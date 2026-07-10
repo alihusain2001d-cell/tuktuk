@@ -16,9 +16,9 @@ const wss = new WebSocketServer({ server });
 app.use(express.json());
 
 // المسارات الرئيسية
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
-app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'public', 'driver.html')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
+app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
 
 app.use(express.static(path.join(__dirname)));
 
