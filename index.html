@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>تكتك المسيب</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root {
+    --ink:#1a1410;
+    --sun:#F2A104;
+    --sun-dark:#C77E02;
+    --road:#2E2A28;
+    --paper:#FAF6EF;
+    --line:#E4DBCB;
+    --go:#1D8A4E;
+    --stop:#C0392B;
+    --muted:#8A8073;
+  }
+  html,body { height:100%; font-family:'Segoe UI',Tahoma,sans-serif; background:var(--paper); color:var(--ink); overflow:hidden; }
+  #app { height:100vh; display:flex; flex-direction:column; position:relative; }
+
+  /* الهيدر */
+  header {
+    background:var(--road); color:#fff; padding:14px 18px;
+    display:flex; align-items:center; gap:12px; z-index:1000;
+    box-shadow:0 2px 12px rgba(0,0,0,.2);
+  }
+  .logo-mark {
+    width:38px; height:38px; background:var(--sun); border-radius:10px;
+    display:flex; align-items:center; justify-content:center; font-size:22px;
+    box-shadow:0 2px 0 var(--sun-dark);
+  }
+  header h1 { font-size:19px; font-weight:700; letter-spacing:-.3px; }
+  header .sub { font-size:11px; opacity:.7; margin-top:1px; }
+
+  /* الخريطة */
+  #map { flex:1; z-index:1; background:#dfe6e0; }
+
+  /* اللوحة السفلية */
+  .sheet {
+    background:var(--paper); border-radius:22px 22px 0 0;
+    box-shadow:0 -6px 24px rgba(0,0,0,.14);
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    z-index:1000; position:relative;
+    transition:transform .3s ease;
+  }
+  .grip { width:40px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 16px; }
+
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:600; }
+  .field input {
+    width:100%; padding:13px 14px; border:1.5px solid var(--line); border-radius:12px;
+    font-size:15px; font-family:inherit; background:#fff; color:var(--ink);
+  }
+  .field input:focus { outline:none; border-color:var(--sun); }
+
+  .pickup-row {
+    display:flex; align-items:center; gap:10px; background:#fff;
+    border:1.5px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:14px;
+  }
+  .pickup-dot { width:12px; height:12px; border-radius:50%; background:var(--go); flex-shrink:0; box-shadow:0 0 0 4px rgba(29,138,78,.15); }
+  .pickup-row .txt { flex:1; font-size:14px; }
+  .pickup-row .txt b { display:block; font-size:12px; color:var(--muted); font-weight:600; }
+  .pickup-row .re { font-size:12px; color:var(--sun-dark); font-weight:700; cursor:pointer; }
+
+  .btn {
+    width:100%; padding:16px; border:none; border-radius:14px; font-size:17px; font-weight:700;
+    font-family:inherit; cursor:pointer; color:#fff; background:var(--sun);
+    box-shadow:0 3px 0 var(--sun-dark); transition:transform .08s, box-shadow .08s;
+  }
+  .btn:active { transform:translateY(2px); box-shadow:0 1px 0 var(--sun-dark); }
+  .btn:disabled { opacity:.6; cursor:default; }
+  .btn.ghost { background:#fff; color:var(--stop); box-shadow:0 0 0 1.5px var(--line) inset; }
+
+  /* حالة البحث */
+  .searching { text-align:center; padding:8px 0; }
+  .radar { width:80px; height:80px; margin:0 auto 14px; position:relative; }
+  .radar span {
+    position:absolute; inset:0; border:3px solid var(--sun); border-radius:50%;
+    animation:ping 1.6s cubic-bezier(0,.2,.8,1) infinite; opacity:0;
+  }
+  .radar span:nth-child(2){ animation-delay:.5s; }
+  .radar span:nth-child(3){ animation-delay:1s; }
+  .radar .core {
+    position:absolute; inset:32px; background:var(--sun); border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:20px; animation:none; border:none; opacity:1;
+  }
+  @keyframes ping { 0%{transform:scale(.4);opacity:.8} 100%{transform:scale(1.4);opacity:0} }
+  .searching h2 { font-size:18px; margin-bottom:4px; }
+  .searching p { font-size:13px; color:var(--muted); }
+
+  /* بطاقة السواق */
+  .driver-card { }
+  .driver-head { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+  .avatar {
+    width:56px; height:56px; border-radius:16px; background:var(--road); color:var(--sun);
+    display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:700; flex-shrink:0;
+  }
+  .driver-info { flex:1; }
+  .driver-info h2 { font-size:18px; margin-bottom:2px; }
+  .driver-info .car { font-size:13px; color:var(--muted); }
+  .eta-badge {
+    background:var(--go); color:#fff; padding:8px 12px; border-radius:12px; text-align:center; flex-shrink:0;
+  }
+  .eta-badge b { font-size:20px; display:block; line-height:1; }
+  .eta-badge span { font-size:10px; opacity:.9; }
+
+  .actions { display:flex; gap:10px; }
+  .actions .btn { flex:1; }
+  .call-btn { background:var(--go); box-shadow:0 3px 0 #145c34; }
+
+  .status-strip {
+    background:#fff; border:1.5px solid var(--line); border-radius:12px; padding:12px 14px;
+    margin-bottom:14px; font-size:14px; display:flex; align-items:center; gap:10px;
+  }
+  .status-strip .pulse { width:10px; height:10px; border-radius:50%; background:var(--sun); animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .hidden { display:none !important; }
+
+  /* شاشة وصل السواق */
+  .arrived-banner {
+    background:var(--go); color:#fff; padding:16px; border-radius:14px; text-align:center; margin-bottom:14px;
+  }
+  .arrived-banner h2 { font-size:20px; margin-bottom:4px; }
+  .arrived-banner p { font-size:13px; opacity:.9; }
+
+  .toast {
+    position:fixed; bottom:20px; right:20px; left:20px; background:var(--road); color:#fff;
+    padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000;
+    box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s;
+  }
+  @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+
+  .demo-tag {
+    position:absolute; top:70px; left:12px; z-index:900; background:rgba(46,42,40,.85); color:var(--sun);
+    font-size:10px; padding:4px 8px; border-radius:6px; font-weight:700;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo-mark">🛺</div>
+    <div>
+      <h1>تكتك المسيب</h1>
+      <div class="sub">وصلة سريعة لأي مكان</div>
+    </div>
+  </header>
+
+  <div id="map"></div>
+  <div class="demo-tag">نسخة تجريبية</div>
+
+  <!-- شاشة الحجز -->
+  <div class="sheet" id="sheet-book">
+    <div class="grip"></div>
+    <div class="pickup-row">
+      <div class="pickup-dot"></div>
+      <div class="txt">
+        <b>موقع الانطلاق</b>
+        <span id="pickup-label">حرك الخريطة لتحديد موقعك</span>
+      </div>
+      <div class="re" onclick="locateMe()">موقعي</div>
+    </div>
+    <div class="field">
+      <label>الاسم</label>
+      <input id="c-name" placeholder="شنو اسمك؟" value="">
+    </div>
+    <div class="field">
+      <label>رقم الموبايل</label>
+      <input id="c-phone" type="tel" inputmode="numeric" placeholder="07XX XXX XXXX">
+    </div>
+    <button class="btn" id="book-btn" onclick="bookRide()">اطلب تكتك 🛺</button>
+  </div>
+
+  <!-- شاشة البحث -->
+  <div class="sheet hidden" id="sheet-search">
+    <div class="grip"></div>
+    <div class="searching">
+      <div class="radar">
+        <span></span><span></span><span></span>
+        <div class="core">🛺</div>
+      </div>
+      <h2>نبحثلك عن أقرب تكتك...</h2>
+      <p id="search-sub">أرسلنا طلبك للسواقين</p>
+    </div>
+    <button class="btn ghost" onclick="cancelRide()" style="margin-top:14px">إلغاء الطلب</button>
+  </div>
+
+  <!-- شاشة السواق -->
+  <div class="sheet hidden" id="sheet-driver">
+    <div class="grip"></div>
+    <div id="arrived-box" class="arrived-banner hidden">
+      <h2>وصل السواق 🎉</h2>
+      <p>التكتك ينتظرك برة</p>
+    </div>
+    <div class="status-strip" id="status-strip">
+      <div class="pulse"></div>
+      <span id="driver-status">السواق بالطريق إلك</span>
+    </div>
+    <div class="driver-head">
+      <div class="avatar" id="d-avatar">؟</div>
+      <div class="driver-info">
+        <h2 id="d-name">—</h2>
+        <div class="car" id="d-car">—</div>
+      </div>
+      <div class="eta-badge" id="eta-box">
+        <b id="d-eta">—</b>
+        <span>دقيقة</span>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn call-btn" onclick="callDriver()">📞 اتصل</button>
+      <button class="btn ghost" onclick="cancelRide()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ============ الإعدادات ============
+const MUSAYYIB = [32.7789, 44.2892]; // إحداثيات المسيب التقريبية
+let map, pickupMarker, driverMarker, routeLine;
+let ws, socketId = null, currentRide = null, driverPhone = '';
+
+// ============ الخريطة ============
+function initMap() {
+  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+  L.control.zoom({ position:'topleft' }).addTo(map);
+
+  // دبوس ثابت بالوسط = موقع الزبون
+  const centerIcon = L.divIcon({
+    className:'', html:'<div style="font-size:34px;transform:translate(-50%,-90%)">📍</div>',
+    iconSize:[0,0],
+  });
+  pickupMarker = L.marker(map.getCenter(), { icon:centerIcon, interactive:false }).addTo(map);
+  map.on('move', () => {
+    pickupMarker.setLatLng(map.getCenter());
+  });
+  map.on('moveend', reverseLabel);
+  reverseLabel();
+}
+
+function reverseLabel() {
+  const c = map.getCenter();
+  document.getElementById('pickup-label').textContent =
+    `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`;
+}
+
+function locateMe() {
+  if (!navigator.geolocation) return toast('الموقع غير مدعوم بهذا الجهاز');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => map.setView([pos.coords.latitude, pos.coords.longitude], 16),
+    () => toast('ما كدرنا نحدد موقعك، حرك الخريطة يدوياً'),
+    { enableHighAccuracy:true, timeout:8000 }
+  );
+}
+
+// ============ WebSocket ============
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => ws.send(JSON.stringify({ type:'customer:hello', data:{} }));
+  ws.onmessage = (e) => {
+    const { type, data } = JSON.parse(e.data);
+    handleWS(type, data);
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+function handleWS(type, data) {
+  switch(type) {
+    case 'welcome':       socketId = data.socketId; break;
+    case 'ride:accepted': onDriverAccepted(data); break;
+    case 'driver:moved':  onDriverMoved(data); break;
+    case 'ride:arrived':  onArrived(); break;
+    case 'ride:done':     onDone(); break;
+  }
+}
+
+// ============ الحجز ============
+async function bookRide() {
+  const name = document.getElementById('c-name').value.trim();
+  const phone = document.getElementById('c-phone').value.trim();
+  if (!phone) return toast('اكتب رقم موبايلك حتى السواق يتصل بيك');
+
+  const c = map.getCenter();
+  const btn = document.getElementById('book-btn');
+  btn.disabled = true; btn.textContent = 'نرسل الطلب...';
+
+  try {
+    const res = await fetch('/api/book', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, phone, lat:c.lat, lng:c.lng, socketId }),
+    });
+    const out = await res.json();
+    currentRide = out.rideId;
+    showScreen('search');
+    document.getElementById('search-sub').textContent =
+      out.driversNotified > 0
+        ? `أرسلنا طلبك لـ ${out.driversNotified} سواق`
+        : 'ننتظر سواق يفتح التطبيق...';
+  } catch (err) {
+    toast('صار خطأ، حاول مرة ثانية');
+    btn.disabled = false; btn.textContent = 'اطلب تكتك 🛺';
+  }
+}
+
+function onDriverAccepted(data) {
+  showScreen('driver');
+  const d = data.driver;
+  driverPhone = d.phone;
+  document.getElementById('d-name').textContent = d.name;
+  document.getElementById('d-car').textContent = d.car || 'تكتك';
+  document.getElementById('d-avatar').textContent = (d.name||'؟').charAt(0);
+  document.getElementById('d-eta').textContent = data.etaMin;
+
+  // ارسم موقع السواق والخط
+  placeDriver(d.lat, d.lng);
+  drawRoute(d.lat, d.lng, map.getCenter().lat, map.getCenter().lng);
+  toast(`${d.name} قبل طلبك! 🎉`);
+}
+
+function placeDriver(lat, lng) {
+  const icon = L.divIcon({ className:'', html:'<div style="font-size:30px;transform:translate(-50%,-50%)">🛺</div>', iconSize:[0,0] });
+  if (driverMarker) driverMarker.setLatLng([lat,lng]);
+  else driverMarker = L.marker([lat,lng], { icon, interactive:false }).addTo(map);
+}
+
+function onDriverMoved(data) {
+  placeDriver(data.lat, data.lng);
+  drawRoute(data.lat, data.lng, map.getCenter().lat, map.getCenter().lng);
+}
+
+function drawRoute(lat1,lng1,lat2,lng2) {
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline([[lat1,lng1],[lat2,lng2]], {
+    color:'#F2A104', weight:5, opacity:.85, dashArray:'2,10', lineCap:'round'
+  }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding:[60,60], maxZoom:16 });
+}
+
+function onArrived() {
+  document.getElementById('arrived-box').classList.remove('hidden');
+  document.getElementById('status-strip').classList.add('hidden');
+  toast('السواق وصل! 🛺');
+}
+
+function onDone() {
+  toast('انتهت الرحلة، شكراً لاستخدامك تكتك المسيب 🙏');
+  setTimeout(resetAll, 2500);
+}
+
+async function cancelRide() {
+  if (currentRide) {
+    await fetch('/api/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId: currentRide }) });
+  }
+  resetAll();
+}
+
+function callDriver() {
+  if (driverPhone) location.href = `tel:${driverPhone}`;
+  else toast('رقم السواق غير متوفر');
+}
+
+// ============ التحكم بالشاشات ============
+function showScreen(name) {
+  document.getElementById('sheet-book').classList.toggle('hidden', name!=='book');
+  document.getElementById('sheet-search').classList.toggle('hidden', name!=='search');
+  document.getElementById('sheet-driver').classList.toggle('hidden', name!=='driver');
+}
+
+function resetAll() {
+  currentRide = null; driverPhone='';
+  if (driverMarker) { map.removeLayer(driverMarker); driverMarker=null; }
+  if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
+  document.getElementById('arrived-box').classList.add('hidden');
+  document.getElementById('status-strip').classList.remove('hidden');
+  document.getElementById('book-btn').disabled=false;
+  document.getElementById('book-btn').textContent='اطلب تكتك 🛺';
+  map.setView(MUSAYYIB, 15);
+  showScreen('book');
+}
+
+let toastTimer;
+function toast(msg) {
+  const old = document.querySelector('.toast'); if(old) old.remove();
+  const t = document.createElement('div'); t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.remove(), 3000);
+}
+
+// ============ التشغيل ============
+initMap();
+connectWS();
+</script>
+</body>
+</html>

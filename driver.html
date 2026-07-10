@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>تكتك المسيب - السواق</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root {
+    --ink:#1a1410; --sun:#F2A104; --sun-dark:#C77E02; --road:#2E2A28;
+    --paper:#FAF6EF; --line:#E4DBCB; --go:#1D8A4E; --stop:#C0392B; --muted:#8A8073;
+  }
+  html,body { height:100%; font-family:'Segoe UI',Tahoma,sans-serif; background:var(--paper); color:var(--ink); overflow:hidden; }
+  #app { height:100vh; display:flex; flex-direction:column; position:relative; }
+
+  header {
+    background:var(--road); color:#fff; padding:14px 18px;
+    display:flex; align-items:center; gap:12px; z-index:1000; box-shadow:0 2px 12px rgba(0,0,0,.2);
+  }
+  .logo-mark { width:38px; height:38px; background:var(--sun); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:22px; box-shadow:0 2px 0 var(--sun-dark); }
+  header h1 { font-size:18px; font-weight:700; }
+  header .sub { font-size:11px; opacity:.7; }
+  .online-toggle { margin-right:auto; }
+  .switch { position:relative; width:56px; height:30px; }
+  .switch input { display:none; }
+  .slider { position:absolute; inset:0; background:#555; border-radius:30px; cursor:pointer; transition:.2s; }
+  .slider::before { content:''; position:absolute; width:24px; height:24px; right:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider { background:var(--go); }
+  .switch input:checked + .slider::before { transform:translateX(-26px); }
+
+  #map { flex:1; z-index:1; background:#dfe6e0; }
+
+  .demo-tag { position:absolute; top:70px; left:12px; z-index:900; background:rgba(46,42,40,.85); color:var(--sun); font-size:10px; padding:4px 8px; border-radius:6px; font-weight:700; }
+
+  .panel {
+    background:var(--paper); border-radius:22px 22px 0 0; box-shadow:0 -6px 24px rgba(0,0,0,.14);
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom)); z-index:1000; position:relative;
+  }
+  .grip { width:40px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 16px; }
+
+  /* شاشة التسجيل */
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:600; }
+  .field input { width:100%; padding:13px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:15px; font-family:inherit; background:#fff; color:var(--ink); }
+  .field input:focus { outline:none; border-color:var(--sun); }
+
+  .btn { width:100%; padding:16px; border:none; border-radius:14px; font-size:17px; font-weight:700; font-family:inherit; cursor:pointer; color:#fff; background:var(--sun); box-shadow:0 3px 0 var(--sun-dark); transition:transform .08s, box-shadow .08s; }
+  .btn:active { transform:translateY(2px); box-shadow:0 1px 0 var(--sun-dark); }
+  .btn.ghost { background:#fff; color:var(--stop); box-shadow:0 0 0 1.5px var(--line) inset; }
+  .btn.go { background:var(--go); box-shadow:0 3px 0 #145c34; }
+
+  /* حالة الانتظار */
+  .waiting { text-align:center; padding:16px 0; }
+  .waiting .icon { font-size:44px; margin-bottom:10px; }
+  .waiting h2 { font-size:17px; margin-bottom:4px; }
+  .waiting p { font-size:13px; color:var(--muted); }
+  .offline-note { text-align:center; padding:20px 0; color:var(--muted); font-size:14px; }
+
+  /* طلبات واردة */
+  .ride-request {
+    background:#fff; border:2px solid var(--sun); border-radius:16px; padding:16px; margin-bottom:12px;
+    animation:pop .3s; box-shadow:0 4px 16px rgba(242,161,4,.2);
+  }
+  @keyframes pop { from{transform:scale(.94);opacity:0} to{transform:scale(1);opacity:1} }
+  .ride-request .rr-top { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .rr-icon { width:48px; height:48px; border-radius:12px; background:var(--sun); display:flex; align-items:center; justify-content:center; font-size:24px; flex-shrink:0; }
+  .rr-info { flex:1; }
+  .rr-info h3 { font-size:16px; margin-bottom:2px; }
+  .rr-info .dist { font-size:13px; color:var(--muted); }
+  .rr-info .dist b { color:var(--go); }
+  .rr-actions { display:flex; gap:10px; }
+  .rr-actions .btn { flex:1; padding:13px; font-size:15px; }
+
+  /* رحلة نشطة */
+  .active-ride .ar-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .ar-avatar { width:52px; height:52px; border-radius:14px; background:var(--go); color:#fff; display:flex; align-items:center; justify-content:center; font-size:24px; flex-shrink:0; }
+  .ar-info { flex:1; }
+  .ar-info h2 { font-size:17px; margin-bottom:2px; }
+  .ar-info p { font-size:13px; color:var(--muted); }
+  .ar-info .ph { color:var(--go); font-weight:700; }
+
+  .hidden { display:none !important; }
+  .badge-count { background:var(--stop); color:#fff; font-size:11px; padding:2px 7px; border-radius:10px; margin-right:6px; }
+
+  .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--road); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo-mark">🛺</div>
+    <div>
+      <h1>واجهة السواق</h1>
+      <div class="sub" id="status-text">غير متصل</div>
+    </div>
+    <div class="online-toggle">
+      <label class="switch">
+        <input type="checkbox" id="online-switch" onchange="toggleOnline()">
+        <span class="slider"></span>
+      </label>
+    </div>
+  </header>
+
+  <div id="map"></div>
+  <div class="demo-tag">نسخة تجريبية</div>
+
+  <!-- شاشة التسجيل -->
+  <div class="panel" id="panel-register">
+    <div class="grip"></div>
+    <div class="field">
+      <label>اسمك</label>
+      <input id="d-name" placeholder="مثال: أبو علي">
+    </div>
+    <div class="field">
+      <label>رقم الموبايل</label>
+      <input id="d-phone" type="tel" inputmode="numeric" placeholder="07XX XXX XXXX">
+    </div>
+    <div class="field">
+      <label>وصف التكتك</label>
+      <input id="d-car" placeholder="مثال: تكتك أصفر - بجاج">
+    </div>
+    <button class="btn" onclick="saveDriver()">ابدأ الشغل 🛺</button>
+  </div>
+
+  <!-- شاشة الانتظار / الطلبات -->
+  <div class="panel hidden" id="panel-waiting">
+    <div class="grip"></div>
+    <div id="offline-msg" class="offline-note">
+      شغّل المفتاح فوق حتى تستلم الطلبات
+    </div>
+    <div id="waiting-msg" class="waiting hidden">
+      <div class="icon">📡</div>
+      <h2>جاهز لاستلام الطلبات</h2>
+      <p>راح توصلك الطلبات القريبة منك</p>
+    </div>
+    <div id="requests-list"></div>
+  </div>
+
+  <!-- رحلة نشطة -->
+  <div class="panel hidden" id="panel-active">
+    <div class="grip"></div>
+    <div class="active-ride">
+      <div class="ar-head">
+        <div class="ar-avatar" id="ar-avatar">؟</div>
+        <div class="ar-info">
+          <h2 id="ar-name">—</h2>
+          <p>الوجهة: <span id="ar-dist">—</span></p>
+          <p class="ph" id="ar-phone">—</p>
+        </div>
+      </div>
+      <div id="active-actions">
+        <button class="btn go" onclick="markArrived()" style="margin-bottom:10px">وصلت لموقع الزبون ✅</button>
+        <div style="display:flex; gap:10px">
+          <button class="btn go" onclick="callCustomer()" style="flex:1">📞 اتصل بالزبون</button>
+          <button class="btn ghost" onclick="finishRide()" style="flex:1">إنهاء الرحلة</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const MUSAYYIB = [32.7789, 44.2892];
+let map, meMarker, pickupMarker, routeLine;
+let ws, driverId = localStorage.getItem('tuktuk_driver_id') || genId();
+let myPos = { lat: MUSAYYIB[0], lng: MUSAYYIB[1] };
+let isOnline = false, activeRide = null, customerPhone = '', locTimer = null;
+const pendingRides = new Map();
+
+function genId(){ const id = 'drv_'+Math.random().toString(36).slice(2,10); localStorage.setItem('tuktuk_driver_id', id); return id; }
+
+// استرجاع بيانات السواق المحفوظة
+const saved = JSON.parse(localStorage.getItem('tuktuk_driver_info') || 'null');
+
+function initMap() {
+  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+  L.control.zoom({ position:'topleft' }).addTo(map);
+  const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🛺</div>', iconSize:[0,0] });
+  meMarker = L.marker(myPos, { icon, interactive:false }).addTo(map);
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onmessage = (e) => {
+    const { type, data } = JSON.parse(e.data);
+    handleWS(type, data);
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+function handleWS(type, data) {
+  switch(type) {
+    case 'ride:new':    onNewRide(data); break;
+    case 'ride:taken':  onRideTaken(data); break;
+    case 'ride:cancelled': onRideCancelled(data); break;
+    case 'driver:confirmed': break;
+  }
+}
+
+// ============ التسجيل ============
+function saveDriver() {
+  const name = document.getElementById('d-name').value.trim();
+  const phone = document.getElementById('d-phone').value.trim();
+  const car = document.getElementById('d-car').value.trim();
+  if (!name || !phone) return toast('اكتب اسمك ورقمك');
+  localStorage.setItem('tuktuk_driver_info', JSON.stringify({ name, phone, car }));
+  showPanel('waiting');
+  toast('أهلاً '+name+'! شغّل المفتاح فوق حتى تبدأ');
+}
+
+// ============ متصل/غير متصل ============
+function getMyPosition() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        meMarker.setLatLng(myPos);
+        map.setView(myPos, 15);
+        if (isOnline) goOnline();
+      },
+      () => { /* نبقى على موقع المسيب الافتراضي */ if(isOnline) goOnline(); },
+      { enableHighAccuracy:true, timeout:8000 }
+    );
+  }
+}
+
+function toggleOnline() {
+  isOnline = document.getElementById('online-switch').checked;
+  document.getElementById('status-text').textContent = isOnline ? 'متصل - جاهز' : 'غير متصل';
+  document.getElementById('offline-msg').classList.toggle('hidden', isOnline);
+  document.getElementById('waiting-msg').classList.toggle('hidden', !isOnline);
+  if (isOnline) { getMyPosition(); goOnline(); startLocationUpdates(); }
+  else { goOffline(); stopLocationUpdates(); }
+}
+
+function goOnline() {
+  const info = JSON.parse(localStorage.getItem('tuktuk_driver_info') || '{}');
+  ws.send(JSON.stringify({ type:'driver:online', data:{
+    driverId, name:info.name, phone:info.phone, car:info.car, lat:myPos.lat, lng:myPos.lng,
+  }}));
+}
+
+function goOffline() {
+  ws.send(JSON.stringify({ type:'driver:offline', data:{ driverId } }));
+}
+
+// نبعث الموقع كل ثانيتين (بالإنتاج: أثناء الرحلة فقط لتوفير الاستهلاك)
+function startLocationUpdates() {
+  stopLocationUpdates();
+  locTimer = setInterval(() => {
+    if (!isOnline) return;
+    // بالنسخة التجريبية: لو ماكو GPS، حرك التكتك شوية باتجاه الزبون لتوضيح التتبع
+    if (activeRide && simulateMovement) simulateStep();
+    ws.send(JSON.stringify({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } }));
+  }, 2000);
+}
+function stopLocationUpdates(){ if(locTimer) clearInterval(locTimer); locTimer=null; }
+
+// ============ الطلبات ============
+function onNewRide(data) {
+  if (!isOnline || activeRide) return;
+  pendingRides.set(data.rideId, data);
+  renderRequests();
+  beep();
+  toast('🛺 طلب جديد!');
+}
+
+function onRideTaken(data) {
+  pendingRides.delete(data.rideId);
+  renderRequests();
+}
+
+function onRideCancelled(data) {
+  if (activeRide && activeRide.rideId === data.rideId) {
+    toast('الزبون ألغى الرحلة');
+    endActive();
+  }
+}
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function renderRequests() {
+  const list = document.getElementById('requests-list');
+  const waiting = document.getElementById('waiting-msg');
+  list.innerHTML = '';
+  if (pendingRides.size === 0) { waiting.classList.toggle('hidden', !isOnline); return; }
+  waiting.classList.add('hidden');
+
+  for (const [id, r] of pendingRides) {
+    const dist = haversine(myPos.lat, myPos.lng, r.pickup.lat, r.pickup.lng);
+    const div = document.createElement('div');
+    div.className = 'ride-request';
+    div.innerHTML = `
+      <div class="rr-top">
+        <div class="rr-icon">🙋</div>
+        <div class="rr-info">
+          <h3>${r.customer.name}</h3>
+          <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b> تقريباً</div>
+        </div>
+      </div>
+      <div class="rr-actions">
+        <button class="btn go" onclick="acceptRide('${id}')">اقبل الطلب</button>
+        <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
+      </div>`;
+    list.appendChild(div);
+  }
+}
+
+function dismissRide(id) { pendingRides.delete(id); renderRequests(); }
+
+async function acceptRide(id) {
+  const r = pendingRides.get(id);
+  if (!r) return;
+  try {
+    const res = await fetch('/api/accept', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ rideId:id, driverId }),
+    });
+    const out = await res.json();
+    if (out.taken) { toast('الطلب انحجز من سواق ثاني'); pendingRides.delete(id); renderRequests(); return; }
+
+    activeRide = { rideId:id, pickup:r.pickup, customer:out.customer };
+    customerPhone = out.customer.phone || '';
+    pendingRides.clear();
+    showActiveRide(out, r);
+    setupSimulation(r.pickup);
+  } catch(err) { toast('صار خطأ، حاول مرة ثانية'); }
+}
+
+function showActiveRide(out, r) {
+  showPanel('active');
+  document.getElementById('ar-name').textContent = out.customer.name || 'زبون';
+  document.getElementById('ar-avatar').textContent = (out.customer.name||'؟').charAt(0);
+  document.getElementById('ar-phone').textContent = out.customer.phone || '';
+  const dist = haversine(myPos.lat, myPos.lng, r.pickup.lat, r.pickup.lng);
+  document.getElementById('ar-dist').textContent = dist.toFixed(1)+' كم';
+
+  // ارسم الخط للزبون
+  const pIcon = L.divIcon({ className:'', html:'<div style="font-size:30px;transform:translate(-50%,-90%)">📍</div>', iconSize:[0,0] });
+  if (pickupMarker) pickupMarker.setLatLng([r.pickup.lat, r.pickup.lng]);
+  else pickupMarker = L.marker([r.pickup.lat, r.pickup.lng], { icon:pIcon, interactive:false }).addTo(map);
+  drawRoute();
+}
+
+function drawRoute() {
+  if (!activeRide) return;
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline([[myPos.lat,myPos.lng],[activeRide.pickup.lat,activeRide.pickup.lng]], {
+    color:'#F2A104', weight:5, opacity:.85, dashArray:'2,10', lineCap:'round'
+  }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding:[50,50], maxZoom:16 });
+}
+
+// ============ محاكاة الحركة (للنسخة التجريبية فقط) ============
+// لو ماكو GPS حقيقي، نخلي التكتك يتحرك تدريجياً نحو الزبون حتى يبان التتبع
+let simulateMovement = true;
+function setupSimulation(pickup){ simulateMovement = true; }
+function simulateStep() {
+  if (!activeRide) return;
+  const dLat = activeRide.pickup.lat - myPos.lat;
+  const dLng = activeRide.pickup.lng - myPos.lng;
+  const d = Math.sqrt(dLat*dLat + dLng*dLng);
+  if (d < 0.0003) return; // وصل تقريباً
+  myPos.lat += dLat * 0.15;
+  myPos.lng += dLng * 0.15;
+  meMarker.setLatLng(myPos);
+  drawRoute();
+}
+
+// ============ إجراءات الرحلة ============
+async function markArrived() {
+  if (!activeRide) return;
+  await fetch('/api/arrived', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) });
+  toast('تم إبلاغ الزبون بوصولك ✅');
+}
+
+function callCustomer() {
+  if (customerPhone) location.href = `tel:${customerPhone}`;
+  else toast('رقم الزبون غير متوفر');
+}
+
+async function finishRide() {
+  if (!activeRide) return;
+  await fetch('/api/complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) });
+  toast('انتهت الرحلة، عاشت إيدك 🙏');
+  endActive();
+}
+
+function endActive() {
+  activeRide = null; customerPhone='';
+  if (pickupMarker) { map.removeLayer(pickupMarker); pickupMarker=null; }
+  if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
+  map.setView(myPos, 15);
+  showPanel('waiting');
+  renderRequests();
+}
+
+// ============ أدوات ============
+function showPanel(name) {
+  document.getElementById('panel-register').classList.toggle('hidden', name!=='register');
+  document.getElementById('panel-waiting').classList.toggle('hidden', name!=='waiting');
+  document.getElementById('panel-active').classList.toggle('hidden', name!=='active');
+}
+
+let toastTimer;
+function toast(msg){ const old=document.querySelector('.toast'); if(old)old.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.remove(),3000); }
+
+function beep(){ try { const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value=880; g.gain.setValueAtTime(.15,ctx.currentTime); o.start(); o.stop(ctx.currentTime+.15); } catch(e){} }
+
+// ============ التشغيل ============
+initMap();
+connectWS();
+if (saved) {
+  document.getElementById('d-name').value = saved.name || '';
+  document.getElementById('d-phone').value = saved.phone || '';
+  document.getElementById('d-car').value = saved.car || '';
+  showPanel('waiting'); // مسجّل من قبل
+} else {
+  showPanel('register');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تكتك المسيب</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --sun:#F2A104; --sun-dark:#C77E02; --road:#2E2A28; --paper:#FAF6EF; --go:#1D8A4E; }
+  body { font-family:'Segoe UI',Tahoma,sans-serif; background:var(--road); color:#fff; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center; }
+  .logo { width:90px; height:90px; background:var(--sun); border-radius:24px; display:flex; align-items:center; justify-content:center; font-size:52px; box-shadow:0 6px 0 var(--sun-dark); margin-bottom:20px; }
+  h1 { font-size:32px; margin-bottom:6px; }
+  .tag { font-size:15px; opacity:.7; margin-bottom:40px; }
+  .cards { display:flex; flex-direction:column; gap:16px; width:100%; max-width:340px; }
+  .card { background:var(--paper); color:var(--road); border-radius:18px; padding:24px; text-decoration:none; display:flex; align-items:center; gap:16px; transition:transform .1s; box-shadow:0 4px 0 rgba(0,0,0,.2); }
+  .card:active { transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,.2); }
+  .card .ic { font-size:40px; }
+  .card .tx { text-align:right; flex:1; }
+  .card .tx h2 { font-size:19px; margin-bottom:3px; }
+  .card .tx p { font-size:13px; color:#8A8073; }
+  .card.driver { background:var(--sun); }
+  .demo { margin-top:36px; font-size:12px; opacity:.5; }
+</style>
+</head>
+<body>
+  <div class="logo">🛺</div>
+  <h1>تكتك المسيب</h1>
+  <div class="tag">وصلة سريعة لأي مكان بالمسيب</div>
+  <div class="cards">
+    <a href="/ride" class="card">
+      <div class="ic">🙋</div>
+      <div class="tx"><h2>أنا زبون</h2><p>احجز تكتك يوصلك لأي مكان</p></div>
+    </a>
+    <a href="/driver" class="card driver">
+      <div class="ic">🛺</div>
+      <div class="tx"><h2>أنا سواق</h2><p>استلم الطلبات وابدأ الشغل</p></div>
+    </a>
+  </div>
+  <div class="demo">نسخة تجريبية — Tuktuk Al-Musayyib Demo</div>
+</body>
+</html>
