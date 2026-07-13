@@ -125,9 +125,10 @@ wss.on('connection', (ws) => {
 
 // الزبون يحجز — مع نقطة انطلاق ووصول
 app.post('/api/book', (req, res) => {
-  const { name, phone, pickup, destination, socketId } = req.body;
+  const { name, phone, pickup, destination, socketId, orderType, store, itemDesc } = req.body;
   if (!pickup || !pickup.lat) return res.status(400).json({ error: 'نقطة الانطلاق مطلوبة' });
 
+  const type = orderType === 'delivery' ? 'delivery' : 'ride';
   const rideId = uid();
   let estKm = 0, estFare = 0;
   if (destination && destination.lat) {
@@ -137,11 +138,15 @@ app.post('/api/book', (req, res) => {
 
   const ride = {
     id: rideId,
+    type,                 // 'ride' | 'delivery'
     customer: { name: name || 'زبون', phone: phone || '' },
     pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label || '' },
     destination: destination && destination.lat
       ? { lat: destination.lat, lng: destination.lng, label: destination.label || '' }
       : null,
+    // خاص بتوصيل البضاعة
+    store: type === 'delivery' && store ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
+    itemDesc: type === 'delivery' ? (itemDesc || '') : '',
     estKm, estFare,
     status: 'searching',
     driverId: null,
@@ -153,8 +158,11 @@ app.post('/api/book', (req, res) => {
   const onlineDrivers = [...drivers.values()].filter(d => d.online);
   broadcast('driver', 'ride:new', {
     rideId,
+    type: ride.type,
     pickup: ride.pickup,
     destination: ride.destination,
+    store: ride.store,
+    itemDesc: ride.itemDesc,
     estKm: Math.round(estKm * 10) / 10,
     estFare,
     customer: { name: ride.customer.name },
@@ -188,7 +196,8 @@ app.post('/api/accept', (req, res) => {
   broadcast('driver', 'ride:taken', { rideId });
 
   res.json({
-    ok: true, pickup: ride.pickup, destination: ride.destination,
+    ok: true, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+    store: ride.store, itemDesc: ride.itemDesc,
     customer: ride.customer, estKm: ride.estKm, estFare: ride.estFare, etaMin,
   });
 });

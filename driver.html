@@ -79,7 +79,14 @@
   .rr-route .leg .d { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
   .rr-route .leg .d.from { background:var(--go); }
   .rr-route .leg .d.to { background:var(--stop); border-radius:1px; }
+  .rr-route .leg .d.store { background:var(--accent); }
   .rr-route .leg span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .type-badge { display:inline-block; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; margin-bottom:5px; }
+  .type-badge.ride { background:#E8F0FF; color:var(--brand); }
+  .type-badge.delivery { background:#FFF6E0; color:var(--accent-dark); }
+  .ride-request.is-delivery { border-color:var(--accent); box-shadow:0 4px 16px rgba(255,193,7,.2); }
+  .item-box { background:#FFF9E8; border:1px solid #FFE9A8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px; line-height:1.5; }
+  .item-box b { color:var(--accent-dark); }
   .rr-actions { display:flex; gap:10px; }
   .rr-actions .btn { flex:1; padding:12px; font-size:15px; }
 
@@ -395,24 +402,47 @@ function renderRequests() {
 
   for (const [id, r] of pendingRides) {
     const dist = haversine(myPos.lat, myPos.lng, r.pickup.lat, r.pickup.lng);
+    const isDelivery = r.type === 'delivery';
     const fromLbl = r.pickup.label || 'نقطة على الخريطة';
     const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
-    const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع تقريباً</div></div>` : '';
+    const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">أجرة توصيل</div></div>` : '';
+
+    // شارة نوع الطلب
+    const badge = isDelivery
+      ? '<div class="type-badge delivery">🛒 توصيل بضاعة</div>'
+      : '<div class="type-badge ride">🛺 رحلة</div>';
+
+    // للتوصيل: نعرض المحل + وصف البضاعة
+    let routeHtml;
+    if (isDelivery) {
+      const storeLbl = r.store ? (r.store.label || 'محل على الخريطة') : fromLbl;
+      routeHtml = `
+        <div class="rr-route">
+          <div class="leg"><div class="d store"></div><span>يجيب من: ${storeLbl}</span></div>
+          <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${toLbl}</span></div>
+        </div>
+        <div class="item-box">📦 <b>الطلب:</b> ${r.itemDesc || '—'}</div>`;
+    } else {
+      routeHtml = `
+        <div class="rr-route">
+          <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
+          <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>
+        </div>`;
+    }
+
     const div = document.createElement('div');
-    div.className = 'ride-request';
+    div.className = 'ride-request' + (isDelivery ? ' is-delivery' : '');
     div.innerHTML = `
       <div class="rr-top">
-        <div class="rr-icon">🙋</div>
+        <div class="rr-icon">${isDelivery ? '🛒' : '🙋'}</div>
         <div class="rr-info">
+          ${badge}
           <h3>${r.customer.name}</h3>
           <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div>
         </div>
         ${fareHtml}
       </div>
-      <div class="rr-route">
-        <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
-        <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>
-      </div>
+      ${routeHtml}
       <div class="rr-actions">
         <button class="btn go" onclick="acceptRide('${id}')">اقبل الطلب</button>
         <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
@@ -430,7 +460,7 @@ async function acceptRide(id) {
     const res = await fetch('/api/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rideId:id, driverId }) });
     const out = await res.json();
     if (out.taken) { toast('الطلب انحجز من سواق ثاني'); pendingRides.delete(id); renderRequests(); return; }
-    activeRide = { rideId:id, pickup:r.pickup, destination:r.destination, customer:out.customer, estFare:out.estFare, estKm:out.estKm };
+    activeRide = { rideId:id, type:r.type, pickup:r.pickup, destination:r.destination, store:r.store, itemDesc:r.itemDesc, customer:out.customer, estFare:out.estFare, estKm:out.estKm };
     customerPhone = out.customer.phone || '';
     pendingRides.clear();
     showActiveRide(out, r);
@@ -445,11 +475,30 @@ function showActiveRide(out, r) {
   document.getElementById('ar-phone').textContent = out.customer.phone || '';
   document.getElementById('ar-fare').textContent = out.estFare ? out.estFare.toLocaleString() + ' د.ع' : 'غير محددة';
 
+  const isDelivery = r.type === 'delivery';
   const fromLbl = r.pickup.label || 'نقطة على الخريطة';
   const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
-  document.getElementById('ar-route').innerHTML = `
-    <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
-    <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>`;
+  if (isDelivery) {
+    const storeLbl = r.store ? (r.store.label || 'محل على الخريطة') : fromLbl;
+    document.getElementById('ar-route').innerHTML = `
+      <div class="leg"><div class="d store"></div><span>يجيب من: ${storeLbl}</span></div>
+      <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${toLbl}</span></div>`;
+    // اعرض وصف الطلب
+    let itemEl = document.getElementById('ar-item');
+    if (!itemEl) {
+      itemEl = document.createElement('div');
+      itemEl.id = 'ar-item'; itemEl.className = 'item-box';
+      document.getElementById('ar-route').after(itemEl);
+    }
+    itemEl.innerHTML = `📦 <b>الطلب:</b> ${r.itemDesc || '—'}`;
+    itemEl.style.display = 'block';
+  } else {
+    document.getElementById('ar-route').innerHTML = `
+      <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
+      <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>`;
+    const itemEl = document.getElementById('ar-item');
+    if (itemEl) itemEl.style.display = 'none';
+  }
 
   // ارسم الخط للزبون
   const pIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🟢</div>', iconSize:[0,0] });
