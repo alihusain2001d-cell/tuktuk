@@ -88,7 +88,7 @@
   .flow-head .back { font-size:24px; cursor:pointer; }
   .flow-head h2 { font-size:17px; font-weight:700; }
   #map, #map-d { flex:1; z-index:1; background:#dde3ee; }
-  .center-pin { position:absolute; top:50%; left:50%; transform:translate(-50%,-100%); z-index:500; pointer-events:none; font-size:38px; }
+  .center-pin { display:none; }
   .locate-btn { position:absolute; bottom:calc(38% + 12px); left:16px; z-index:600; width:44px; height:44px; background:#fff; border:none; border-radius:50%; box-shadow:0 3px 12px rgba(0,0,0,.15); font-size:20px; cursor:pointer; }
 
   .sheet { background:#fff; border-radius:22px 22px 0 0; box-shadow:0 -6px 24px rgba(15,27,61,.12); padding:18px 18px calc(18px + env(safe-area-inset-bottom)); z-index:700; position:relative; }
@@ -262,11 +262,6 @@
       </div>
     </div>
     <div class="drawer-body">
-      <div class="menu-item" onclick="openSimple('payment')">
-        <div class="mi-icon">💳</div>
-        <div class="mi-label">طرق الدفع</div>
-        <div class="mi-sub">الرصيد ٠ دينار</div>
-      </div>
       <div class="menu-item" onclick="openSimple('trips')">
         <div class="mi-icon">🕐</div>
         <div class="mi-label">الرحلات</div>
@@ -319,12 +314,12 @@
       <div class="trip-points">
         <div class="tp-row" onclick="openSearch('pickup','r')">
           <div class="tp-dot from"></div>
-          <div class="tp-text"><b>نقطة الانطلاق</b><div class="val empty" id="r-pickup">حدد على الخريطة أو ابحث</div></div>
+          <div class="tp-text"><b>نقطة الانطلاق</b><div class="val empty" id="r-pickup">نحدد موقعك تلقائياً...</div></div>
           <div class="tp-edit">✎</div>
         </div>
         <div class="tp-row" onclick="openSearch('destination','r')">
           <div class="tp-dot to"></div>
-          <div class="tp-text"><b>نقطة الوصول</b><div class="val empty" id="r-dest">وين تريد تروح؟</div></div>
+          <div class="tp-text"><b>نقطة الوصول</b><div class="val empty" id="r-dest">اضغط على الخريطة أو ابحث</div></div>
           <div class="tp-edit">✎</div>
         </div>
       </div>
@@ -351,12 +346,12 @@
       <div class="trip-points">
         <div class="tp-row" onclick="openSearch('store','d')">
           <div class="tp-dot store"></div>
-          <div class="tp-text"><b>من أي محل؟</b><div class="val empty" id="d-store">حدد المحل على الخريطة أو ابحث</div></div>
+          <div class="tp-text"><b>من أي محل؟</b><div class="val empty" id="d-store">اضغط على الخريطة أو ابحث</div></div>
           <div class="tp-edit">✎</div>
         </div>
         <div class="tp-row" onclick="openSearch('destination','d')">
           <div class="tp-dot to"></div>
-          <div class="tp-text"><b>عنوان التوصيل</b><div class="val empty" id="d-dest">وين نوصّل الطلب؟</div></div>
+          <div class="tp-text"><b>عنوان التوصيل</b><div class="val empty" id="d-dest">اضغط على الخريطة أو ابحث</div></div>
           <div class="tp-edit">✎</div>
         </div>
       </div>
@@ -378,7 +373,7 @@
       <div class="back" onclick="closeSearch()">→</div>
       <input id="search-input" placeholder="اكتب اسم المكان..." oninput="onSearchInput()">
     </div>
-    <button class="btn accent sr-map-btn" onclick="pickFromMap()">📍 حدد على الخريطة بدل البحث</button>
+    <button class="btn accent sr-map-btn" onclick="pickFromMap()">📍 أو اضغط على الخريطة لتحديد المكان</button>
     <div class="search-results" id="search-results">
       <div class="sr-hint">اكتب اسم منطقة أو مكان بالمسيب<br>مثال: مستشفى المسيب، حي العسكري، الجسر</div>
     </div>
@@ -442,7 +437,8 @@ let driverMarker, routeLine, pkMarker, dsMarker, stMarker;
 
 // نقاط
 let pickup = null, destination = null, store = null;
-let searchMode = null, searchFlow = null, mapPickMode = null, mapPickFlow = null;
+let searchMode = null, searchFlow = null;
+let tapTarget = 'destination'; // أي نقطة يحددها الضغط على الخريطة
 
 // ============ تسجيل الدخول ============
 function doLogin() {
@@ -474,7 +470,6 @@ function closeDrawer() { document.getElementById('drawer').classList.remove('ope
 
 // ============ الصفحات البسيطة (شكلية) ============
 const SIMPLE_PAGES = {
-  payment: { title:'طرق الدفع', ico:'💳', h:'الدفع نقداً حالياً', p:'حالياً الدفع يكون كاش مباشرة للسواق. قريباً راح نضيف المحفظة والبطاقات.' },
   trips: { title:'الرحلات', ico:'🕐', h:'سجل رحلاتك', p:'هنا راح تظهر كل رحلاتك السابقة وتفاصيلها. لسه ماكو رحلات مسجّلة.' },
   favorites: { title:'المواقع المختارة', ico:'⭐', h:'مواقعك المفضلة', p:'احفظ عناوينك المهمة (البيت، الشغل) للوصول السريع. قريباً.' },
   rewards: { title:'التخفيضات والمكافآت', ico:'🏷️', h:'مكافآتك', p:'اجمع نقاط مع كل رحلة واحصل على تخفيضات. قريباً.' },
@@ -503,12 +498,36 @@ function startFlow(type) {
   if (type === 'ride') {
     document.getElementById('flow-ride').classList.add('active');
     resetRideUI();
-    setTimeout(() => { if (!mapR) mapR = makeMap('map','pin-r'); else mapR.invalidateSize(); }, 60);
+    tapTarget = 'destination'; // الضغط على الخريطة يحدد الوصول
+    setTimeout(() => {
+      if (!mapR) mapR = makeMap('map','r'); else mapR.invalidateSize();
+      autoLocatePickup('r');
+    }, 60);
   } else {
     document.getElementById('flow-delivery').classList.add('active');
     resetDeliveryUI();
-    setTimeout(() => { if (!mapD) mapD = makeMap('map-d','pin-d'); else mapD.invalidateSize(); }, 60);
+    tapTarget = 'store'; // بالبداية الضغط يحدد المحل
+    setTimeout(() => {
+      if (!mapD) mapD = makeMap('map-d','d'); else mapD.invalidateSize();
+    }, 60);
   }
+}
+
+// يحدد نقطة الانطلاق تلقائياً على موقع الزبون
+function autoLocatePickup(flow) {
+  if (!navigator.geolocation) return;
+  const m = flow === 'r' ? mapR : mapD;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      pickup = { lat, lng, label: 'موقعي الحالي' };
+      m.setView([lat, lng], 16);
+      updatePlanUI();
+      drawPlanMarkers();
+    },
+    () => { /* لو ما سمح بالموقع، يحدده يدوياً */ },
+    { enableHighAccuracy:true, timeout:8000 }
+  );
 }
 
 function exitFlow() {
@@ -517,11 +536,28 @@ function exitFlow() {
 }
 
 // ============ الخرائط ============
-function makeMap(elId, pinId) {
+function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(m);
   L.control.zoom({ position:'topright' }).addTo(m);
+  // الضغط على الخريطة يحدد النقطة مباشرة
+  m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
   return m;
+}
+
+// عند الضغط على الخريطة
+function onMapTap(lat, lng, flow) {
+  const place = { lat, lng, label: 'موقع محدد على الخريطة' };
+  if (currentType === 'ride') {
+    if (tapTarget === 'pickup') pickup = place;
+    else destination = place;
+  } else {
+    // بالتوصيل: لو المحل مو محدد نحدده أول، بعدها عنوان التوصيل
+    if (tapTarget === 'store' || tapTarget === 'pickup') { store = place; tapTarget = 'destination'; }
+    else if (tapTarget === 'destination') { destination = place; }
+  }
+  updatePlanUI();
+  drawPlanMarkers();
 }
 
 function activeMap() { return currentType === 'ride' ? mapR : mapD; }
@@ -530,8 +566,13 @@ function locateMe(which) {
   const m = which === 'r' ? mapR : mapD;
   if (!navigator.geolocation) return toast('الموقع غير مدعوم');
   navigator.geolocation.getCurrentPosition(
-    (pos) => m.setView([pos.coords.latitude, pos.coords.longitude], 16),
-    () => toast('ما كدرنا نحدد موقعك، حرك الخريطة يدوياً'),
+    (pos) => {
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      m.setView([lat, lng], 16);
+      // زر الموقع يحدد نقطة الانطلاق على موقعي (بالرحلة)
+      if (currentType === 'ride') { pickup = { lat, lng, label:'موقعي الحالي' }; updatePlanUI(); drawPlanMarkers(); }
+    },
+    () => toast('ما كدرنا نحدد موقعك، اضغط على الخريطة يدوياً'),
     { enableHighAccuracy:true, timeout:8000 }
   );
 }
@@ -539,6 +580,7 @@ function locateMe(which) {
 // ============ البحث عن مكان ============
 function openSearch(mode, flow) {
   searchMode = mode; searchFlow = flow;
+  tapTarget = mode; // لو رجع وضغط الخريطة، يحدد هالنقطة
   document.getElementById('search-input').value = '';
   const hint = mode === 'store' ? 'اكتب اسم المحل أو المطعم<br>مثال: مطعم فلان، صيدلية، سوبرماركت' : 'اكتب اسم منطقة أو مكان بالمسيب<br>مثال: مستشفى المسيب، حي العسكري، الجسر';
   document.getElementById('search-results').innerHTML = `<div class="sr-hint">${hint}</div>`;
@@ -595,46 +637,12 @@ function assignPoint(place) {
   updatePlanUI();
 }
 
-// تحديد من الخريطة
+// تحديد من الخريطة — بس نسكّر البحث والزبون يضغط على الخريطة مباشرة
 function pickFromMap() {
-  mapPickMode = searchMode; mapPickFlow = searchFlow;
+  tapTarget = searchMode; // الضغط الجاي على الخريطة يحدد هالنقطة
   closeSearch();
-  const label = { pickup:'نقطة الانطلاق', destination:'عنوان التوصيل', store:'موقع المحل' }[mapPickMode];
-  toast(`حرك الخريطة لـ${label} واضغط تأكيد`);
-  showMapConfirm(searchFlow);
-}
-
-function showMapConfirm(flow) {
-  const sheetId = flow === 'r' ? 'ride-sheet' : 'delivery-sheet';
-  const btnId = flow === 'r' ? 'r-book-btn' : 'd-book-btn';
-  const sheet = document.getElementById(sheetId);
-  let bar = document.getElementById('map-confirm-'+flow);
-  if (!bar) {
-    bar = document.createElement('button');
-    bar.id = 'map-confirm-'+flow;
-    bar.className = 'btn go';
-    bar.textContent = 'تأكيد الموقع ✅';
-    bar.onclick = () => confirmMapPick(flow);
-    sheet.appendChild(bar);
-  }
-  bar.classList.remove('hidden');
-  document.getElementById(btnId).classList.add('hidden');
-  sheet.querySelector('.trip-points').style.opacity = '.4';
-}
-
-function confirmMapPick(flow) {
-  const m = flow === 'r' ? mapR : mapD;
-  const c = m.getCenter();
-  const place = { lat: c.lat, lng: c.lng, label: `موقع على الخريطة (${c.lat.toFixed(4)}, ${c.lng.toFixed(4)})` };
-  searchMode = mapPickMode;
-  assignPoint(place);
-  const btnId = flow === 'r' ? 'r-book-btn' : 'd-book-btn';
-  document.getElementById('map-confirm-'+flow).classList.add('hidden');
-  document.getElementById(btnId).classList.remove('hidden');
-  const sheetId = flow === 'r' ? 'ride-sheet' : 'delivery-sheet';
-  document.getElementById(sheetId).querySelector('.trip-points').style.opacity = '1';
-  mapPickMode = null;
-  drawPlanMarkers();
+  const label = { pickup:'نقطة الانطلاق', destination:currentType==='delivery'?'عنوان التوصيل':'نقطة الوصول', store:'موقع المحل' }[searchMode];
+  toast(`اضغط على الخريطة لتحديد ${label}`);
 }
 
 // ============ تحديث واجهة التخطيط ============
@@ -808,12 +816,12 @@ function resetAll() {
 
 function resetRideUI() {
   const b = document.getElementById('r-book-btn'); b.disabled=false; b.textContent='اطلب تكتك 🛺';
-  setEmpty('r-pickup','حدد على الخريطة أو ابحث'); setEmpty('r-dest','وين تريد تروح؟');
+  setEmpty('r-pickup','نحدد موقعك تلقائياً...'); setEmpty('r-dest','اضغط على الخريطة أو ابحث');
   document.getElementById('r-fare-box').classList.add('hidden');
 }
 function resetDeliveryUI() {
   const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='اطلب التوصيل 🛒';
-  setEmpty('d-store','حدد المحل على الخريطة أو ابحث'); setEmpty('d-dest','وين نوصّل الطلب؟');
+  setEmpty('d-store','اضغط على الخريطة أو ابحث'); setEmpty('d-dest','اضغط على الخريطة أو ابحث');
   const item = document.getElementById('d-item'); if (item) item.value='';
   document.getElementById('d-fare-box').classList.add('hidden');
 }
