@@ -1,6 +1,6 @@
 // ============================================================
-//  تكتك المسيب - سيرفر الحجز والتتبع اللحظي (نسخة متطورة)
-//  Tuktuk Al-Musayyib - v2
+//  جايك - السيرفر (مع قاعدة بيانات دائمة)
+//  Jayak Server - PostgreSQL persistence
 // ============================================================
 
 const express = require('express');
@@ -8,33 +8,36 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const db = require('./db');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
-// ============ إعدادات الأجرة (غيّرها زي ما تريد) ============
+// ============ إعدادات الأجرة ============
 const FARE = {
   base: 1000,       // أجرة الأساس (دينار)
   perKm: 500,       // سعر الكيلومتر (دينار)
-  minimum: 1500,    // أقل أجرة للرحلة
+  minimum: 1500,    // أقل أجرة
 };
 
-// المسارات الرئيسية (الملفات بالجذر)
+// ============ مفتاح لوحة التحكم ============
+const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
+
+// المسارات
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
 app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
 app.use(express.static(path.join(__dirname)));
 
 // ============================================================
-//  التخزين في الذاكرة (تجريبي)
+//  الحالة اللحظية (بالذاكرة — طبيعي، هاي مؤقتة)
 // ============================================================
-const drivers = new Map();
-const rides = new Map();
-const sockets = new Map();
-const driverStats = new Map();
+const sockets = new Map();       // socketId -> ws
+const onlineDrivers = new Map(); // driverId -> { socketId, lat, lng, name, phone, car }
+const activeRides = new Map();   // rideId -> بيانات الرحلة النشطة
 
 function uid() { return crypto.randomBytes(6).toString('hex'); }
 
@@ -56,6 +59,14 @@ function sendTo(socketId, type, data) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type, data }));
 }
 
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ============================================================
 //  WebSocket
 // ============================================================
@@ -66,233 +77,303 @@ wss.on('connection', (ws) => {
   sockets.set(socketId, ws);
   ws.send(JSON.stringify({ type: 'welcome', data: { socketId } }));
 
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     const { type, data } = msg;
 
-    switch (type) {
-      case 'driver:online': {
-        ws._role = 'driver';
-        ws._driverId = data.driverId;
-        const d = drivers.get(data.driverId) || {};
-        drivers.set(data.driverId, {
-          ...d, id: data.driverId, name: data.name, phone: data.phone,
-          car: data.car, lat: data.lat, lng: data.lng, online: true, socketId,
-        });
-        if (!driverStats.has(data.driverId)) {
-          driverStats.set(data.driverId, { trips: [], totalEarnings: 0, totalKm: 0 });
-        }
-        ws.send(JSON.stringify({ type: 'driver:confirmed', data: { online: true } }));
-        break;
-      }
-
-      case 'driver:location': {
-        const d = drivers.get(ws._driverId);
-        if (d) { d.lat = data.lat; d.lng = data.lng; }
-        for (const ride of rides.values()) {
-          if (ride.driverId === ws._driverId &&
-              (ride.status === 'accepted' || ride.status === 'arriving')) {
-            sendTo(ride.customerSocketId, 'driver:moved', { lat: data.lat, lng: data.lng });
+    try {
+      switch (type) {
+        case 'driver:online': {
+          // تأكد إنه مسموح له يشتغل (تجربة أو اشتراك)
+          const access = await db.getDriverAccess(data.driverId);
+          if (!access.allowed) {
+            ws.send(JSON.stringify({ type: 'driver:blocked', data: access }));
+            return;
           }
+          ws._role = 'driver';
+          ws._driverId = data.driverId;
+          onlineDrivers.set(data.driverId, {
+            socketId, lat: data.lat, lng: data.lng,
+            name: data.name, phone: data.phone, car: data.car,
+          });
+          await db.updateDriverLocation(data.driverId, data.lat, data.lng);
+          ws.send(JSON.stringify({ type: 'driver:confirmed', data: { online: true, access } }));
+          break;
         }
-        break;
-      }
 
-      case 'driver:offline': {
-        const d = drivers.get(ws._driverId);
-        if (d) d.online = false;
-        break;
-      }
+        case 'driver:location': {
+          const d = onlineDrivers.get(ws._driverId);
+          if (d) { d.lat = data.lat; d.lng = data.lng; }
+          for (const ride of activeRides.values()) {
+            if (ride.driverId === ws._driverId && ['accepted','arriving'].includes(ride.status)) {
+              sendTo(ride.customerSocketId, 'driver:moved', { lat: data.lat, lng: data.lng });
+            }
+          }
+          break;
+        }
 
-      case 'customer:hello': { ws._role = 'customer'; break; }
-      default: break;
-    }
+        case 'driver:offline': {
+          onlineDrivers.delete(ws._driverId);
+          break;
+        }
+
+        case 'customer:hello': { ws._role = 'customer'; break; }
+        default: break;
+      }
+    } catch (e) { console.error('خطأ بالرسالة:', e.message); }
   });
 
   ws.on('close', () => {
-    if (ws._role === 'driver' && ws._driverId) {
-      const d = drivers.get(ws._driverId);
-      if (d) d.online = false;
-    }
+    if (ws._role === 'driver' && ws._driverId) onlineDrivers.delete(ws._driverId);
     sockets.delete(socketId);
   });
 });
 
 // ============================================================
-//  API
+//  API — السائق
 // ============================================================
 
-// الزبون يحجز — مع نقطة انطلاق ووصول
-app.post('/api/book', (req, res) => {
-  const { name, phone, pickup, destination, socketId, orderType, store, itemDesc } = req.body;
-  if (!pickup || !pickup.lat) return res.status(400).json({ error: 'نقطة الانطلاق مطلوبة' });
+// تسجيل السائق (مع الصور)
+app.post('/api/driver/register', async (req, res) => {
+  try {
+    const { driverId, name, phone, car, photoCar, photoIdFront, photoIdBack, lat, lng } = req.body;
+    if (!driverId || !name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
 
-  const type = orderType === 'delivery' ? 'delivery' : 'ride';
-  const rideId = uid();
-  let estKm = 0, estFare = 0;
-  if (destination && destination.lat) {
-    estKm = haversine(pickup.lat, pickup.lng, destination.lat, destination.lng);
-    estFare = calcFare(estKm);
-  }
-
-  const ride = {
-    id: rideId,
-    type,                 // 'ride' | 'delivery'
-    customer: { name: name || 'زبون', phone: phone || '' },
-    pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label || '' },
-    destination: destination && destination.lat
-      ? { lat: destination.lat, lng: destination.lng, label: destination.label || '' }
-      : null,
-    // خاص بتوصيل البضاعة
-    store: type === 'delivery' && store ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
-    itemDesc: type === 'delivery' ? (itemDesc || '') : '',
-    estKm, estFare,
-    status: 'searching',
-    driverId: null,
-    customerSocketId: socketId,
-    createdAt: Date.now(),
-  };
-  rides.set(rideId, ride);
-
-  const onlineDrivers = [...drivers.values()].filter(d => d.online);
-  broadcast('driver', 'ride:new', {
-    rideId,
-    type: ride.type,
-    pickup: ride.pickup,
-    destination: ride.destination,
-    store: ride.store,
-    itemDesc: ride.itemDesc,
-    estKm: Math.round(estKm * 10) / 10,
-    estFare,
-    customer: { name: ride.customer.name },
-  });
-
-  res.json({ rideId, driversNotified: onlineDrivers.length, estKm: Math.round(estKm*10)/10, estFare });
-});
-
-// السواق يقبل
-app.post('/api/accept', (req, res) => {
-  const { rideId, driverId } = req.body;
-  const ride = rides.get(rideId);
-  if (!ride) return res.status(404).json({ error: 'الرحلة غير موجودة' });
-  if (ride.status !== 'searching') return res.status(409).json({ error: 'الرحلة انحجزت', taken: true });
-
-  const driver = drivers.get(driverId);
-  if (!driver) return res.status(404).json({ error: 'السواق غير موجود' });
-
-  ride.status = 'accepted';
-  ride.driverId = driverId;
-  ride.acceptedAt = Date.now();
-
-  const dist = haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng);
-  const etaMin = Math.max(1, Math.round((dist / 25) * 60));
-
-  sendTo(ride.customerSocketId, 'ride:accepted', {
-    driver: { name: driver.name, phone: driver.phone, car: driver.car, lat: driver.lat, lng: driver.lng },
-    etaMin,
-  });
-
-  broadcast('driver', 'ride:taken', { rideId });
-
-  res.json({
-    ok: true, type: ride.type, pickup: ride.pickup, destination: ride.destination,
-    store: ride.store, itemDesc: ride.itemDesc,
-    customer: ride.customer, estKm: ride.estKm, estFare: ride.estFare, etaMin,
-  });
-});
-
-app.post('/api/arrived', (req, res) => {
-  const { rideId } = req.body;
-  const ride = rides.get(rideId);
-  if (!ride) return res.status(404).json({ error: 'غير موجودة' });
-  ride.status = 'arrived';
-  sendTo(ride.customerSocketId, 'ride:arrived', {});
-  res.json({ ok: true });
-});
-
-// إنهاء الرحلة — يسجل بكشف حساب السواق
-app.post('/api/complete', (req, res) => {
-  const { rideId } = req.body;
-  const ride = rides.get(rideId);
-  if (!ride) return res.status(404).json({ error: 'غير موجودة' });
-  ride.status = 'done';
-  ride.doneAt = Date.now();
-
-  if (ride.driverId) {
-    const stats = driverStats.get(ride.driverId) || { trips: [], totalEarnings: 0, totalKm: 0 };
-    const km = ride.estKm || 0;
-    const fare = ride.estFare || calcFare(km);
-    stats.trips.push({
-      rideId: ride.id,
-      customer: ride.customer.name,
-      km: Math.round(km * 10) / 10,
-      fare,
-      from: ride.pickup.label || '—',
-      to: ride.destination ? (ride.destination.label || '—') : '—',
-      at: ride.doneAt,
+    const d = await db.upsertDriver({
+      id: driverId, name, phone, car,
+      photo_car: photoCar || null,
+      photo_id_front: photoIdFront || null,
+      photo_id_back: photoIdBack || null,
+      last_lat: lat || null, last_lng: lng || null,
     });
-    stats.totalEarnings += fare;
-    stats.totalKm += km;
-    driverStats.set(ride.driverId, stats);
+    const access = await db.getDriverAccess(driverId);
+    res.json({ ok: true, driver: { id: d.id, name: d.name, status: d.status }, access });
+  } catch (e) {
+    console.error('خطأ بالتسجيل:', e.message);
+    res.status(500).json({ error: 'صار خطأ بالتسجيل' });
   }
-
-  sendTo(ride.customerSocketId, 'ride:done', { fare: ride.estFare });
-  res.json({ ok: true, fare: ride.estFare });
 });
 
-app.post('/api/cancel', (req, res) => {
-  const { rideId } = req.body;
-  const ride = rides.get(rideId);
-  if (!ride) return res.status(404).json({ error: 'غير موجودة' });
-  ride.status = 'cancelled';
-  if (ride.driverId) {
-    const driver = drivers.get(ride.driverId);
-    if (driver && driver.socketId) sendTo(driver.socketId, 'ride:cancelled', { rideId });
-  }
-  broadcast('driver', 'ride:taken', { rideId });
-  res.json({ ok: true });
+// حالة وصول السائق (تجربة/اشتراك/محظور)
+app.get('/api/driver/:id/access', async (req, res) => {
+  try {
+    const access = await db.getDriverAccess(req.params.id);
+    res.json(access);
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
-// كشف حساب السواق
-app.get('/api/driver/:id/earnings', (req, res) => {
-  const stats = driverStats.get(req.params.id) || { trips: [], totalEarnings: 0, totalKm: 0 };
-  const today = new Date(); today.setHours(0,0,0,0);
-  const todayTrips = stats.trips.filter(t => t.at >= today.getTime());
-  const todayEarnings = todayTrips.reduce((s, t) => s + t.fare, 0);
-  res.json({
-    totalEarnings: stats.totalEarnings,
-    totalKm: Math.round(stats.totalKm * 10) / 10,
-    totalTrips: stats.trips.length,
-    todayEarnings,
-    todayTrips: todayTrips.length,
-    trips: stats.trips.slice(-20).reverse(),
-  });
+// كشف حساب السائق
+app.get('/api/driver/:id/earnings', async (req, res) => {
+  try {
+    res.json(await db.getDriverEarnings(req.params.id));
+  } catch (e) {
+    console.error('خطأ بكشف الحساب:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// ============================================================
+//  API — الحجز
+// ============================================================
+app.post('/api/book', async (req, res) => {
+  try {
+    const { name, phone, pickup, destination, socketId, orderType, store, itemDesc } = req.body;
+    if (!pickup || !pickup.lat) return res.status(400).json({ error: 'نقطة الانطلاق مطلوبة' });
+
+    const type = orderType === 'delivery' ? 'delivery' : 'ride';
+    const rideId = uid();
+    let estKm = 0, estFare = 0;
+    if (destination && destination.lat) {
+      estKm = haversine(pickup.lat, pickup.lng, destination.lat, destination.lng);
+      estFare = calcFare(estKm);
+    }
+
+    const ride = {
+      id: rideId, type,
+      customer: { name: name || 'زبون', phone: phone || '' },
+      pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label || '' },
+      destination: destination && destination.lat
+        ? { lat: destination.lat, lng: destination.lng, label: destination.label || '' } : null,
+      store: type === 'delivery' && store ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
+      itemDesc: type === 'delivery' ? (itemDesc || '') : '',
+      estKm, estFare, status: 'searching', driverId: null,
+      customerSocketId: socketId, createdAt: Date.now(),
+    };
+
+    // احفظ بالقاعدة + بالذاكرة (للتتبع اللحظي)
+    await db.createRide(ride);
+    if (phone) await db.upsertCustomer(phone, name || 'زبون');
+    activeRides.set(rideId, ride);
+
+    broadcast('driver', 'ride:new', {
+      rideId, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+      store: ride.store, itemDesc: ride.itemDesc,
+      estKm: Math.round(estKm*10)/10, estFare, customer: { name: ride.customer.name },
+    });
+
+    res.json({ rideId, driversNotified: onlineDrivers.size, estKm: Math.round(estKm*10)/10, estFare });
+  } catch (e) {
+    console.error('خطأ بالحجز:', e.message);
+    res.status(500).json({ error: 'صار خطأ بالحجز' });
+  }
+});
+
+app.post('/api/accept', async (req, res) => {
+  try {
+    const { rideId, driverId } = req.body;
+    const ride = activeRides.get(rideId);
+    if (!ride) return res.status(404).json({ error: 'الرحلة غير موجودة' });
+    if (ride.status !== 'searching') return res.status(409).json({ error: 'الرحلة انحجزت', taken: true });
+
+    // تأكد من صلاحية السائق
+    const access = await db.getDriverAccess(driverId);
+    if (!access.allowed) return res.status(403).json({ error: 'اشتراكك منتهي', blocked: true, access });
+
+    const driver = onlineDrivers.get(driverId);
+    if (!driver) return res.status(404).json({ error: 'السواق غير متصل' });
+
+    ride.status = 'accepted';
+    ride.driverId = driverId;
+    await db.updateRideStatus(rideId, 'accepted', driverId);
+
+    const dist = haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng);
+    const etaMin = Math.max(1, Math.round((dist / 25) * 60));
+
+    sendTo(ride.customerSocketId, 'ride:accepted', {
+      driver: { name: driver.name, phone: driver.phone, car: driver.car, lat: driver.lat, lng: driver.lng },
+      etaMin,
+    });
+    broadcast('driver', 'ride:taken', { rideId });
+
+    res.json({
+      ok: true, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+      store: ride.store, itemDesc: ride.itemDesc, customer: ride.customer,
+      estKm: ride.estKm, estFare: ride.estFare, etaMin,
+    });
+  } catch (e) {
+    console.error('خطأ بالقبول:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+app.post('/api/arrived', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.body.rideId);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    ride.status = 'arrived';
+    await db.updateRideStatus(ride.id, 'arrived');
+    sendTo(ride.customerSocketId, 'ride:arrived', {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
+app.post('/api/complete', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.body.rideId);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    ride.status = 'done';
+    await db.updateRideStatus(ride.id, 'done');
+    sendTo(ride.customerSocketId, 'ride:done', { fare: ride.estFare });
+    activeRides.delete(ride.id);
+    res.json({ ok: true, fare: ride.estFare });
+  } catch (e) {
+    console.error('خطأ بالإنهاء:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+app.post('/api/cancel', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.body.rideId);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    ride.status = 'cancelled';
+    await db.updateRideStatus(ride.id, 'cancelled');
+    if (ride.driverId) {
+      const d = onlineDrivers.get(ride.driverId);
+      if (d) sendTo(d.socketId, 'ride:cancelled', { rideId: ride.id });
+    }
+    broadcast('driver', 'ride:taken', { rideId: ride.id });
+    activeRides.delete(ride.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
+// ============================================================
+//  API — لوحة التحكم (تحتاج مفتاح)
+// ============================================================
+function checkAdmin(req, res, next) {
+  const key = req.headers['x-admin-key'] || req.query.key;
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'غير مصرح' });
+  next();
+}
+
+app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
+  try {
+    const drivers = await db.getAllDrivers();
+    const withAccess = await Promise.all(drivers.map(async d => ({
+      ...d,
+      online: onlineDrivers.has(d.id),
+      access: await db.getDriverAccess(d.id),
+    })));
+    res.json(withAccess);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/driver/:id/subscribe', checkAdmin, async (req, res) => {
+  try {
+    const days = parseInt(req.body.days, 10);
+    if (!days || days < 1) return res.status(400).json({ error: 'عدد أيام غير صحيح' });
+    const d = await db.setDriverSubscription(req.params.id, days);
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/driver/:id/status', checkAdmin, async (req, res) => {
+  try {
+    const d = await db.setDriverStatus(req.params.id, req.body.status);
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/rides', checkAdmin, async (req, res) => {
+  try { res.json(await db.getAllRides(100)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/customers', checkAdmin, async (req, res) => {
+  try { res.json(await db.getAllCustomers()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/stats', checkAdmin, async (req, res) => {
+  try {
+    const s = await db.getStats();
+    res.json({ ...s, driversOnline: onlineDrivers.size, activeRides: activeRides.size });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
+app.get('/api/stats', async (req, res) => {
+  try {
+    const s = await db.getStats();
+    res.json({ driversOnline: onlineDrivers.size, activeRides: activeRides.size, ...s });
+  } catch (e) { res.json({ driversOnline: onlineDrivers.size, activeRides: activeRides.size }); }
 });
 
 app.get('/api/ride/:id', (req, res) => {
-  const ride = rides.get(req.params.id);
+  const ride = activeRides.get(req.params.id);
   if (!ride) return res.status(404).json({ error: 'غير موجودة' });
   res.json(ride);
 });
 
-app.get('/api/stats', (req, res) => {
-  res.json({
-    driversOnline: [...drivers.values()].filter(d => d.online).length,
-    driversTotal: drivers.size,
-    activeRides: [...rides.values()].filter(r => ['searching','accepted','arriving','arrived'].includes(r.status)).length,
-    totalRides: rides.size,
-  });
-});
-
 // ============================================================
-function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`تكتك المسيب v2 يشتغل على المنفذ ${PORT}`));
+
+(async () => {
+  await db.init();
+  server.listen(PORT, () => {
+    console.log(`🛺 جايك يشتغل على المنفذ ${PORT}`);
+    console.log(db.HAS_DB ? '   التخزين: PostgreSQL (دائم)' : '   التخزين: الذاكرة (مؤقت)');
+  });
+})();

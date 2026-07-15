@@ -1,7 +1,7 @@
 {
-  "name": "tuktuk-almusayyib",
+  "name": "jayak",
   "version": "1.0.0",
-  "description": "تطبيق حجز تكتك للمسيب - نسخة تجريبية",
+  "description": "جايك - تطبيق نقل وتوصيل بالتكتك",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
+    "pg": "^8.22.0",
     "ws": "^8.18.0"
   },
   "license": "MIT"
