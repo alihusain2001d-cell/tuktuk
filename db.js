@@ -8,10 +8,24 @@ const { Pool } = require('pg');
 const HAS_DB = !!process.env.DATABASE_URL;
 let pool = null;
 
+// SSL مطلوب بس للاتصالات الخارجية (العامة).
+// الاتصال الداخلي بـ Railway (railway.internal) والمحلي ما يحتاجون SSL.
+function needsSSL(url) {
+  if (!url) return false;
+  if (url.includes('localhost') || url.includes('127.0.0.1')) return false;
+  if (url.includes('.railway.internal')) return false;  // شبكة Railway الداخلية
+  if (url.includes('sslmode=disable')) return false;
+  return true;
+}
+
 if (HAS_DB) {
+  const url = process.env.DATABASE_URL;
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+    connectionString: url,
+    ssl: needsSSL(url) ? { rejectUnauthorized: false } : false,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
   });
   pool.on('error', (err) => console.error('خطأ بقاعدة البيانات:', err.message));
 }
@@ -27,6 +41,16 @@ const mem = {
 async function init() {
   if (!HAS_DB) {
     console.log('⚠️  ماكو DATABASE_URL — نشتغل بالذاكرة (البيانات تنمسح عند إعادة النشر)');
+    return false;
+  }
+  // تأكد من الاتصال أول
+  try {
+    const test = await pool.query('SELECT 1 AS ok');
+    const host = (process.env.DATABASE_URL.match(/@([^:/]+)/) || [])[1] || '؟';
+    console.log(`🔌 اتصلنا بقاعدة البيانات (${host}) — SSL: ${needsSSL(process.env.DATABASE_URL) ? 'مفعّل' : 'مطفي'}`);
+  } catch (e) {
+    console.error('❌ ما كدرنا نتصل بقاعدة البيانات:', e.message);
+    console.error('   تأكد من DATABASE_URL بمتغيرات التطبيق');
     return false;
   }
   try {
