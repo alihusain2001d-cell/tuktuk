@@ -131,6 +131,94 @@ wss.on('connection', (ws) => {
 });
 
 // ============================================================
+//  تأكيد رقم الموبايل بكود (OTP)
+// ============================================================
+// الأكواد تنحفظ مؤقتاً بالذاكرة (تنتهي بعد ٥ دقايق)
+const otpCodes = new Map(); // phone -> { code, expiresAt, attempts, lastSentAt }
+
+const OTP_TTL = 5 * 60 * 1000;        // صلاحية الكود: ٥ دقايق
+const OTP_RESEND_WAIT = 60 * 1000;    // ما يقدر يعيد الإرسال قبل دقيقة
+const OTP_MAX_ATTEMPTS = 5;           // أقصى محاولات خاطئة
+
+// وضع التطوير: الكود يرجع بالرد حتى تجرّب بدون خدمة SMS
+const OTP_DEV_MODE = process.env.OTP_DEV_MODE !== 'false';
+
+function genOTP() {
+  return String(Math.floor(100000 + Math.random() * 900000)); // ٦ أرقام
+}
+
+// إرسال الكود — حالياً يطبعه بالسجل. لاحقاً نربطه بـ Firebase أو واتساب
+async function sendOTP(phone, code) {
+  console.log(`📱 كود التحقق لـ ${phone}: ${code}`);
+  // TODO: اربط هنا Firebase Phone Auth أو GreenAPI واتساب
+  return true;
+}
+
+function normalizePhone(p) {
+  return String(p || '').replace(/\D/g, ''); // بس أرقام
+}
+
+// طلب كود
+app.post('/api/otp/send', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    if (phone.length < 10) return res.status(400).json({ error: 'رقم غير صحيح' });
+
+    const existing = otpCodes.get(phone);
+    if (existing && Date.now() - existing.lastSentAt < OTP_RESEND_WAIT) {
+      const wait = Math.ceil((OTP_RESEND_WAIT - (Date.now() - existing.lastSentAt)) / 1000);
+      return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال`, waitSec: wait });
+    }
+
+    const code = genOTP();
+    otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL, attempts: 0, lastSentAt: Date.now() });
+    await sendOTP(phone, code);
+
+    res.json({ ok: true, sent: true, ...(OTP_DEV_MODE ? { devCode: code } : {}) });
+  } catch (e) {
+    console.error('خطأ بإرسال الكود:', e.message);
+    res.status(500).json({ error: 'ما كدرنا نرسل الكود' });
+  }
+});
+
+// تأكيد الكود
+app.post('/api/otp/verify', (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const code = String(req.body.code || '').trim();
+    const rec = otpCodes.get(phone);
+
+    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
+    if (Date.now() > rec.expiresAt) {
+      otpCodes.delete(phone);
+      return res.status(400).json({ error: 'الكود انتهت صلاحيته، اطلب واحد جديد' });
+    }
+    if (rec.attempts >= OTP_MAX_ATTEMPTS) {
+      otpCodes.delete(phone);
+      return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' });
+    }
+    if (rec.code !== code) {
+      rec.attempts++;
+      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
+    }
+
+    otpCodes.delete(phone);
+    // توكن بسيط يثبت إنه الرقم متأكد (صالح ١٠ دقايق)
+    const token = crypto.createHmac('sha256', ADMIN_KEY)
+      .update(`${phone}:${Math.floor(Date.now() / (10*60*1000))}`).digest('hex').slice(0, 32);
+    res.json({ ok: true, verified: true, token });
+  } catch (e) {
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// تنظيف الأكواد المنتهية كل ١٠ دقايق
+setInterval(() => {
+  const now = Date.now();
+  for (const [phone, rec] of otpCodes) if (now > rec.expiresAt) otpCodes.delete(phone);
+}, 10 * 60 * 1000);
+
+// ============================================================
 //  API — السائق
 // ============================================================
 
