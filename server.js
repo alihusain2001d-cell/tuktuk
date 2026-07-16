@@ -269,7 +269,7 @@ app.post('/api/driver/login', async (req, res) => {
 // تسجيل السائق (مع الصور)
 app.post('/api/driver/register', async (req, res) => {
   try {
-    const { driverId, name, phone, car, photoCar, photoIdFront, photoIdBack, lat, lng } = req.body;
+    const { driverId, name, phone, car, photoSelf, photoCar, photoIdFront, photoIdBack, lat, lng } = req.body;
     if (!driverId || !name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
 
     // امنع تسجيل رقم موجود بحساب ثاني
@@ -283,6 +283,7 @@ app.post('/api/driver/register', async (req, res) => {
 
     const d = await db.upsertDriver({
       id: driverId, name, phone, car,
+      photo_self: photoSelf || null,
       photo_car: photoCar || null,
       photo_id_front: photoIdFront || null,
       photo_id_back: photoIdBack || null,
@@ -319,13 +320,15 @@ app.get('/api/driver/:id/earnings', async (req, res) => {
 // ============================================================
 app.post('/api/book', async (req, res) => {
   try {
-    const { name, phone, pickup, destination, socketId, orderType, store, itemDesc } = req.body;
-    if (!pickup || !pickup.lat) return res.status(400).json({ error: 'نقطة الانطلاق مطلوبة' });
+    const { name, phone, pickup, destination, socketId, orderType, store, storeName, itemDesc } = req.body;
+    if (!pickup || !pickup.lat) return res.status(400).json({ error: 'موقعك مطلوب' });
 
     const type = orderType === 'delivery' ? 'delivery' : 'ride';
     const rideId = uid();
     let estKm = 0, estFare = 0;
-    if (destination && destination.lat) {
+    // الرحلة العادية: أجرة تلقائية بالمسافة
+    // التوصيل: ماكو سعر — السائق يعرض والزبون يوافق
+    if (type === 'ride' && destination && destination.lat) {
       estKm = haversine(pickup.lat, pickup.lng, destination.lat, destination.lng);
       estFare = calcFare(estKm);
     }
@@ -336,7 +339,8 @@ app.post('/api/book', async (req, res) => {
       pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label || '' },
       destination: destination && destination.lat
         ? { lat: destination.lat, lng: destination.lng, label: destination.label || '' } : null,
-      store: type === 'delivery' && store ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
+      store: type === 'delivery' && store && store.lat ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
+      storeName: type === 'delivery' ? (storeName || '') : '',
       itemDesc: type === 'delivery' ? (itemDesc || '') : '',
       estKm, estFare, status: 'searching', driverId: null,
       customerSocketId: socketId, createdAt: Date.now(),
@@ -349,7 +353,7 @@ app.post('/api/book', async (req, res) => {
 
     broadcast('driver', 'ride:new', {
       rideId, type: ride.type, pickup: ride.pickup, destination: ride.destination,
-      store: ride.store, itemDesc: ride.itemDesc,
+      store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc,
       estKm: Math.round(estKm*10)/10, estFare, customer: { name: ride.customer.name },
     });
 
@@ -367,12 +371,11 @@ app.post('/api/accept', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'الرحلة غير موجودة' });
     if (ride.status !== 'searching') return res.status(409).json({ error: 'الرحلة انحجزت', taken: true });
 
-    // تأكد من صلاحية السائق
     const access = await db.getDriverAccess(driverId);
     if (!access.allowed) return res.status(403).json({ error: 'اشتراكك منتهي', blocked: true, access });
 
     const driver = onlineDrivers.get(driverId);
-    if (!driver) return res.status(404).json({ error: 'السواق غير متصل' });
+    if (!driver) return res.status(404).json({ error: 'السائق غير متصل' });
 
     ride.status = 'accepted';
     ride.driverId = driverId;
@@ -381,19 +384,145 @@ app.post('/api/accept', async (req, res) => {
     const dist = haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng);
     const etaMin = Math.max(1, Math.round((dist / 25) * 60));
 
+    // جيب صورة السائق الشخصية حتى الزبون يتعرف عليه
+    const dRec = await db.getDriver(driverId);
+
     sendTo(ride.customerSocketId, 'ride:accepted', {
-      driver: { name: driver.name, phone: driver.phone, car: driver.car, lat: driver.lat, lng: driver.lng },
+      driver: {
+        name: driver.name, phone: driver.phone, car: driver.car,
+        lat: driver.lat, lng: driver.lng,
+        photo: dRec ? dRec.photo_self : null,
+      },
       etaMin,
     });
     broadcast('driver', 'ride:taken', { rideId });
 
     res.json({
       ok: true, type: ride.type, pickup: ride.pickup, destination: ride.destination,
-      store: ride.store, itemDesc: ride.itemDesc, customer: ride.customer,
+      store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc, customer: ride.customer,
       estKm: ride.estKm, estFare: ride.estFare, etaMin,
     });
   } catch (e) {
     console.error('خطأ بالقبول:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// ============================================================
+//  عروض السعر (لطلبات التوصيل)
+// ============================================================
+
+// السائق يقدّم عرض سعر
+app.post('/api/offer', async (req, res) => {
+  try {
+    const { rideId, driverId, price, note } = req.body;
+    const ride = activeRides.get(rideId);
+    if (!ride) return res.status(404).json({ error: 'الطلب غير موجود' });
+    if (ride.type !== 'delivery') return res.status(400).json({ error: 'العروض بس لطلبات التوصيل' });
+    if (ride.status !== 'searching') return res.status(409).json({ error: 'الطلب مأخوذ من سائق ثاني', taken: true });
+
+    const p = parseInt(price, 10);
+    if (!p || p < 250) return res.status(400).json({ error: 'اكتب سعر صحيح' });
+
+    const access = await db.getDriverAccess(driverId);
+    if (!access.allowed) return res.status(403).json({ error: 'اشتراكك منتهي', blocked: true, access });
+
+    const driver = onlineDrivers.get(driverId);
+    if (!driver) return res.status(404).json({ error: 'مو متصل' });
+
+    // اقفل الطلب مؤقتاً على هذا السائق لحد ما الزبون يرد
+    ride.status = 'offered';
+    ride.driverId = driverId;
+    ride.offerPrice = p;
+    ride.offerNote = note || '';
+    await db.setRideOffer(rideId, driverId, p, note);
+
+    const dRec = await db.getDriver(driverId);
+    const dist = haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng);
+    const etaMin = Math.max(1, Math.round((dist / 25) * 60));
+
+    // ابعث العرض للزبون
+    sendTo(ride.customerSocketId, 'offer:new', {
+      rideId,
+      price: p,
+      note: note || '',
+      etaMin,
+      driver: {
+        name: driver.name, phone: driver.phone, car: driver.car,
+        photo: dRec ? dRec.photo_self : null,
+      },
+    });
+
+    // بلّغ باقي السواقين إنه الطلب مأخوذ مؤقتاً
+    broadcast('driver', 'ride:taken', { rideId });
+
+    res.json({ ok: true, waiting: true });
+  } catch (e) {
+    console.error('خطأ بالعرض:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// الزبون يوافق على العرض
+app.post('/api/offer/accept', async (req, res) => {
+  try {
+    const { rideId } = req.body;
+    const ride = activeRides.get(rideId);
+    if (!ride) return res.status(404).json({ error: 'الطلب غير موجود' });
+    if (ride.status !== 'offered') return res.status(409).json({ error: 'ماكو عرض معلّق' });
+
+    ride.status = 'accepted';
+    ride.estFare = ride.offerPrice;
+    await db.acceptRideOffer(rideId);
+
+    const driver = onlineDrivers.get(ride.driverId);
+    if (driver) {
+      sendTo(driver.socketId, 'offer:accepted', {
+        rideId,
+        price: ride.offerPrice,
+        customer: ride.customer,
+        pickup: ride.pickup,
+        storeName: ride.storeName,
+        itemDesc: ride.itemDesc,
+      });
+    }
+    res.json({ ok: true, fare: ride.offerPrice });
+  } catch (e) {
+    console.error('خطأ بقبول العرض:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// الزبون يرفض العرض — الطلب يرجع للسواقين
+app.post('/api/offer/reject', async (req, res) => {
+  try {
+    const { rideId } = req.body;
+    const ride = activeRides.get(rideId);
+    if (!ride) return res.status(404).json({ error: 'الطلب غير موجود' });
+
+    const rejectedDriver = ride.driverId;
+    ride.status = 'searching';
+    ride.driverId = null;
+    ride.offerPrice = null;
+    ride.offerNote = '';
+    await db.clearRideOffer(rideId);
+
+    // بلّغ السائق إنه العرض انرفض
+    if (rejectedDriver) {
+      const d = onlineDrivers.get(rejectedDriver);
+      if (d) sendTo(d.socketId, 'offer:rejected', { rideId });
+    }
+
+    // ارجع الطلب لكل السواقين من جديد
+    broadcast('driver', 'ride:new', {
+      rideId, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+      store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc,
+      estKm: 0, estFare: 0, customer: { name: ride.customer.name },
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('خطأ برفض العرض:', e.message);
     res.status(500).json({ error: 'خطأ' });
   }
 });

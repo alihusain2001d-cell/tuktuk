@@ -111,6 +111,32 @@
   .item-field label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:600; }
   .item-field textarea { width:100%; padding:13px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; background:var(--paper); resize:none; min-height:70px; font-family:inherit; }
   .item-field textarea:focus { outline:none; border-color:var(--brand); background:#fff; }
+  .item-field input[type=text] { width:100%; padding:13px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; background:var(--paper); color:var(--ink); }
+  .item-field input[type=text]:focus { outline:none; border-color:var(--brand); background:#fff; }
+  .note-info { background:#EAF0FF; border-radius:10px; padding:11px 13px; font-size:12.5px; color:var(--brand-dark); line-height:1.6; margin-bottom:14px; }
+
+  /* شاشة عرض السائق */
+  .offer-review { flex:1; overflow-y:auto; padding:22px 18px calc(22px + env(safe-area-inset-bottom)); background:var(--paper); }
+  .or-driver { display:flex; align-items:center; gap:15px; background:#fff; border:1.5px solid var(--line); border-radius:17px; padding:16px; margin-bottom:15px; }
+  .or-photo { width:70px; height:70px; border-radius:18px; background:var(--dark); color:#fff; display:flex; align-items:center; justify-content:center; font-size:32px; flex-shrink:0; overflow:hidden; }
+  .or-photo img { width:100%; height:100%; object-fit:cover; }
+  .or-info { flex:1; }
+  .or-info h3 { font-size:19px; margin-bottom:3px; }
+  .or-info p { font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .or-eta { display:inline-block; background:#E8F5EC; color:var(--go); font-size:12px; font-weight:700; padding:4px 10px; border-radius:20px; }
+  .or-price-card { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:18px; padding:24px; text-align:center; color:#fff; margin-bottom:15px; }
+  .or-price-label { font-size:13px; opacity:.85; margin-bottom:6px; }
+  .or-price { font-size:38px; font-weight:700; line-height:1.1; margin-bottom:5px; }
+  .or-price-sub { font-size:11.5px; opacity:.8; }
+  .or-note { background:#FFF9E8; border:1px solid #FFE9A8; border-radius:12px; padding:13px; font-size:13.5px; line-height:1.6; margin-bottom:15px; }
+  .or-note b { color:#B26A00; }
+  .or-order { background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:14px; margin-bottom:18px; }
+  .or-order-row { font-size:13.5px; line-height:1.9; }
+  .or-order-row b { color:var(--muted); font-weight:600; }
+  .or-actions { display:flex; gap:11px; margin-bottom:12px; }
+  .or-actions .btn { flex:1; }
+  .or-hint { text-align:center; font-size:12px; color:var(--muted); }
+  .avatar img { width:100%; height:100%; object-fit:cover; }
 
   .fare-preview { display:flex; align-items:center; justify-content:space-between; background:#EAF0FF; border-radius:12px; padding:12px 14px; margin-bottom:14px; }
   .fare-preview .fp-label { font-size:13px; color:var(--brand-dark); font-weight:600; }
@@ -343,27 +369,23 @@
 
     <div class="sheet" id="delivery-sheet">
       <div class="grip"></div>
-      <div class="trip-points">
-        <div class="tp-row" onclick="openSearch('store','d')">
-          <div class="tp-dot store"></div>
-          <div class="tp-text"><b>من أي محل؟</b><div class="val empty" id="d-store">اضغط على الخريطة أو ابحث</div></div>
-          <div class="tp-edit">✎</div>
-        </div>
-        <div class="tp-row" onclick="openSearch('destination','d')">
-          <div class="tp-dot to"></div>
-          <div class="tp-text"><b>عنوان التوصيل</b><div class="val empty" id="d-dest">اضغط على الخريطة أو ابحث</div></div>
-          <div class="tp-edit">✎</div>
-        </div>
+      <div class="item-field">
+        <label>من أي محل؟</label>
+        <input type="text" id="d-store-name" placeholder="مثال: مطعم الشام، صيدلية النور، سوبرماركت الرافدين">
       </div>
       <div class="item-field">
         <label>شنو الطلب؟ (وصف البضاعة)</label>
-        <textarea id="d-item" placeholder="مثال: ٢ سندويش شاورما دجاج + بيبسي، من مطعم فلان"></textarea>
+        <textarea id="d-item" placeholder="مثال: ٢ سندويش شاورما دجاج + بيبسي كبير"></textarea>
       </div>
-      <div class="fare-preview hidden" id="d-fare-box">
-        <div><div class="fp-label">أجرة التوصيل التقديرية</div><div class="fp-km" id="d-fare-km">— كم</div></div>
-        <div class="fp-amount" id="d-fare-amount">—</div>
+      <div class="trip-points">
+        <div class="tp-row" onclick="openSearch('destination','d')">
+          <div class="tp-dot to"></div>
+          <div class="tp-text"><b>وين نوصّل الطلب؟</b><div class="val empty" id="d-dest">نحدد موقعك تلقائياً...</div></div>
+          <div class="tp-edit">✎</div>
+        </div>
       </div>
-      <button class="btn accent" id="d-book-btn" onclick="bookDelivery()">اطلب التوصيل 🛒</button>
+      <div class="note-info">💡 السائق راح يشوف طلبك ويرسلك سعره، وإنت توافق أو ترفض</div>
+      <button class="btn accent" id="d-book-btn" onclick="bookDelivery()">أرسل الطلب للسواق 🛒</button>
     </div>
   </div>
 
@@ -391,6 +413,42 @@
         <p id="searching-sub">أرسلنا طلبك للسواقين</p>
       </div>
       <button class="btn ghost" onclick="cancelRide()" style="margin-top:14px">إلغاء الطلب</button>
+    </div>
+  </div>
+
+  <!-- ============ شاشة عرض السائق ============ -->
+  <div class="flow-screen" id="flow-offer">
+    <div class="flow-head"><h2>عرض من السائق 💬</h2></div>
+    <div class="offer-review">
+      <div class="or-driver">
+        <div class="or-photo" id="or-photo">🧑</div>
+        <div class="or-info">
+          <h3 id="or-name">—</h3>
+          <p id="or-car">—</p>
+          <div class="or-eta"><span id="or-eta">—</span> دقيقة للوصول</div>
+        </div>
+      </div>
+
+      <div class="or-price-card">
+        <div class="or-price-label">السعر الكلي المعروض</div>
+        <div class="or-price" id="or-price">—</div>
+        <div class="or-price-sub">أجرة التوصيل + سعر البضاعة</div>
+      </div>
+
+      <div class="or-note hidden" id="or-note-box">
+        <b>ملاحظة السائق:</b> <span id="or-note">—</span>
+      </div>
+
+      <div class="or-order" id="or-order">
+        <div class="or-order-row"><b>المحل:</b> <span id="or-store">—</span></div>
+        <div class="or-order-row"><b>الطلب:</b> <span id="or-item">—</span></div>
+      </div>
+
+      <div class="or-actions">
+        <button class="btn go" onclick="acceptOffer()">أوافق ✅</button>
+        <button class="btn ghost" onclick="rejectOffer()">ما أوافق ❌</button>
+      </div>
+      <p class="or-hint">لو ما وافقت، راح ندوّر على سائق ثاني</p>
     </div>
   </div>
 
@@ -439,6 +497,7 @@ let driverMarker, routeLine, pkMarker, dsMarker, stMarker;
 let pickup = null, destination = null, store = null;
 let searchMode = null, searchFlow = null;
 let tapTarget = 'destination'; // أي نقطة يحددها الضغط على الخريطة
+let deliveryInfo = { storeName:'', itemDesc:'' }; // تفاصيل طلب التوصيل الحالي
 
 // ============ تسجيل الدخول ============
 function doLogin() {
@@ -506,11 +565,29 @@ function startFlow(type) {
   } else {
     document.getElementById('flow-delivery').classList.add('active');
     resetDeliveryUI();
-    tapTarget = 'store'; // بالبداية الضغط يحدد المحل
+    tapTarget = 'destination'; // بالتوصيل: الضغط يحدد مكان التوصيل
     setTimeout(() => {
       if (!mapD) mapD = makeMap('map-d','d'); else mapD.invalidateSize();
+      autoLocateDest('d');
     }, 60);
   }
+}
+
+// يحدد مكان التوصيل تلقائياً على موقع الزبون
+function autoLocateDest(flow) {
+  if (!navigator.geolocation) return;
+  const m = flow === 'r' ? mapR : mapD;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude, lng = pos.coords.longitude;
+      destination = { lat, lng, label: 'موقعي الحالي' };
+      m.setView([lat, lng], 16);
+      updatePlanUI();
+      drawPlanMarkers();
+    },
+    () => {},
+    { enableHighAccuracy:true, timeout:8000 }
+  );
 }
 
 // يحدد نقطة الانطلاق تلقائياً على موقع الزبون
@@ -552,9 +629,8 @@ function onMapTap(lat, lng, flow) {
     if (tapTarget === 'pickup') pickup = place;
     else destination = place;
   } else {
-    // بالتوصيل: لو المحل مو محدد نحدده أول، بعدها عنوان التوصيل
-    if (tapTarget === 'store' || tapTarget === 'pickup') { store = place; tapTarget = 'destination'; }
-    else if (tapTarget === 'destination') { destination = place; }
+    // بالتوصيل: بس مكان التوصيل (المحل يكتبه نص)
+    destination = place;
   }
   updatePlanUI();
   drawPlanMarkers();
@@ -651,8 +727,8 @@ function updatePlanUI() {
     setVal('r-pickup', pickup); setVal('r-dest', destination);
     updateFare('r', pickup, destination);
   } else {
-    setVal('d-store', store); setVal('d-dest', destination);
-    updateFare('d', store, destination);
+    setVal('d-dest', destination);
+    // التوصيل: ماكو سعر تلقائي — السائق يعرض
   }
 }
 
@@ -673,19 +749,26 @@ function updateFare(prefix, a, b) {
 
 function drawPlanMarkers() {
   const m = activeMap();
+  if (!m) return;
   const green = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🟢</div>', iconSize:[0,0] });
   const red = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🔴</div>', iconSize:[0,0] });
-  const yellow = L.divIcon({ className:'', html:'<div style="font-size:28px;transform:translate(-50%,-90%)">🏪</div>', iconSize:[0,0] });
 
-  const startPt = currentType === 'ride' ? pickup : store;
-  const startIcon = currentType === 'ride' ? green : yellow;
+  if (currentType === 'delivery') {
+    // بس مكان التوصيل
+    if (destination) {
+      if (dsMarker) m.removeLayer(dsMarker);
+      dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m);
+      m.setView([destination.lat, destination.lng], 16);
+    }
+    return;
+  }
 
-  if (startPt) { if (pkMarker) m.removeLayer(pkMarker); pkMarker = L.marker([startPt.lat,startPt.lng],{icon:startIcon,interactive:false}).addTo(m); }
+  // الرحلة: انطلاق + وصول + خط
+  if (pickup) { if (pkMarker) m.removeLayer(pkMarker); pkMarker = L.marker([pickup.lat,pickup.lng],{icon:green,interactive:false}).addTo(m); }
   if (destination) { if (dsMarker) m.removeLayer(dsMarker); dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m); }
-
-  if (startPt && destination) {
+  if (pickup && destination) {
     if (routeLine) m.removeLayer(routeLine);
-    routeLine = L.polyline([[startPt.lat,startPt.lng],[destination.lat,destination.lng]], { color:'#1652F0', weight:4, opacity:.7, dashArray:'2,9', lineCap:'round' }).addTo(m);
+    routeLine = L.polyline([[pickup.lat,pickup.lng],[destination.lat,destination.lng]], { color:'#1652F0', weight:4, opacity:.7, dashArray:'2,9', lineCap:'round' }).addTo(m);
     m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
   }
 }
@@ -703,12 +786,74 @@ function connectWS() {
 function handleWS(type, data) {
   switch(type) {
     case 'welcome': socketId = data.socketId; break;
+    case 'offer:new': onOfferReceived(data); break;
     case 'ride:accepted': onDriverAccepted(data); break;
     case 'driver:moved': onDriverMoved(data); break;
     case 'ride:arrived': onArrived(); break;
     case 'ride:done': onDone(data); break;
   }
 }
+
+// ============ عرض السائق ============
+let currentOffer = null;
+
+function onOfferReceived(data) {
+  currentOffer = data;
+  document.getElementById('flow-searching').classList.remove('active');
+  document.getElementById('flow-offer').classList.add('active');
+
+  const d = data.driver;
+  const photoEl = document.getElementById('or-photo');
+  if (d.photo) photoEl.innerHTML = `<img src="${d.photo}" alt="">`;
+  else photoEl.textContent = (d.name||'؟').charAt(0);
+
+  document.getElementById('or-name').textContent = d.name;
+  document.getElementById('or-car').textContent = d.car || 'تكتك';
+  document.getElementById('or-eta').textContent = data.etaMin;
+  document.getElementById('or-price').textContent = data.price.toLocaleString() + ' د.ع';
+  document.getElementById('or-store').textContent = deliveryInfo.storeName || '—';
+  document.getElementById('or-item').textContent = deliveryInfo.itemDesc || '—';
+
+  if (data.note) {
+    document.getElementById('or-note').textContent = data.note;
+    document.getElementById('or-note-box').classList.remove('hidden');
+  } else {
+    document.getElementById('or-note-box').classList.add('hidden');
+  }
+
+  driverPhone = d.phone;
+  beep();
+  toast('وصلك عرض من سائق! 💬');
+}
+
+async function acceptOffer() {
+  if (!currentOffer) return;
+  try {
+    const res = await fetch('/api/offer/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rideId: currentOffer.rideId }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    document.getElementById('flow-offer').classList.remove('active');
+    // انتقل لشاشة التتبع
+    onDriverAccepted({ driver: currentOffer.driver, etaMin: currentOffer.etaMin });
+    toast('وافقت على العرض — السائق بالطريق! 🎉');
+    currentOffer = null;
+  } catch(e) { toast('صار خطأ'); }
+}
+
+async function rejectOffer() {
+  if (!currentOffer) return;
+  try {
+    await fetch('/api/offer/reject', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rideId: currentOffer.rideId }) });
+    currentOffer = null;
+    document.getElementById('flow-offer').classList.remove('active');
+    // ارجع لشاشة البحث
+    goSearching('delivery', 0);
+    document.getElementById('searching-sub').textContent = 'ندوّر على سائق ثاني...';
+    toast('ندوّر على سائق ثاني');
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.setValueAtTime(.15,c.currentTime); o.start(); o.stop(c.currentTime+.15); }catch(e){} }
 
 // ============ الحجز ============
 async function bookRide() {
@@ -719,14 +864,18 @@ async function bookRide() {
 }
 
 async function bookDelivery() {
-  if (!store) return toast('حدد المحل أول');
-  if (!destination) return toast('حدد عنوان التوصيل');
+  const storeName = document.getElementById('d-store-name').value.trim();
   const item = document.getElementById('d-item').value.trim();
+  if (!storeName) return toast('اكتب اسم المحل');
   if (!item) return toast('اكتب وصف الطلب (شنو تريد نجيب)');
+  if (!destination) return toast('حدد مكان التوصيل');
+
   const btn = document.getElementById('d-book-btn');
   btn.disabled = true; btn.textContent = 'نرسل الطلب...';
-  // بتوصيل البضاعة: نقطة الانطلاق = المحل، والوجهة = عنوان التوصيل
-  await sendBooking({ orderType:'delivery', pickup:store, destination, store, itemDesc:item }, () => { btn.disabled=false; btn.textContent='اطلب التوصيل 🛒'; });
+  deliveryInfo = { storeName, itemDesc: item };
+  // بالتوصيل: موقع الزبون = نقطة الانطلاق والوصول (السائق يجي له)
+  await sendBooking({ orderType:'delivery', pickup:destination, destination, storeName, itemDesc:item },
+    () => { btn.disabled=false; btn.textContent='أرسل الطلب للسواق 🛒'; });
 }
 
 async function sendBooking(payload, onErr) {
@@ -752,18 +901,21 @@ function goSearching(type, notified) {
 
 function onDriverAccepted(data) {
   document.getElementById('flow-searching').classList.remove('active');
+  document.getElementById('flow-offer').classList.remove('active');
   document.getElementById('flow-driver').classList.add('active');
   const d = data.driver;
   driverPhone = d.phone;
-  document.getElementById('driver-flow-title').textContent = currentType === 'delivery' ? 'السواق يجيب طلبك 🛒' : 'السواق بالطريق 🛺';
+  document.getElementById('driver-flow-title').textContent = currentType === 'delivery' ? 'السائق يجيب طلبك 🛒' : 'السائق بالطريق 🛺';
   document.getElementById('dv-name').textContent = d.name;
   document.getElementById('dv-car').textContent = d.car || 'تكتك';
-  document.getElementById('d-avatar').textContent = (d.name||'؟').charAt(0);
+  const av = document.getElementById('d-avatar');
+  if (d.photo) av.innerHTML = `<img src="${d.photo}" alt="">`;
+  else av.textContent = (d.name||'؟').charAt(0);
   document.getElementById('dv-eta').textContent = data.etaMin;
-  document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السواق رايح يجيب طلبك' : 'السواق بالطريق إلك';
+  document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السائق رايح يجيب طلبك' : 'السائق بالطريق إلك';
   setTimeout(() => {
     if (!mapT) mapT = makeMap('map-t',null); else mapT.invalidateSize();
-    placeDriver(d.lat, d.lng); drawDriverRoute(d.lat, d.lng);
+    if (d.lat && d.lng) { placeDriver(d.lat, d.lng); drawDriverRoute(d.lat, d.lng); }
   }, 60);
   toast(`${d.name} قبل طلبك! 🎉`);
 }
@@ -777,11 +929,12 @@ function placeDriver(lat, lng) {
 function onDriverMoved(data) { if (mapT) { placeDriver(data.lat, data.lng); drawDriverRoute(data.lat, data.lng); } }
 
 function drawDriverRoute(dlat, dlng) {
-  const target = currentType === 'ride' ? pickup : store;
+  // الرحلة: السائق يجي لنقطة الانطلاق | التوصيل: السائق يجي لموقع الزبون
+  const target = currentType === 'ride' ? pickup : destination;
   if (!target || !mapT) return;
   if (routeLine) mapT.removeLayer(routeLine);
   routeLine = L.polyline([[dlat,dlng],[target.lat,target.lng]], { color:'#FFC107', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(mapT);
-  const tIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">${currentType==='ride'?'🟢':'🏪'}</div>`, iconSize:[0,0] });
+  const tIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">🟢</div>`, iconSize:[0,0] });
   L.marker([target.lat,target.lng],{icon:tIcon,interactive:false}).addTo(mapT);
   mapT.fitBounds(routeLine.getBounds(), { padding:[60,60], maxZoom:16 });
 }
@@ -806,9 +959,10 @@ async function cancelRide() {
 function callDriver() { if (driverPhone) location.href = `tel:${driverPhone}`; else toast('رقم السواق غير متوفر'); }
 
 function resetAll() {
-  currentRide = null; driverPhone='';
+  currentRide = null; driverPhone=''; currentOffer = null;
   pickup = null; destination = null; store = null;
-  ['flow-searching','flow-driver','flow-ride','flow-delivery'].forEach(id => document.getElementById(id).classList.remove('active'));
+  deliveryInfo = { storeName:'', itemDesc:'' };
+  ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
   resetRideUI(); resetDeliveryUI();
@@ -820,10 +974,10 @@ function resetRideUI() {
   document.getElementById('r-fare-box').classList.add('hidden');
 }
 function resetDeliveryUI() {
-  const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='اطلب التوصيل 🛒';
-  setEmpty('d-store','اضغط على الخريطة أو ابحث'); setEmpty('d-dest','اضغط على الخريطة أو ابحث');
+  const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='أرسل الطلب للسواق 🛒';
+  setEmpty('d-dest','نحدد موقعك تلقائياً...');
+  const sn = document.getElementById('d-store-name'); if (sn) sn.value='';
   const item = document.getElementById('d-item'); if (item) item.value='';
-  document.getElementById('d-fare-box').classList.add('hidden');
 }
 function setEmpty(id, text) { const el = document.getElementById(id); el.textContent = text; el.classList.add('empty'); }
 

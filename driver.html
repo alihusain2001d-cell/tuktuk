@@ -150,6 +150,24 @@
   .rr-route .leg span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .item-box { background:#FFF9E8; border:1px solid #FFE9A8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px; line-height:1.5; }
   .item-box b { color:#B26A00; }
+
+  /* صندوق عرض السعر */
+  .offer-box { background:var(--sky-pale); border:1px solid var(--line); border-radius:12px; padding:13px; margin-bottom:12px; }
+  .offer-box label { display:block; font-size:12px; font-weight:600; color:var(--ink); margin-bottom:8px; }
+  .offer-input-row { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .offer-input-row input { flex:1; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:18px; font-weight:700; background:#fff; color:var(--ink); text-align:center; }
+  .offer-input-row input:focus { outline:none; border-color:var(--sky); }
+  .offer-input-row .cur { font-size:14px; font-weight:700; color:var(--muted); }
+  .offer-note { width:100%; padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13px; background:#fff; color:var(--ink); }
+  .offer-note:focus { outline:none; border-color:var(--sky); }
+
+  /* انتظار رد الزبون */
+  .offer-waiting { text-align:center; padding:22px 0; }
+  .ow-spin { width:44px; height:44px; border:3.5px solid var(--sky-light); border-top-color:var(--sky); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 14px; }
+  .offer-waiting h3 { font-size:17px; margin-bottom:6px; }
+  .offer-waiting p { font-size:14px; color:var(--muted); }
+  .offer-waiting p b { color:var(--sky-dark); font-size:17px; }
+  .offer-waiting .ow-sub { font-size:12.5px; margin-top:5px; }
   .rr-actions { display:flex; gap:10px; }
   .rr-actions .btn { flex:1; padding:12px; font-size:15px; }
 
@@ -338,6 +356,13 @@
       <div class="step-label">الخطوة ٣ من ٣ — الصور</div>
 
       <div class="photo-grid">
+        <label class="photo-box" id="box-self">
+          <div class="pb-icon" id="ic-self">🤳</div>
+          <div class="pb-text"><h4>صورتك الشخصية</h4><p>من الكاميرا — الزبون راح يشوفها حتى يتعرف عليك</p></div>
+          <div class="pb-check hidden" id="ck-self">✓</div>
+          <input type="file" accept="image/*" capture="user" onchange="pickPhoto(this,'self')">
+        </label>
+
         <label class="photo-box" id="box-car">
           <div class="pb-icon" id="ic-car">🛺</div>
           <div class="pb-text"><h4>صورة التكتك</h4><p>صورة واضحة للتكتك مالتك</p></div>
@@ -406,6 +431,12 @@
         <h2>جاهز لاستلام الطلبات</h2>
         <p>راح توصلك الطلبات القريبة منك</p>
       </div>
+      <div id="offer-waiting" class="offer-waiting hidden">
+        <div class="ow-spin"></div>
+        <h3>أرسلنا عرضك للزبون</h3>
+        <p>عرضت <b id="ow-price">—</b></p>
+        <p class="ow-sub">ننتظر رده...</p>
+      </div>
       <div id="requests-list"></div>
     </div>
 
@@ -454,7 +485,8 @@ let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
 let driver = JSON.parse(localStorage.getItem('jayak_driver') || 'null');
 let myPos = { lat: MUSAYYIB[0], lng: MUSAYYIB[1] };
 let isOnline = false, activeRide = null, customerPhone = '', locTimer = null;
-let photos = { car:null, idf:null, idb:null };
+let photos = { self:null, car:null, idf:null, idb:null };
+let offeredRide = null; // العرض المعلّق اللي ننتظر رد الزبون عليه
 let pendingPhone = '', resendTimer = null;
 const pendingRides = new Map();
 
@@ -681,7 +713,7 @@ function pickPhoto(input, key) {
   if (!file) return;
   compressImage(file, (dataUrl) => {
     photos[key] = dataUrl;
-    const map = { car:['ic-car','ck-car','box-car'], idf:['ic-idf','ck-idf','box-idf'], idb:['ic-idb','ck-idb','box-idb'] };
+    const map = { self:['ic-self','ck-self','box-self'], car:['ic-car','ck-car','box-car'], idf:['ic-idf','ck-idf','box-idf'], idb:['ic-idb','ck-idb','box-idb'] };
     const [icId, ckId, boxId] = map[key];
     document.getElementById(icId).innerHTML = `<img src="${dataUrl}" alt="">`;
     document.getElementById(ckId).classList.remove('hidden');
@@ -709,6 +741,7 @@ function compressImage(file, cb) {
 }
 
 async function finishRegister() {
+  if (!photos.self) return toast('التقط صورتك الشخصية من الكاميرا');
   if (!photos.car) return toast('أضف صورة التكتك');
   if (!photos.idf) return toast('أضف صورة البطاقة — الوجه الأمامي');
   if (!photos.idb) return toast('أضف صورة البطاقة — الوجه الخلفي');
@@ -723,7 +756,7 @@ async function finishRegister() {
         name: document.getElementById('f-name').value.trim(),
         phone: document.getElementById('f-phone').value.trim(),
         car: document.getElementById('f-car').value.trim(),
-        photoCar: photos.car, photoIdFront: photos.idf, photoIdBack: photos.idb,
+        photoSelf: photos.self, photoCar: photos.car, photoIdFront: photos.idf, photoIdBack: photos.idb,
         lat: myPos.lat, lng: myPos.lng,
       }),
     });
@@ -866,6 +899,8 @@ function handleWS(type, data) {
     case 'ride:new': onNewRide(data); break;
     case 'ride:taken': pendingRides.delete(data.rideId); renderRequests(); break;
     case 'ride:cancelled': if (activeRide && activeRide.rideId===data.rideId) { toast('الزبون ألغى'); endActive(); } break;
+    case 'offer:accepted': onOfferAccepted(data); break;
+    case 'offer:rejected': onOfferRejected(data); break;
     case 'driver:blocked': {
       stopWorking();
       showExpired(data);
@@ -873,6 +908,31 @@ function handleWS(type, data) {
     }
     default: break;
   }
+}
+
+// الزبون وافق على عرضي
+function onOfferAccepted(data) {
+  if (!offeredRide || offeredRide.rideId !== data.rideId) return;
+  const r = offeredRide.data;
+  hideWaitingOffer();
+  activeRide = {
+    rideId: data.rideId, type:'delivery', pickup: r.pickup, destination: r.destination,
+    store: r.store, storeName: r.storeName, itemDesc: r.itemDesc, customer: data.customer,
+  };
+  customerPhone = data.customer.phone || '';
+  offeredRide = null;
+  showActiveRide({ customer: data.customer, estFare: data.price }, r);
+  beep();
+  toast('الزبون وافق على عرضك! 🎉 اطلع بالطريق');
+}
+
+// الزبون رفض عرضي
+function onOfferRejected(data) {
+  if (!offeredRide || offeredRide.rideId !== data.rideId) return;
+  offeredRide = null;
+  hideWaitingOffer();
+  document.getElementById('waiting-msg').classList.remove('hidden');
+  toast('الزبون ما وافق على عرضك');
 }
 
 function getMyPosition() {
@@ -922,7 +982,7 @@ function stopLocationUpdates(){ if(locTimer) clearInterval(locTimer); locTimer=n
 
 // ============ الطلبات ============
 function onNewRide(data) {
-  if (!isOnline || activeRide) return;
+  if (!isOnline || activeRide || offeredRide) return;
   pendingRides.set(data.rideId, data);
   renderRequests(); beep(); toast('🛺 طلب جديد!');
 }
@@ -941,33 +1001,94 @@ function renderRequests() {
     const isDel = r.type === 'delivery';
     const fromLbl = r.pickup.label || 'نقطة على الخريطة';
     const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
-    const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع</div></div>` : '';
     const badge = isDel ? '<div class="type-badge delivery">🛒 توصيل بضاعة</div>' : '<div class="type-badge ride">🛺 رحلة</div>';
-    let routeHtml;
-    if (isDel) {
-      const storeLbl = r.store ? (r.store.label || 'محل على الخريطة') : fromLbl;
-      routeHtml = `<div class="rr-route">
-        <div class="leg"><div class="d store"></div><span>يجيب من: ${storeLbl}</span></div>
-        <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${toLbl}</span></div></div>
-        <div class="item-box">📦 <b>الطلب:</b> ${r.itemDesc || '—'}</div>`;
-    } else {
-      routeHtml = `<div class="rr-route">
-        <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
-        <div class="leg"><div class="d to"></div><span>${toLbl}</span></div></div>`;
-    }
     const div = document.createElement('div');
     div.className = 'ride-request' + (isDel ? ' is-delivery' : '');
-    div.innerHTML = `<div class="rr-top">
-        <div class="rr-icon">${isDel?'🛒':'🙋'}</div>
-        <div class="rr-info">${badge}<h3>${r.customer.name}</h3><div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div></div>
-        ${fareHtml}</div>
-      ${routeHtml}
-      <div class="rr-actions">
-        <button class="btn go" onclick="acceptRide('${id}')">اقبل الطلب</button>
-        <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
-      </div>`;
+
+    if (isDel) {
+      // ===== طلب توصيل: السائق يعرض سعر =====
+      const storeTxt = r.storeName || (r.store ? r.store.label : '') || 'محل غير محدد';
+      div.innerHTML = `
+        <div class="rr-top">
+          <div class="rr-icon">🛒</div>
+          <div class="rr-info">${badge}<h3>${r.customer.name}</h3>
+            <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div></div>
+        </div>
+        <div class="rr-route">
+          <div class="leg"><div class="d store"></div><span>من: ${storeTxt}</span></div>
+          <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${fromLbl}</span></div>
+        </div>
+        <div class="item-box">📦 <b>الطلب:</b> ${r.itemDesc || '—'}</div>
+        <div class="offer-box">
+          <label>سعرك (أجرة التوصيل + سعر البضاعة)</label>
+          <div class="offer-input-row">
+            <input type="number" inputmode="numeric" id="price-${id}" placeholder="مثال: 8000" min="250" step="250">
+            <span class="cur">د.ع</span>
+          </div>
+          <input type="text" id="note-${id}" class="offer-note" placeholder="ملاحظة للزبون (اختياري)">
+        </div>
+        <div class="rr-actions">
+          <button class="btn go" onclick="sendOffer('${id}')">أرسل عرضي 💬</button>
+          <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
+        </div>`;
+    } else {
+      // ===== رحلة عادية: سعر تلقائي =====
+      const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع</div></div>` : '';
+      div.innerHTML = `
+        <div class="rr-top">
+          <div class="rr-icon">🙋</div>
+          <div class="rr-info">${badge}<h3>${r.customer.name}</h3>
+            <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div></div>
+          ${fareHtml}
+        </div>
+        <div class="rr-route">
+          <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
+          <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>
+        </div>
+        <div class="rr-actions">
+          <button class="btn go" onclick="acceptRide('${id}')">اقبل الطلب</button>
+          <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
+        </div>`;
+    }
     list.appendChild(div);
   }
+}
+
+// السائق يرسل عرض سعر
+async function sendOffer(id) {
+  const priceEl = document.getElementById('price-'+id);
+  const noteEl = document.getElementById('note-'+id);
+  const price = parseInt(priceEl?.value, 10);
+  if (!price || price < 250) return toast('اكتب سعرك أول');
+
+  try {
+    const res = await fetch('/api/offer', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ rideId:id, driverId, price, note: noteEl?.value.trim() || '' }),
+    });
+    const out = await res.json();
+    if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
+    if (out.taken) { toast('الطلب مأخوذ من سائق ثاني'); pendingRides.delete(id); renderRequests(); return; }
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+
+    // خزّن الطلب لحد ما الزبون يرد
+    offeredRide = { rideId:id, data: pendingRides.get(id), price };
+    pendingRides.delete(id);
+    renderRequests();
+    showWaitingOffer(price);
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+}
+
+function showWaitingOffer(price) {
+  document.getElementById('waiting-msg').classList.add('hidden');
+  const box = document.getElementById('offer-waiting');
+  box.classList.remove('hidden');
+  document.getElementById('ow-price').textContent = price.toLocaleString() + ' د.ع';
+}
+
+function hideWaitingOffer() {
+  document.getElementById('offer-waiting').classList.add('hidden');
+  renderRequests();
 }
 
 function dismissRide(id){ pendingRides.delete(id); renderRequests(); }
@@ -1000,9 +1121,9 @@ function showActiveRide(out, r) {
   const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
   let html;
   if (isDel) {
-    const storeLbl = r.store ? (r.store.label || 'محل على الخريطة') : fromLbl;
-    html = `<div class="leg"><div class="d store"></div><span>يجيب من: ${storeLbl}</span></div>
-            <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${toLbl}</span></div>`;
+    const storeTxt = r.storeName || (r.store ? r.store.label : '') || 'محل غير محدد';
+    html = `<div class="leg"><div class="d store"></div><span>يجيب من: ${storeTxt}</span></div>
+            <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${fromLbl}</span></div>`;
   } else {
     html = `<div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
             <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>`;

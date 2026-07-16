@@ -60,6 +60,7 @@ async function init() {
         name          TEXT NOT NULL,
         phone         TEXT NOT NULL,
         car           TEXT,
+        photo_self    TEXT,
         photo_car     TEXT,
         photo_id_front TEXT,
         photo_id_back TEXT,
@@ -71,6 +72,8 @@ async function init() {
         last_lng      DOUBLE PRECISION
       );
     `);
+    // ترقية: أضف العمود لو الجدول موجود من قبل
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS photo_self TEXT;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS customers (
         phone      TEXT PRIMARY KEY,
@@ -93,15 +96,22 @@ async function init() {
         store_lat      DOUBLE PRECISION,
         store_lng      DOUBLE PRECISION,
         store_label    TEXT,
+        store_name     TEXT,
         item_desc      TEXT,
         est_km         DOUBLE PRECISION DEFAULT 0,
         est_fare       INTEGER DEFAULT 0,
+        offer_price    INTEGER,
+        offer_note     TEXT,
         status         TEXT NOT NULL DEFAULT 'searching',
         driver_id      TEXT,
         created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         done_at        TIMESTAMPTZ
       );
     `);
+    // ترقية الأعمدة الجديدة
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS store_name TEXT;`);
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_price INTEGER;`);
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_note TEXT;`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_driver ON rides(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_status ON rides(status);`);
     console.log('✅ قاعدة البيانات جاهزة (PostgreSQL)');
@@ -124,20 +134,21 @@ async function upsertDriver(d) {
     return mem.drivers.get(d.id);
   }
   const res = await pool.query(`
-    INSERT INTO drivers (id, name, phone, car, photo_car, photo_id_front, photo_id_back, trial_ends_at, last_lat, last_lng)
-    VALUES ($1,$2,$3,$4,$5,$6,$7, NOW() + INTERVAL '1 day', $8,$9)
+    INSERT INTO drivers (id, name, phone, car, photo_self, photo_car, photo_id_front, photo_id_back, trial_ends_at, last_lat, last_lng)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW() + INTERVAL '1 day', $9,$10)
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name,
       phone = EXCLUDED.phone,
       car = EXCLUDED.car,
+      photo_self = COALESCE(EXCLUDED.photo_self, drivers.photo_self),
       photo_car = COALESCE(EXCLUDED.photo_car, drivers.photo_car),
       photo_id_front = COALESCE(EXCLUDED.photo_id_front, drivers.photo_id_front),
       photo_id_back = COALESCE(EXCLUDED.photo_id_back, drivers.photo_id_back),
       last_lat = EXCLUDED.last_lat,
       last_lng = EXCLUDED.last_lng
     RETURNING *;
-  `, [d.id, d.name, d.phone, d.car || null, d.photo_car || null, d.photo_id_front || null,
-      d.photo_id_back || null, d.last_lat || null, d.last_lng || null]);
+  `, [d.id, d.name, d.phone, d.car || null, d.photo_self || null, d.photo_car || null,
+      d.photo_id_front || null, d.photo_id_back || null, d.last_lat || null, d.last_lng || null]);
   return res.rows[0];
 }
 
@@ -248,14 +259,56 @@ async function createRide(r) {
   if (!HAS_DB) { mem.rides.set(r.id, { ...r, created_at: new Date() }); return r; }
   await pool.query(`
     INSERT INTO rides (id, type, customer_name, customer_phone, pickup_lat, pickup_lng, pickup_label,
-      dest_lat, dest_lng, dest_label, store_lat, store_lng, store_label, item_desc, est_km, est_fare, status)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17);
+      dest_lat, dest_lng, dest_label, store_lat, store_lng, store_label, store_name, item_desc, est_km, est_fare, status)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18);
   `, [r.id, r.type, r.customer.name, r.customer.phone,
       r.pickup.lat, r.pickup.lng, r.pickup.label,
       r.destination?.lat || null, r.destination?.lng || null, r.destination?.label || null,
       r.store?.lat || null, r.store?.lng || null, r.store?.label || null,
-      r.itemDesc || null, r.estKm, r.estFare, r.status]);
+      r.storeName || null, r.itemDesc || null, r.estKm, r.estFare, r.status]);
   return r;
+}
+
+// السائق يقدم عرض سعر على طلب توصيل
+async function setRideOffer(rideId, driverId, price, note) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(rideId);
+    if (r) { r.offer_price = price; r.offer_note = note; r.driverId = driverId; r.status = 'offered'; }
+    return r;
+  }
+  const res = await pool.query(`
+    UPDATE rides SET offer_price=$3, offer_note=$4, driver_id=$2, status='offered'
+    WHERE id=$1 RETURNING *;
+  `, [rideId, driverId, price, note || null]);
+  return res.rows[0];
+}
+
+// الزبون يرفض العرض — يرجع الطلب للبحث
+async function clearRideOffer(rideId) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(rideId);
+    if (r) { r.offer_price = null; r.offer_note = null; r.driverId = null; r.status = 'searching'; }
+    return r;
+  }
+  const res = await pool.query(`
+    UPDATE rides SET offer_price=NULL, offer_note=NULL, driver_id=NULL, status='searching'
+    WHERE id=$1 RETURNING *;
+  `, [rideId]);
+  return res.rows[0];
+}
+
+// الزبون يوافق على العرض — الأجرة تصير سعر العرض
+async function acceptRideOffer(rideId) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(rideId);
+    if (r) { r.estFare = r.offer_price; r.status = 'accepted'; }
+    return r;
+  }
+  const res = await pool.query(`
+    UPDATE rides SET est_fare = offer_price, status='accepted'
+    WHERE id=$1 RETURNING *;
+  `, [rideId]);
+  return res.rows[0];
 }
 
 async function updateRideStatus(id, status, driverId) {
@@ -307,7 +360,7 @@ async function getDriverEarnings(driverId) {
     FROM rides WHERE driver_id=$1 AND status='done' AND done_at >= CURRENT_DATE;
   `, [driverId]);
   const list = await pool.query(`
-    SELECT id, type, customer_name, est_km, est_fare, pickup_label, dest_label, store_label, done_at
+    SELECT id, type, customer_name, est_km, est_fare, pickup_label, dest_label, store_label, store_name, done_at
     FROM rides WHERE driver_id=$1 AND status='done' ORDER BY done_at DESC LIMIT 20;
   `, [driverId]);
   const t = totals.rows[0], td = todayRes.rows[0];
@@ -316,7 +369,8 @@ async function getDriverEarnings(driverId) {
     todayEarnings: td.earnings, todayTrips: td.trips,
     trips: list.rows.map(r => ({
       rideId: r.id, customer: r.customer_name, km: Math.round((r.est_km||0)*10)/10,
-      fare: r.est_fare||0, from: r.type==='delivery' ? (r.store_label||'—') : (r.pickup_label||'—'),
+      fare: r.est_fare||0,
+      from: r.type==='delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label||'—'),
       to: r.dest_label||'—', at: r.done_at ? new Date(r.done_at).getTime() : Date.now(), type: r.type,
     })),
   };
@@ -355,4 +409,5 @@ module.exports = {
   getDriverAccess, setDriverSubscription, setDriverStatus,
   upsertCustomer, getAllCustomers,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
+  setRideOffer, clearRideOffer, acceptRideOffer,
 };
