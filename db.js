@@ -239,6 +239,30 @@ async function setDriverStatus(id, status) {
   return res.rows[0];
 }
 
+// إيقاف الاشتراك وفترة التجربة فوراً
+async function revokeDriverSubscription(id) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(id);
+    if (d) { d.sub_ends_at = new Date(Date.now() - 1000); d.trial_ends_at = new Date(Date.now() - 1000); d.status = 'pending'; }
+    return d;
+  }
+  const res = await pool.query(`
+    UPDATE drivers SET sub_ends_at = NOW() - INTERVAL '1 second',
+                       trial_ends_at = NOW() - INTERVAL '1 second',
+                       status='pending'
+    WHERE id=$1 RETURNING *;
+  `, [id]);
+  return res.rows[0];
+}
+
+// حذف سائق (مع رحلاته)
+async function deleteDriver(id) {
+  if (!HAS_DB) { mem.drivers.delete(id); return true; }
+  await pool.query('UPDATE rides SET driver_id=NULL WHERE driver_id=$1', [id]);
+  await pool.query('DELETE FROM drivers WHERE id=$1', [id]);
+  return true;
+}
+
 // ============ الزبائن ============
 async function upsertCustomer(phone, name) {
   if (!HAS_DB) { mem.customers.set(phone, { phone, name, created_at: new Date() }); return; }
@@ -406,7 +430,7 @@ async function getStats() {
 module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
-  getDriverAccess, setDriverSubscription, setDriverStatus,
+  getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
   upsertCustomer, getAllCustomers,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,

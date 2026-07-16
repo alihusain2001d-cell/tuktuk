@@ -30,6 +30,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
 app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 app.use(express.static(path.join(__dirname)));
 
 // ============================================================
@@ -604,6 +605,62 @@ app.post('/api/admin/driver/:id/status', checkAdmin, async (req, res) => {
     const d = await db.setDriverStatus(req.params.id, req.body.status);
     res.json({ ok: true, driver: d });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// إيقاف اشتراك السائق فوراً
+app.post('/api/admin/driver/:id/revoke', checkAdmin, async (req, res) => {
+  try {
+    const d = await db.revokeDriverSubscription(req.params.id);
+    // لو متصل، اقطعه فوراً
+    const online = onlineDrivers.get(req.params.id);
+    if (online) {
+      sendTo(online.socketId, 'driver:blocked', { reason: 'expired', allowed: false });
+      onlineDrivers.delete(req.params.id);
+    }
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// حذف سائق
+app.delete('/api/admin/driver/:id', checkAdmin, async (req, res) => {
+  try {
+    const online = onlineDrivers.get(req.params.id);
+    if (online) {
+      sendTo(online.socketId, 'driver:blocked', { reason: 'deleted', allowed: false });
+      onlineDrivers.delete(req.params.id);
+    }
+    await db.deleteDriver(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
+app.get('/api/admin/live', checkAdmin, async (req, res) => {
+  try {
+    const list = [];
+    for (const [id, d] of onlineDrivers) {
+      const rec = await db.getDriver(id);
+      const access = await db.getDriverAccess(id);
+      // هل عنده رحلة نشطة؟
+      let busy = null;
+      for (const ride of activeRides.values()) {
+        if (ride.driverId === id && ['accepted','arriving','arrived','offered'].includes(ride.status)) {
+          busy = { rideId: ride.id, type: ride.type, status: ride.status, customer: ride.customer.name };
+          break;
+        }
+      }
+      list.push({
+        id, name: d.name, phone: d.phone, car: d.car,
+        lat: d.lat, lng: d.lng,
+        photo: rec ? rec.photo_self : null,
+        access, busy,
+      });
+    }
+    res.json({ drivers: list, activeRides: activeRides.size });
+  } catch (e) {
+    console.error('خطأ بالخريطة اللحظية:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/admin/rides', checkAdmin, async (req, res) => {

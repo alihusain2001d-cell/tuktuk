@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>جايك — لوحة التحكم</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
+  :root {
+    --ink:#0E2A3D; --sky:#2BA9E0; --sky-dark:#1B87B8; --sky-light:#E8F6FD; --sky-pale:#F5FBFE;
+    --bg:#F4F8FB; --line:#DCEBF3; --go:#12A150; --stop:#E5484D; --warn:#F5A623; --muted:#7B96A6;
+  }
+  html,body { height:100%; background:var(--bg); color:var(--ink); }
+  #app { min-height:100vh; display:flex; flex-direction:column; }
+
+  /* ===== شاشة الدخول ===== */
+  .login { position:fixed; inset:0; z-index:3000; background:linear-gradient(160deg,var(--sky),var(--sky-dark)); display:flex; align-items:center; justify-content:center; padding:24px; }
+  .login.hidden { display:none; }
+  .login-card { background:#fff; border-radius:22px; padding:32px 26px; width:100%; max-width:360px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+  .login-card .lg-logo { width:72px; height:72px; background:var(--sky); border-radius:20px; display:flex; align-items:center; justify-content:center; font-size:34px; margin:0 auto 16px; color:#fff; }
+  .login-card h1 { font-size:22px; margin-bottom:5px; }
+  .login-card p { font-size:13px; color:var(--muted); margin-bottom:22px; }
+  .login-card input { width:100%; padding:15px; border:1.5px solid var(--line); border-radius:13px; font-size:17px; text-align:center; background:var(--sky-pale); margin-bottom:14px; letter-spacing:3px; }
+  .login-card input:focus { outline:none; border-color:var(--sky); background:#fff; }
+
+  /* ===== الهيدر ===== */
+  header { background:#fff; padding:14px 18px; display:flex; align-items:center; gap:12px; box-shadow:0 1px 10px rgba(14,42,61,.06); position:sticky; top:0; z-index:900; }
+  .h-logo { width:38px; height:38px; background:var(--sky); border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:19px; color:#fff; font-weight:700; }
+  .h-title { flex:1; }
+  .h-title h1 { font-size:17px; }
+  .h-title p { font-size:11.5px; color:var(--muted); }
+  .refresh-btn { background:var(--sky-light); border:none; border-radius:11px; width:38px; height:38px; font-size:17px; cursor:pointer; color:var(--sky-dark); }
+  .refresh-btn.spin { animation:spin 1s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  /* ===== التبويبات ===== */
+  .tabs { display:flex; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:66px; z-index:850; overflow-x:auto; }
+  .tab { flex:1; min-width:88px; padding:13px 8px; text-align:center; font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; border-bottom:2.5px solid transparent; white-space:nowrap; }
+  .tab.active { color:var(--sky-dark); border-bottom-color:var(--sky); }
+
+  .view { display:none; padding:18px; }
+  .view.active { display:block; }
+
+  /* ===== الإحصائيات ===== */
+  .stat-hero { background:linear-gradient(135deg,var(--sky),var(--sky-dark)); border-radius:20px; padding:24px; color:#fff; margin-bottom:16px; }
+  .stat-hero .sh-label { font-size:13px; opacity:.85; margin-bottom:5px; }
+  .stat-hero .sh-num { font-size:38px; font-weight:700; line-height:1.1; }
+  .stat-hero .sh-sub { font-size:12px; opacity:.8; margin-top:6px; }
+  .stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:16px; }
+  .stat-card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px; }
+  .stat-card .sc-num { font-size:24px; font-weight:700; margin-bottom:3px; }
+  .stat-card .sc-label { font-size:11.5px; color:var(--muted); }
+  .stat-card.live { background:#F2FBF6; border-color:#C8EBD6; }
+  .stat-card.live .sc-num { color:var(--go); }
+  .stat-card.warn { background:#FFF8EC; border-color:#FFE3B0; }
+  .stat-card.warn .sc-num { color:#B26A00; }
+
+  .section-title { font-size:15px; font-weight:700; margin:20px 0 12px; display:flex; align-items:center; gap:8px; }
+  .section-title .count { background:var(--sky-light); color:var(--sky-dark); font-size:11px; padding:2px 9px; border-radius:12px; }
+
+  /* ===== بطاقة السائق ===== */
+  .driver-card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px; }
+  .dc-head { display:flex; align-items:center; gap:12px; margin-bottom:11px; }
+  .dc-photo { width:56px; height:56px; border-radius:14px; background:var(--sky-light); display:flex; align-items:center; justify-content:center; font-size:24px; flex-shrink:0; overflow:hidden; cursor:pointer; border:2px solid var(--line); }
+  .dc-photo img { width:100%; height:100%; object-fit:cover; }
+  .dc-info { flex:1; min-width:0; }
+  .dc-info h3 { font-size:15.5px; margin-bottom:2px; }
+  .dc-info .phone { font-size:12.5px; color:var(--muted); direction:ltr; text-align:right; }
+  .dc-info .car { font-size:11.5px; color:var(--muted); }
+  .dc-status { flex-shrink:0; text-align:left; }
+  .badge { display:inline-block; font-size:10.5px; font-weight:700; padding:4px 9px; border-radius:12px; white-space:nowrap; }
+  .badge.trial { background:#FFF4E5; color:#B26A00; }
+  .badge.sub { background:#F2FBF6; color:var(--go); }
+  .badge.expired { background:#FEECEC; color:var(--stop); }
+  .badge.online { background:#F2FBF6; color:var(--go); }
+  .badge.offline { background:#F0F3F5; color:var(--muted); }
+  .dc-meta { font-size:11px; color:var(--muted); margin-top:3px; }
+
+  .dc-photos { display:flex; gap:7px; margin-bottom:11px; }
+  .dc-thumb { flex:1; aspect-ratio:1.4; border-radius:9px; background:var(--sky-pale); border:1px solid var(--line); overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted); }
+  .dc-thumb img { width:100%; height:100%; object-fit:cover; }
+
+  .dc-actions { display:flex; gap:7px; flex-wrap:wrap; }
+  .btn { padding:9px 13px; border:none; border-radius:10px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit; transition:transform .08s; }
+  .btn:active { transform:scale(.96); }
+  .btn.sky { background:var(--sky); color:#fff; }
+  .btn.go { background:var(--go); color:#fff; }
+  .btn.warn { background:var(--warn); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--ink); border:1.5px solid var(--line); }
+  .btn.danger { background:#fff; color:var(--stop); border:1.5px solid #FBD5D5; }
+  .btn.full { width:100%; padding:14px; font-size:15px; }
+  .btn:disabled { opacity:.5; }
+
+  /* ===== الخريطة ===== */
+  #live-map { height:calc(100vh - 190px); min-height:340px; border-radius:16px; border:1px solid var(--line); background:#DCE9F0; }
+  .map-legend { display:flex; gap:14px; padding:11px 14px; background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; font-size:12px; flex-wrap:wrap; }
+  .map-legend span { display:flex; align-items:center; gap:5px; }
+  .lg-dot { width:9px; height:9px; border-radius:50%; }
+  .lg-dot.free { background:var(--go); }
+  .lg-dot.busy { background:var(--warn); }
+
+  /* ===== الرحلات ===== */
+  .ride-row { background:#fff; border:1px solid var(--line); border-radius:13px; padding:12px 14px; margin-bottom:9px; display:flex; align-items:center; gap:11px; }
+  .rr-ico { width:38px; height:38px; border-radius:10px; background:var(--sky-pale); display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+  .rr-body { flex:1; min-width:0; }
+  .rr-body h4 { font-size:13.5px; margin-bottom:2px; }
+  .rr-body p { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rr-side { text-align:left; flex-shrink:0; }
+  .rr-side .fare { font-size:14px; font-weight:700; color:var(--go); }
+  .rr-side .st { font-size:10px; }
+  .st.done { color:var(--go); } .st.cancelled { color:var(--stop); } .st.searching { color:var(--warn); } .st.accepted { color:var(--sky-dark); }
+
+  .empty { text-align:center; padding:44px 20px; color:var(--muted); }
+  .empty .ico { font-size:44px; margin-bottom:10px; }
+
+  /* ===== نافذة ===== */
+  .modal-bg { position:fixed; inset:0; background:rgba(14,42,61,.6); z-index:2000; display:none; align-items:center; justify-content:center; padding:20px; }
+  .modal-bg.show { display:flex; }
+  .modal { background:#fff; border-radius:20px; padding:24px; width:100%; max-width:380px; max-height:88vh; overflow-y:auto; }
+  .modal h3 { font-size:18px; margin-bottom:6px; }
+  .modal .m-sub { font-size:13px; color:var(--muted); margin-bottom:18px; }
+  .quick-btns { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
+  .quick-btn { background:var(--sky-pale); border:1.5px solid var(--line); border-radius:13px; padding:14px 10px; text-align:center; cursor:pointer; transition:all .12s; }
+  .quick-btn:active { transform:scale(.96); }
+  .quick-btn.sel { background:var(--sky); border-color:var(--sky); color:#fff; }
+  .quick-btn .qb-num { font-size:19px; font-weight:700; margin-bottom:2px; }
+  .quick-btn .qb-lbl { font-size:11px; opacity:.85; }
+  .manual-row { display:flex; gap:9px; align-items:center; margin-bottom:16px; }
+  .manual-row input { flex:1; padding:13px; border:1.5px solid var(--line); border-radius:11px; font-size:16px; text-align:center; background:var(--sky-pale); }
+  .manual-row input:focus { outline:none; border-color:var(--sky); background:#fff; }
+  .manual-row .lbl { font-size:13px; color:var(--muted); font-weight:600; }
+  .modal-actions { display:flex; gap:9px; }
+  .modal-actions .btn { flex:1; padding:13px; font-size:14px; }
+
+  /* عارض الصور */
+  .img-viewer { position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:2500; display:none; align-items:center; justify-content:center; padding:16px; flex-direction:column; }
+  .img-viewer.show { display:flex; }
+  .img-viewer img { max-width:100%; max-height:82vh; border-radius:12px; }
+  .img-viewer .iv-label { color:#fff; font-size:14px; margin-bottom:12px; font-weight:600; }
+  .img-viewer .iv-close { position:absolute; top:16px; left:16px; background:rgba(255,255,255,.15); color:#fff; border:none; border-radius:11px; padding:10px 15px; font-size:14px; cursor:pointer; font-family:inherit; }
+
+  .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--ink); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3500; box-shadow:0 4px 20px rgba(0,0,0,.3); max-width:400px; margin:0 auto; }
+  .loading { text-align:center; padding:40px; color:var(--muted); }
+  .spinner { width:30px; height:30px; border:3px solid var(--line); border-top-color:var(--sky); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 12px; }
+  .filter-row { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px; }
+  .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; }
+  .chip.active { background:var(--sky); border-color:var(--sky); color:#fff; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== الدخول ===== -->
+  <div class="login" id="login">
+    <div class="login-card">
+      <div class="lg-logo">ج</div>
+      <h1>لوحة تحكم جايك</h1>
+      <p>أدخل مفتاح الدخول</p>
+      <input type="password" id="admin-key" placeholder="••••" inputmode="numeric">
+      <button class="btn sky full" onclick="doLogin()">دخول</button>
+    </div>
+  </div>
+
+  <header>
+    <div class="h-logo">ج</div>
+    <div class="h-title">
+      <h1>لوحة التحكم</h1>
+      <p id="last-update">—</p>
+    </div>
+    <button class="refresh-btn" id="refresh-btn" onclick="refreshAll()">⟳</button>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('home')">📊 عام</div>
+    <div class="tab" onclick="switchTab('drivers')">🛺 السواق</div>
+    <div class="tab" onclick="switchTab('map')">🗺️ الخريطة</div>
+    <div class="tab" onclick="switchTab('rides')">📋 الطلبات</div>
+    <div class="tab" onclick="switchTab('customers')">👥 الزبائن</div>
+  </div>
+
+  <!-- ===== عام ===== -->
+  <div class="view active" id="view-home">
+    <div class="stat-hero">
+      <div class="sh-label">إجمالي دخل السواق</div>
+      <div class="sh-num" id="s-revenue">—</div>
+      <div class="sh-sub">من كل الطلبات المنجزة</div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-card live"><div class="sc-num" id="s-online">—</div><div class="sc-label">سائق متصل الآن</div></div>
+      <div class="stat-card"><div class="sc-num" id="s-drivers">—</div><div class="sc-label">إجمالي السواق</div></div>
+      <div class="stat-card warn"><div class="sc-num" id="s-active-rides">—</div><div class="sc-label">طلبات نشطة</div></div>
+      <div class="stat-card"><div class="sc-num" id="s-rides">—</div><div class="sc-label">إجمالي الطلبات</div></div>
+      <div class="stat-card"><div class="sc-num" id="s-done">—</div><div class="sc-label">طلبات منجزة</div></div>
+      <div class="stat-card"><div class="sc-num" id="s-customers">—</div><div class="sc-label">زبائن مسجلين</div></div>
+    </div>
+
+    <div class="section-title">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span></div>
+    <div id="need-activation"></div>
+  </div>
+
+  <!-- ===== السواق ===== -->
+  <div class="view" id="view-drivers">
+    <div class="filter-row">
+      <div class="chip active" onclick="filterDrivers('all', this)">الكل</div>
+      <div class="chip" onclick="filterDrivers('online', this)">متصل</div>
+      <div class="chip" onclick="filterDrivers('trial', this)">تجربة</div>
+      <div class="chip" onclick="filterDrivers('sub', this)">مشترك</div>
+      <div class="chip" onclick="filterDrivers('expired', this)">منتهي</div>
+    </div>
+    <div id="drivers-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
+  </div>
+
+  <!-- ===== الخريطة ===== -->
+  <div class="view" id="view-map">
+    <div class="map-legend">
+      <span><i class="lg-dot free"></i> فاضي</span>
+      <span><i class="lg-dot busy"></i> عنده طلب</span>
+      <span id="map-count" style="margin-right:auto;color:var(--muted)">—</span>
+    </div>
+    <div id="live-map"></div>
+  </div>
+
+  <!-- ===== الطلبات ===== -->
+  <div class="view" id="view-rides">
+    <div class="filter-row">
+      <div class="chip active" onclick="filterRides('all', this)">الكل</div>
+      <div class="chip" onclick="filterRides('ride', this)">🛺 رحلات</div>
+      <div class="chip" onclick="filterRides('delivery', this)">🛒 توصيل</div>
+      <div class="chip" onclick="filterRides('done', this)">منجزة</div>
+    </div>
+    <div id="rides-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
+  </div>
+
+  <!-- ===== الزبائن ===== -->
+  <div class="view" id="view-customers">
+    <div id="customers-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
+  </div>
+
+</div>
+
+<!-- نافذة الاشتراك -->
+<div class="modal-bg" id="sub-modal">
+  <div class="modal">
+    <h3 id="sm-title">تفعيل اشتراك</h3>
+    <div class="m-sub" id="sm-sub">—</div>
+    <div class="quick-btns">
+      <div class="quick-btn" onclick="pickDays(1, this)"><div class="qb-num">١</div><div class="qb-lbl">يوم</div></div>
+      <div class="quick-btn" onclick="pickDays(7, this)"><div class="qb-num">٧</div><div class="qb-lbl">أسبوع</div></div>
+      <div class="quick-btn" onclick="pickDays(30, this)"><div class="qb-num">٣٠</div><div class="qb-lbl">شهر</div></div>
+      <div class="quick-btn" onclick="pickDays(365, this)"><div class="qb-num">٣٦٥</div><div class="qb-lbl">سنة</div></div>
+    </div>
+    <div class="manual-row">
+      <span class="lbl">أو يدوي:</span>
+      <input type="number" id="manual-days" placeholder="عدد الأيام" min="1" oninput="clearQuick()">
+      <span class="lbl">يوم</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn go" onclick="confirmSub()">فعّل ✅</button>
+      <button class="btn ghost" onclick="closeSubModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- عارض الصور -->
+<div class="img-viewer" id="img-viewer" onclick="closeViewer()">
+  <button class="iv-close" onclick="closeViewer()">✕ إغلاق</button>
+  <div class="iv-label" id="iv-label"></div>
+  <img id="iv-img" src="" alt="" onclick="event.stopPropagation()">
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let KEY = localStorage.getItem('jayak_admin_key') || '';
+let allDrivers = [], allRides = [], liveMap = null, liveMarkers = [];
+let driverFilter = 'all', rideFilter = 'all';
+let selDays = null, subTargetId = null;
+let liveTimer = null;
+
+// ============ الدخول ============
+async function doLogin() {
+  const k = document.getElementById('admin-key').value.trim();
+  if (!k) return toast('اكتب المفتاح');
+  try {
+    const res = await fetch('/api/admin/stats', { headers: { 'x-admin-key': k } });
+    if (res.status === 401) return toast('المفتاح غلط');
+    KEY = k;
+    localStorage.setItem('jayak_admin_key', k);
+    document.getElementById('login').classList.add('hidden');
+    refreshAll();
+  } catch(e) { toast('صار خطأ بالاتصال'); }
+}
+
+const api = (p, opt={}) => fetch(p, { ...opt, headers: { 'Content-Type':'application/json', 'x-admin-key': KEY, ...(opt.headers||{}) } });
+
+// ============ التبويبات ============
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['home','drivers','map','rides','customers'];
+    t.classList.toggle('active', names[i]===name);
+  });
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+
+  if (name === 'map') { initLiveMap(); startLiveUpdates(); }
+  else stopLiveUpdates();
+
+  if (name === 'rides') loadRides();
+  if (name === 'customers') loadCustomers();
+}
+
+// ============ تحديث الكل ============
+async function refreshAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spin');
+  await Promise.all([loadStats(), loadDrivers()]);
+  document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar', {hour:'2-digit',minute:'2-digit'});
+  btn.classList.remove('spin');
+}
+
+async function loadStats() {
+  try {
+    const s = await api('/api/admin/stats').then(r=>r.json());
+    document.getElementById('s-revenue').textContent = (s.totalRevenue||0).toLocaleString() + ' د.ع';
+    document.getElementById('s-online').textContent = s.driversOnline || 0;
+    document.getElementById('s-drivers').textContent = s.driversTotal || 0;
+    document.getElementById('s-active-rides').textContent = s.activeRides || 0;
+    document.getElementById('s-rides').textContent = s.totalRides || 0;
+    document.getElementById('s-done').textContent = s.doneRides || 0;
+    document.getElementById('s-customers').textContent = s.customersTotal || 0;
+  } catch(e) { toast('ما كدرنا نجيب الإحصائيات'); }
+}
+
+// ============ السواق ============
+async function loadDrivers() {
+  try {
+    allDrivers = await api('/api/admin/drivers').then(r=>r.json());
+    renderDrivers();
+    renderNeedActivation();
+  } catch(e) { document.getElementById('drivers-list').innerHTML = '<div class="empty">صار خطأ بالتحميل</div>'; }
+}
+
+function accessBadge(a) {
+  if (!a) return '<span class="badge expired">؟</span>';
+  if (a.reason === 'trial') return `<span class="badge trial">🎁 تجربة ${a.hoursLeft}س</span>`;
+  if (a.reason === 'subscribed') return `<span class="badge sub">✅ ${a.daysLeft} يوم</span>`;
+  if (a.reason === 'trial_ended') return '<span class="badge expired">⏰ انتهت التجربة</span>';
+  return '<span class="badge expired">🔒 منتهي</span>';
+}
+
+function driverCard(d) {
+  const a = d.access;
+  const photo = d.photo_self
+    ? `<img src="${d.photo_self}" onclick="viewImg('${d.id}','self')">`
+    : (d.name||'؟').charAt(0);
+  const thumb = (src, key, label) => src
+    ? `<div class="dc-thumb" onclick="viewImg('${d.id}','${key}')"><img src="${src}"></div>`
+    : `<div class="dc-thumb">${label}</div>`;
+
+  return `<div class="driver-card" data-id="${d.id}">
+    <div class="dc-head">
+      <div class="dc-photo">${photo}</div>
+      <div class="dc-info">
+        <h3>${d.name}</h3>
+        <div class="phone">${d.phone}</div>
+        <div class="car">${d.car || '—'}</div>
+      </div>
+      <div class="dc-status">
+        ${accessBadge(a)}
+        <div class="dc-meta">${d.online ? '<span class="badge online">🟢 متصل</span>' : '<span class="badge offline">غير متصل</span>'}</div>
+      </div>
+    </div>
+    <div class="dc-photos">
+      ${thumb(d.photo_car,'car','تكتك')}
+      ${thumb(d.photo_id_front,'idf','بطاقة أمام')}
+      ${thumb(d.photo_id_back,'idb','بطاقة خلف')}
+    </div>
+    <div class="dc-actions">
+      <button class="btn go" onclick="openSubModal('${d.id}')">💳 تفعيل اشتراك</button>
+      ${a && a.allowed ? `<button class="btn danger" onclick="revokeDriver('${d.id}')">⛔ إيقاف</button>` : ''}
+      <button class="btn ghost" onclick="callDriver('${d.phone}')">📞 اتصل</button>
+      <button class="btn danger" onclick="deleteDriver('${d.id}','${d.name}')">🗑️</button>
+    </div>
+  </div>`;
+}
+
+function renderDrivers() {
+  const list = document.getElementById('drivers-list');
+  let arr = allDrivers;
+  if (driverFilter === 'online') arr = arr.filter(d=>d.online);
+  else if (driverFilter === 'trial') arr = arr.filter(d=>d.access?.reason==='trial');
+  else if (driverFilter === 'sub') arr = arr.filter(d=>d.access?.reason==='subscribed');
+  else if (driverFilter === 'expired') arr = arr.filter(d=>!d.access?.allowed);
+
+  if (!arr.length) { list.innerHTML = '<div class="empty"><div class="ico">🛺</div><div>ماكو سواق بهذا الفلتر</div></div>'; return; }
+  list.innerHTML = arr.map(driverCard).join('');
+}
+
+function filterDrivers(f, el) {
+  driverFilter = f;
+  document.querySelectorAll('#view-drivers .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderDrivers();
+}
+
+function renderNeedActivation() {
+  const need = allDrivers.filter(d => !d.access?.allowed);
+  document.getElementById('need-count').textContent = need.length;
+  const box = document.getElementById('need-activation');
+  if (!need.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:13px">كل السواق مفعّلين</div></div>'; return; }
+  box.innerHTML = need.map(driverCard).join('');
+}
+
+// ============ نافذة الاشتراك ============
+function openSubModal(id) {
+  subTargetId = id; selDays = null;
+  const d = allDrivers.find(x=>x.id===id);
+  document.getElementById('sm-title').textContent = 'تفعيل اشتراك';
+  document.getElementById('sm-sub').textContent = d ? `${d.name} — ${d.phone}` : '';
+  document.getElementById('manual-days').value = '';
+  document.querySelectorAll('.quick-btn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('sub-modal').classList.add('show');
+}
+function closeSubModal(){ document.getElementById('sub-modal').classList.remove('show'); }
+function pickDays(d, el) {
+  selDays = d;
+  document.getElementById('manual-days').value = '';
+  document.querySelectorAll('.quick-btn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+}
+function clearQuick(){ selDays = null; document.querySelectorAll('.quick-btn').forEach(b=>b.classList.remove('sel')); }
+
+async function confirmSub() {
+  const manual = parseInt(document.getElementById('manual-days').value, 10);
+  const days = manual || selDays;
+  if (!days || days < 1) return toast('اختر مدة أو اكتب عدد أيام');
+  try {
+    const res = await api(`/api/admin/driver/${subTargetId}/subscribe`, { method:'POST', body: JSON.stringify({ days }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    closeSubModal();
+    toast(`تفعّل الاشتراك ${days} يوم ✅`);
+    await refreshAll();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+async function revokeDriver(id) {
+  const d = allDrivers.find(x=>x.id===id);
+  if (!confirm(`توقف اشتراك ${d?.name||'السائق'}؟ راح ينقطع فوراً.`)) return;
+  try {
+    const res = await api(`/api/admin/driver/${id}/revoke`, { method:'POST' });
+    if (!res.ok) return toast('صار خطأ');
+    toast('توقف الاشتراك');
+    await refreshAll();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+async function deleteDriver(id, name) {
+  if (!confirm(`تحذف ${name} نهائياً؟ ما تكدر ترجعه.`)) return;
+  try {
+    const res = await api(`/api/admin/driver/${id}`, { method:'DELETE' });
+    if (!res.ok) return toast('صار خطأ');
+    toast('انحذف السائق');
+    await refreshAll();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function callDriver(phone){ if(phone) location.href = 'tel:'+phone; }
+
+// ============ عارض الصور ============
+const IMG_LABELS = { self:'الصورة الشخصية', car:'صورة التكتك', idf:'البطاقة — الوجه الأمامي', idb:'البطاقة — الوجه الخلفي' };
+function viewImg(id, key) {
+  event.stopPropagation();
+  const d = allDrivers.find(x=>x.id===id);
+  if (!d) return;
+  const src = { self:d.photo_self, car:d.photo_car, idf:d.photo_id_front, idb:d.photo_id_back }[key];
+  if (!src) return toast('ماكو صورة');
+  document.getElementById('iv-img').src = src;
+  document.getElementById('iv-label').textContent = `${d.name} — ${IMG_LABELS[key]}`;
+  document.getElementById('img-viewer').classList.add('show');
+}
+function closeViewer(){ document.getElementById('img-viewer').classList.remove('show'); }
+
+// ============ الخريطة اللحظية ============
+function initLiveMap() {
+  if (liveMap) { setTimeout(()=>liveMap.invalidateSize(), 100); return; }
+  liveMap = L.map('live-map', { attributionControl:false }).setView([32.7789, 44.2892], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(liveMap);
+  setTimeout(()=>liveMap.invalidateSize(), 200);
+  loadLive();
+}
+
+function startLiveUpdates(){ stopLiveUpdates(); loadLive(); liveTimer = setInterval(loadLive, 5000); }
+function stopLiveUpdates(){ if(liveTimer) clearInterval(liveTimer); liveTimer=null; }
+
+async function loadLive() {
+  if (!liveMap) return;
+  try {
+    const data = await api('/api/admin/live').then(r=>r.json());
+    liveMarkers.forEach(m => liveMap.removeLayer(m));
+    liveMarkers = [];
+
+    document.getElementById('map-count').textContent = `${data.drivers.length} سائق متصل · ${data.activeRides} طلب نشط`;
+
+    data.drivers.forEach(d => {
+      if (!d.lat || !d.lng) return;
+      const busy = !!d.busy;
+      const color = busy ? '#F5A623' : '#12A150';
+      const icon = L.divIcon({
+        className:'',
+        html:`<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center">
+                <div style="background:${color};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;margin-bottom:2px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${d.name}</div>
+                <div style="font-size:26px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))">🛺</div>
+              </div>`,
+        iconSize:[0,0],
+      });
+      const m = L.marker([d.lat, d.lng], { icon }).addTo(liveMap);
+      m.bindPopup(`<div style="direction:rtl;text-align:right;font-family:Segoe UI,Tahoma">
+        <b style="font-size:14px">${d.name}</b><br>
+        <span style="color:#666;font-size:12px">${d.phone}</span><br>
+        <span style="color:#666;font-size:12px">${d.car||'—'}</span><br>
+        <span style="font-size:12px;color:${color};font-weight:700">${busy ? '🔶 عنده طلب: '+d.busy.customer : '🟢 فاضي'}</span>
+      </div>`);
+      liveMarkers.push(m);
+    });
+
+    if (liveMarkers.length && !liveMap._fitted) {
+      const g = L.featureGroup(liveMarkers);
+      liveMap.fitBounds(g.getBounds(), { padding:[50,50], maxZoom:15 });
+      liveMap._fitted = true;
+    }
+  } catch(e) { /* هادئ */ }
+}
+
+// ============ الطلبات ============
+async function loadRides() {
+  try {
+    allRides = await api('/api/admin/rides').then(r=>r.json());
+    renderRides();
+  } catch(e) { document.getElementById('rides-list').innerHTML = '<div class="empty">صار خطأ</div>'; }
+}
+
+const ST_LABELS = { done:'منجز', cancelled:'ملغي', searching:'يدوّر', accepted:'جاري', offered:'عرض معلّق', arrived:'وصل' };
+
+function renderRides() {
+  const list = document.getElementById('rides-list');
+  let arr = allRides;
+  if (rideFilter === 'ride') arr = arr.filter(r=>r.type==='ride');
+  else if (rideFilter === 'delivery') arr = arr.filter(r=>r.type==='delivery');
+  else if (rideFilter === 'done') arr = arr.filter(r=>r.status==='done');
+
+  if (!arr.length) { list.innerHTML = '<div class="empty"><div class="ico">📋</div><div>ماكو طلبات</div></div>'; return; }
+
+  list.innerHTML = arr.map(r => {
+    const isDel = r.type === 'delivery';
+    const from = isDel ? (r.store_name || r.store_label || '—') : (r.pickup_label || '—');
+    const to = r.dest_label || '—';
+    const t = r.created_at ? new Date(r.created_at).toLocaleString('ar', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div class="ride-row">
+      <div class="rr-ico">${isDel?'🛒':'🛺'}</div>
+      <div class="rr-body">
+        <h4>${r.customer_name || 'زبون'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
+        <p>${from} ← ${to}</p>
+      </div>
+      <div class="rr-side">
+        <div class="fare">${r.est_fare ? r.est_fare.toLocaleString() : '—'}</div>
+        <div class="st ${r.status}">${ST_LABELS[r.status]||r.status}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterRides(f, el) {
+  rideFilter = f;
+  document.querySelectorAll('#view-rides .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderRides();
+}
+
+// ============ الزبائن ============
+async function loadCustomers() {
+  try {
+    const cs = await api('/api/admin/customers').then(r=>r.json());
+    const list = document.getElementById('customers-list');
+    if (!cs.length) { list.innerHTML = '<div class="empty"><div class="ico">👥</div><div>ماكو زبائن</div></div>'; return; }
+    list.innerHTML = `<div class="section-title">الزبائن <span class="count">${cs.length}</span></div>` + cs.map(c => `
+      <div class="ride-row">
+        <div class="rr-ico">👤</div>
+        <div class="rr-body">
+          <h4>${c.name}</h4>
+          <p style="direction:ltr;text-align:right">${c.phone}</p>
+        </div>
+        <div class="rr-side">
+          <button class="btn ghost" onclick="callDriver('${c.phone}')">📞</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { document.getElementById('customers-list').innerHTML = '<div class="empty">صار خطأ</div>'; }
+}
+
+// ============ أدوات ============
+let toastTimer;
+function toast(msg){ const o=document.querySelector('.toast'); if(o)o.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.remove(),3000); }
+
+// ============ التشغيل ============
+if (KEY) {
+  fetch('/api/admin/stats', { headers: { 'x-admin-key': KEY } }).then(r => {
+    if (r.ok) { document.getElementById('login').classList.add('hidden'); refreshAll(); }
+    else localStorage.removeItem('jayak_admin_key');
+  }).catch(()=>{});
+}
+document.getElementById('admin-key').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>
