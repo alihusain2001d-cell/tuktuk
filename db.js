@@ -153,6 +153,24 @@ async function getAllDrivers() {
   return res.rows;
 }
 
+// يدوّر على السائق برقم موبايله (لتسجيل الدخول)
+async function getDriverByPhone(phone) {
+  const clean = String(phone || '').replace(/\D/g, '');
+  if (!clean) return null;
+  if (!HAS_DB) {
+    for (const d of mem.drivers.values()) {
+      if (String(d.phone || '').replace(/\D/g, '') === clean) return d;
+    }
+    return null;
+  }
+  // نقارن بس الأرقام حتى ما تأثر المسافات أو الرموز
+  const res = await pool.query(
+    `SELECT * FROM drivers WHERE regexp_replace(phone, '\\D', '', 'g') = $1 LIMIT 1`,
+    [clean]
+  );
+  return res.rows[0] || null;
+}
+
 async function updateDriverLocation(id, lat, lng) {
   if (!HAS_DB) {
     const d = mem.drivers.get(id);
@@ -333,7 +351,7 @@ async function getStats() {
 
 module.exports = {
   HAS_DB, init,
-  upsertDriver, getDriver, getAllDrivers, updateDriverLocation,
+  upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus,
   upsertCustomer, getAllCustomers,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,

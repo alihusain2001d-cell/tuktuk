@@ -222,11 +222,64 @@ setInterval(() => {
 //  API — السائق
 // ============================================================
 
+// هل الرقم مسجّل من قبل؟ (قبل إرسال الكود)
+app.post('/api/driver/check-phone', async (req, res) => {
+  try {
+    const d = await db.getDriverByPhone(req.body.phone);
+    res.json({ exists: !!d, name: d ? d.name : null });
+  } catch (e) {
+    console.error('خطأ بفحص الرقم:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// تسجيل الدخول برقم + كود (الكود يتأكد بنقطة /api/otp/verify أول)
+app.post('/api/driver/login', async (req, res) => {
+  try {
+    const { phone, code } = req.body;
+    const clean = normalizePhone(phone);
+
+    // تأكد من الكود
+    const rec = otpCodes.get(clean);
+    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
+    if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return res.status(400).json({ error: 'الكود انتهت صلاحيته' }); }
+    if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpCodes.delete(clean); return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' }); }
+    if (rec.code !== String(code || '').trim()) {
+      rec.attempts++;
+      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
+    }
+    otpCodes.delete(clean);
+
+    // دوّر على السائق
+    const d = await db.getDriverByPhone(clean);
+    if (!d) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم', notFound: true });
+
+    const access = await db.getDriverAccess(d.id);
+    res.json({
+      ok: true,
+      driver: { id: d.id, name: d.name, phone: d.phone, car: d.car },
+      access,
+    });
+  } catch (e) {
+    console.error('خطأ بتسجيل الدخول:', e.message);
+    res.status(500).json({ error: 'صار خطأ بتسجيل الدخول' });
+  }
+});
+
 // تسجيل السائق (مع الصور)
 app.post('/api/driver/register', async (req, res) => {
   try {
     const { driverId, name, phone, car, photoCar, photoIdFront, photoIdBack, lat, lng } = req.body;
     if (!driverId || !name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
+
+    // امنع تسجيل رقم موجود بحساب ثاني
+    const existing = await db.getDriverByPhone(phone);
+    if (existing && existing.id !== driverId) {
+      return res.status(409).json({
+        error: 'هذا الرقم مسجّل من قبل. سجّل دخول بدل ما تسوي حساب جديد.',
+        alreadyExists: true,
+      });
+    }
 
     const d = await db.upsertDriver({
       id: driverId, name, phone, car,

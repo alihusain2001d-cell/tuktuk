@@ -24,6 +24,20 @@
   .auth-body { padding:24px 20px 32px; flex:1; }
 
   .step-bar { display:flex; align-items:center; gap:6px; margin-bottom:22px; }
+
+  /* بطاقات شاشة البداية */
+  .welcome-cards { display:flex; flex-direction:column; gap:14px; margin-top:8px; }
+  .wc-card { background:#fff; border:1.5px solid var(--line); border-radius:17px; padding:20px; display:flex; align-items:center; gap:15px; cursor:pointer; transition:transform .1s; box-shadow:0 3px 12px rgba(14,42,61,.05); }
+  .wc-card:active { transform:scale(.98); }
+  .wc-card .wc-icon { width:54px; height:54px; border-radius:14px; background:var(--sky-light); display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0; }
+  .wc-card .wc-text { flex:1; }
+  .wc-card .wc-text h3 { font-size:17px; margin-bottom:3px; }
+  .wc-card .wc-text p { font-size:12.5px; color:var(--muted); line-height:1.5; }
+  .wc-card .wc-arrow { color:var(--muted); font-size:22px; }
+  .wc-card.new { background:var(--sky); border-color:var(--sky); color:#fff; box-shadow:0 3px 0 var(--sky-dark); }
+  .wc-card.new .wc-icon { background:rgba(255,255,255,.2); }
+  .wc-card.new .wc-text p { color:rgba(255,255,255,.88); }
+  .wc-card.new .wc-arrow { color:rgba(255,255,255,.7); }
   .step-dot { flex:1; height:4px; background:var(--line); border-radius:3px; transition:background .3s; }
   .step-dot.done { background:var(--sky); }
   .step-label { text-align:center; font-size:12px; color:var(--muted); margin-bottom:18px; }
@@ -185,12 +199,83 @@
 <body>
 <div id="app">
 
-  <!-- ========== الخطوة ١: الاسم والرقم ========== -->
-  <div class="auth-screen active" id="step-info">
+  <!-- ========== شاشة البداية: دخول أو حساب جديد ========== -->
+  <div class="auth-screen active" id="step-welcome">
     <div class="auth-hero">
       <div class="logo-slot">مكان<br>اللوگو</div>
       <h1>جايك</h1>
       <p>أنا سائق</p>
+    </div>
+    <div class="auth-body">
+      <div class="welcome-cards">
+        <div class="wc-card" onclick="gotoStep('login')">
+          <div class="wc-icon">🔑</div>
+          <div class="wc-text">
+            <h3>عندي حساب</h3>
+            <p>سجّل دخول برقم موبايلك</p>
+          </div>
+          <div class="wc-arrow">‹</div>
+        </div>
+        <div class="wc-card new" onclick="gotoStep('info')">
+          <div class="wc-icon">✨</div>
+          <div class="wc-text">
+            <h3>حساب جديد</h3>
+            <p>سجّل وابدأ الشغل — أول يوم مجاني!</p>
+          </div>
+          <div class="wc-arrow">‹</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== تسجيل الدخول ========== -->
+  <div class="auth-screen" id="step-login">
+    <div class="auth-hero">
+      <div class="logo-slot">مكان<br>اللوگو</div>
+      <h1>تسجيل الدخول</h1>
+      <p>أدخل رقم موبايلك</p>
+    </div>
+    <div class="auth-body">
+      <div class="field">
+        <label>رقم الموبايل</label>
+        <input id="l-phone" type="tel" inputmode="numeric" placeholder="07XX XXX XXXX" style="direction:ltr;text-align:right">
+        <div class="hint">راح نرسلك كود تأكيد على هذا الرقم</div>
+      </div>
+      <button class="btn" id="btn-login-otp" onclick="loginSendOtp()">إرسال الكود</button>
+      <button class="btn ghost" onclick="gotoStep('welcome')" style="margin-top:14px">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ========== كود تسجيل الدخول ========== -->
+  <div class="auth-screen" id="step-login-otp">
+    <div class="auth-hero">
+      <div class="logo-slot">مكان<br>اللوگو</div>
+      <h1>تأكيد الدخول</h1>
+      <p>أدخل الكود اللي وصلك</p>
+    </div>
+    <div class="auth-body">
+      <div class="otp-info">أرسلنا كود مكوّن من ٦ أرقام إلى<br><b id="login-otp-phone">—</b></div>
+      <div class="otp-boxes" id="login-otp-boxes">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="0">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="1">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="2">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="3">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="4">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="5">
+      </div>
+      <div id="login-dev-code" class="dev-code hidden"></div>
+      <button class="btn" id="btn-do-login" onclick="doLogin()" style="margin-top:16px">دخول</button>
+      <div class="resend">ما وصلك الكود؟ <a id="login-resend" onclick="loginResend()">إعادة الإرسال</a></div>
+      <button class="btn ghost" onclick="gotoStep('login')" style="margin-top:18px">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ========== الخطوة ١: الاسم والرقم ========== -->
+  <div class="auth-screen" id="step-info">
+    <div class="auth-hero">
+      <div class="logo-slot">مكان<br>اللوگو</div>
+      <h1>حساب جديد</h1>
+      <p>سجّل وابدأ الشغل</p>
     </div>
     <div class="auth-body">
       <div class="step-bar"><div class="step-dot done"></div><div class="step-dot"></div><div class="step-dot"></div></div>
@@ -210,6 +295,7 @@
         <input id="f-car" placeholder="مثال: تكتك أصفر - بجاج">
       </div>
       <button class="btn" id="btn-send-otp" onclick="sendOtp()">إرسال كود التأكيد</button>
+      <button class="btn ghost" onclick="gotoStep('welcome')" style="margin-top:14px">← رجوع</button>
     </div>
   </div>
 
@@ -375,8 +461,126 @@ const pendingRides = new Map();
 function genId(){ const id='drv_'+Math.random().toString(36).slice(2,10); localStorage.setItem('jayak_driver_id',id); return id; }
 
 // ============ خطوات التسجيل ============
+const AUTH_STEPS = ['welcome','login','login-otp','info','otp','photos'];
 function gotoStep(name) {
-  ['info','otp','photos'].forEach(s => document.getElementById('step-'+s).classList.toggle('active', s===name));
+  AUTH_STEPS.forEach(s => {
+    const el = document.getElementById('step-'+s);
+    if (el) el.classList.toggle('active', s===name);
+  });
+}
+
+// ============ تسجيل الدخول ============
+let loginPhone = '', loginResendTimer = null;
+
+async function loginSendOtp() {
+  const phone = document.getElementById('l-phone').value.trim();
+  if (phone.replace(/\D/g,'').length < 10) return toast('اكتب رقم موبايل صحيح');
+
+  const btn = document.getElementById('btn-login-otp');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> نتأكد...';
+  try {
+    // تأكد إنه الرقم مسجّل أول
+    const chk = await fetch('/api/driver/check-phone', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone })
+    }).then(r=>r.json());
+
+    if (!chk.exists) {
+      toast('ماكو حساب بهذا الرقم — سوّي حساب جديد');
+      setTimeout(() => gotoStep('info'), 1200);
+      return;
+    }
+
+    // ابعث الكود
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone }) });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+
+    loginPhone = phone;
+    document.getElementById('login-otp-phone').textContent = phone;
+    if (out.devCode) {
+      const box = document.getElementById('login-dev-code');
+      box.textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      box.classList.remove('hidden');
+    }
+    clearLoginBoxes();
+    gotoStep('login-otp');
+    startLoginResendTimer();
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='إرسال الكود'; }
+}
+
+async function loginResend() {
+  const link = document.getElementById('login-resend');
+  if (link.classList.contains('disabled')) return;
+  try {
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: loginPhone }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    if (out.devCode) {
+      const box = document.getElementById('login-dev-code');
+      box.textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      box.classList.remove('hidden');
+    }
+    toast('أرسلنا كود جديد');
+    clearLoginBoxes(); startLoginResendTimer();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function startLoginResendTimer() {
+  const link = document.getElementById('login-resend');
+  let sec = 60;
+  link.classList.add('disabled');
+  link.textContent = `إعادة الإرسال (${sec})`;
+  clearInterval(loginResendTimer);
+  loginResendTimer = setInterval(() => {
+    sec--;
+    if (sec <= 0) { clearInterval(loginResendTimer); link.classList.remove('disabled'); link.textContent='إعادة الإرسال'; }
+    else link.textContent = `إعادة الإرسال (${sec})`;
+  }, 1000);
+}
+
+const loginInputs = document.querySelectorAll('#login-otp-boxes input');
+loginInputs.forEach((inp, i) => {
+  inp.addEventListener('input', () => {
+    inp.value = inp.value.replace(/\D/g,'');
+    if (inp.value && i < loginInputs.length-1) loginInputs[i+1].focus();
+    if ([...loginInputs].every(x=>x.value)) doLogin();
+  });
+  inp.addEventListener('keydown', (e) => { if (e.key==='Backspace' && !inp.value && i>0) loginInputs[i-1].focus(); });
+  inp.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6).split('');
+    digits.forEach((d,j) => { if (loginInputs[j]) loginInputs[j].value = d; });
+    if (digits.length === 6) doLogin();
+  });
+});
+function clearLoginBoxes(){ loginInputs.forEach(i=>i.value=''); setTimeout(()=>loginInputs[0]?.focus(), 200); }
+
+async function doLogin() {
+  const code = [...loginInputs].map(i=>i.value).join('');
+  if (code.length < 6) return toast('اكتب الكود كامل');
+  const btn = document.getElementById('btn-do-login');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ندخّلك...';
+  try {
+    const res = await fetch('/api/driver/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: loginPhone, code }) });
+    const out = await res.json();
+    if (!res.ok) {
+      toast(out.error || 'صار خطأ');
+      if (out.notFound) setTimeout(() => gotoStep('info'), 1200);
+      else clearLoginBoxes();
+      return;
+    }
+    // احفظ بياناته محلياً
+    driverId = out.driver.id;
+    localStorage.setItem('jayak_driver_id', driverId);
+    driver = { name: out.driver.name, phone: out.driver.phone, car: out.driver.car };
+    localStorage.setItem('jayak_driver', JSON.stringify(driver));
+    toast(`أهلاً ${driver.name}! 🎉`);
+    document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+    if (out.access.allowed) showMainApp(out.access);
+    else showExpired(out.access);
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='دخول'; }
 }
 
 async function sendOtp() {
@@ -524,7 +728,11 @@ async function finishRegister() {
       }),
     });
     const out = await res.json();
-    if (!res.ok) { toast(out.error || 'صار خطأ بالتسجيل'); return; }
+    if (!res.ok) {
+      toast(out.error || 'صار خطأ بالتسجيل');
+      if (out.alreadyExists) setTimeout(() => gotoStep('login'), 1500);
+      return;
+    }
     driver = { name: out.driver.name, phone: document.getElementById('f-phone').value.trim(), car: document.getElementById('f-car').value.trim() };
     localStorage.setItem('jayak_driver', JSON.stringify(driver));
     toast('أهلاً بيك بجايك! 🎉');
@@ -596,6 +804,7 @@ function showMainApp(acc) {
 function logout() {
   if (!confirm('تريد تسجّل خروج؟')) return;
   localStorage.removeItem('jayak_driver');
+  localStorage.removeItem('jayak_driver_id');
   location.reload();
 }
 
@@ -864,7 +1073,7 @@ if (driver) {
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
   checkAccess();
 } else {
-  gotoStep('info');
+  gotoStep('welcome');
 }
 </script>
 </body>
