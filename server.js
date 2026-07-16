@@ -652,6 +652,7 @@ app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
       ...d,
       online: onlineDrivers.has(d.id),
       access: await db.getDriverAccess(d.id),
+      paidTotal: await db.getDriverPaidTotal(d.id),
     })));
     res.json(withAccess);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -660,9 +661,26 @@ app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
 app.post('/api/admin/driver/:id/subscribe', checkAdmin, async (req, res) => {
   try {
     const days = parseInt(req.body.days, 10);
+    const amount = parseInt(req.body.amount, 10) || 0;
+    const note = req.body.note || '';
     if (!days || days < 1) return res.status(400).json({ error: 'عدد أيام غير صحيح' });
-    const d = await db.setDriverSubscription(req.params.id, days);
-    res.json({ ok: true, driver: d });
+    if (amount < 0) return res.status(400).json({ error: 'المبلغ غير صحيح' });
+    const d = await db.setDriverSubscription(req.params.id, days, amount, note);
+    res.json({ ok: true, driver: d, amount });
+  } catch (e) {
+    console.error('خطأ بالتفعيل:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// سجل الاشتراكات المدفوعة + ربح المالك
+app.get('/api/admin/subscriptions', checkAdmin, async (req, res) => {
+  try {
+    const [revenue, list] = await Promise.all([
+      db.getSubscriptionRevenue(),
+      db.getSubscriptions(100),
+    ]);
+    res.json({ revenue, list });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -741,8 +759,13 @@ app.get('/api/admin/customers', checkAdmin, async (req, res) => {
 
 app.get('/api/admin/stats', checkAdmin, async (req, res) => {
   try {
-    const s = await db.getStats();
-    res.json({ ...s, driversOnline: onlineDrivers.size, activeRides: activeRides.size });
+    const [s, subRev] = await Promise.all([db.getStats(), db.getSubscriptionRevenue()]);
+    res.json({
+      ...s,
+      driversOnline: onlineDrivers.size,
+      activeRides: activeRides.size,
+      subRevenue: subRev,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

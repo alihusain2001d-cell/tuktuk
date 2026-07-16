@@ -117,6 +117,21 @@ async function init() {
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_note TEXT;`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_driver ON rides(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_status ON rides(status);`);
+
+    // سجل الاشتراكات المدفوعة (ربح المالك)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id          SERIAL PRIMARY KEY,
+        driver_id   TEXT NOT NULL,
+        driver_name TEXT,
+        days        INTEGER NOT NULL,
+        amount      INTEGER NOT NULL DEFAULT 0,
+        note        TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_driver ON subscriptions(driver_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_date ON subscriptions(created_at);`);
     console.log('✅ قاعدة البيانات جاهزة (PostgreSQL)');
     return true;
   } catch (e) {
@@ -218,18 +233,59 @@ async function getDriverAccess(id) {
   return { allowed: false, reason: subEnds ? 'expired' : 'trial_ended' };
 }
 
-// المالك يفعّل اشتراك (من لوحة التحكم)
-async function setDriverSubscription(id, days) {
+// المالك يفعّل اشتراك ويسجّل المبلغ المقبوض
+async function setDriverSubscription(id, days, amount = 0, note = '') {
   if (!HAS_DB) {
     const d = mem.drivers.get(id);
     if (d) { d.sub_ends_at = new Date(Date.now() + days*86400000); d.status = 'active'; }
+    if (!mem.subs) mem.subs = [];
+    mem.subs.push({ id: mem.subs.length+1, driver_id:id, driver_name: d?.name, days, amount: amount||0, note, created_at: new Date() });
     return d;
   }
   const res = await pool.query(`
     UPDATE drivers SET sub_ends_at = NOW() + ($2 || ' days')::INTERVAL, status='active'
     WHERE id=$1 RETURNING *;
   `, [id, String(days)]);
+  const d = res.rows[0];
+  // سجّل الدفعة
+  await pool.query(
+    `INSERT INTO subscriptions (driver_id, driver_name, days, amount, note) VALUES ($1,$2,$3,$4,$5)`,
+    [id, d ? d.name : null, days, parseInt(amount,10) || 0, note || null]
+  );
+  return d;
+}
+
+// إجمالي ربح المالك من الاشتراكات
+async function getSubscriptionRevenue() {
+  if (!HAS_DB) {
+    const subs = mem.subs || [];
+    const today = new Date(); today.setHours(0,0,0,0);
+    const month = new Date(); month.setDate(1); month.setHours(0,0,0,0);
+    return {
+      total: subs.reduce((s,x)=>s+(x.amount||0), 0),
+      today: subs.filter(x=>x.created_at>=today).reduce((s,x)=>s+(x.amount||0), 0),
+      month: subs.filter(x=>x.created_at>=month).reduce((s,x)=>s+(x.amount||0), 0),
+      count: subs.length,
+    };
+  }
+  const res = await pool.query(`
+    SELECT
+      COALESCE(SUM(amount),0)::int AS total,
+      COALESCE(SUM(amount) FILTER (WHERE created_at >= CURRENT_DATE),0)::int AS today,
+      COALESCE(SUM(amount) FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE)),0)::int AS month,
+      COUNT(*)::int AS count
+    FROM subscriptions;
+  `);
   return res.rows[0];
+}
+
+// سجل الاشتراكات المدفوعة
+async function getSubscriptions(limit = 100) {
+  if (!HAS_DB) return (mem.subs || []).slice().reverse().slice(0, limit);
+  const res = await pool.query(
+    `SELECT * FROM subscriptions ORDER BY created_at DESC LIMIT $1`, [limit]
+  );
+  return res.rows;
 }
 
 async function setDriverStatus(id, status) {
@@ -466,6 +522,17 @@ async function getStats() {
   };
 }
 
+// إجمالي اللي دفعه سائق معيّن
+async function getDriverPaidTotal(driverId) {
+  if (!HAS_DB) {
+    return (mem.subs || []).filter(x=>x.driver_id===driverId).reduce((s,x)=>s+(x.amount||0), 0);
+  }
+  const res = await pool.query(
+    `SELECT COALESCE(SUM(amount),0)::int AS total FROM subscriptions WHERE driver_id=$1`, [driverId]
+  );
+  return res.rows[0].total;
+}
+
 module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
@@ -473,4 +540,5 @@ module.exports = {
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
+  getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal,
 };
