@@ -914,14 +914,17 @@ function handleWS(type, data) {
 function onOfferAccepted(data) {
   if (!offeredRide || offeredRide.rideId !== data.rideId) return;
   const r = offeredRide.data;
-  hideWaitingOffer();
+  const price = offeredRide.price;
+  offeredRide = null;
+  stopOfferPolling();
+  document.getElementById('offer-waiting').classList.add('hidden');
+
   activeRide = {
     rideId: data.rideId, type:'delivery', pickup: r.pickup, destination: r.destination,
     store: r.store, storeName: r.storeName, itemDesc: r.itemDesc, customer: data.customer,
   };
-  customerPhone = data.customer.phone || '';
-  offeredRide = null;
-  showActiveRide({ customer: data.customer, estFare: data.price }, r);
+  customerPhone = (data.customer && data.customer.phone) || '';
+  showActiveRide({ customer: data.customer || r.customer, estFare: data.price || price }, r);
   beep();
   toast('الزبون وافق على عرضك! 🎉 اطلع بالطريق');
 }
@@ -930,8 +933,9 @@ function onOfferAccepted(data) {
 function onOfferRejected(data) {
   if (!offeredRide || offeredRide.rideId !== data.rideId) return;
   offeredRide = null;
-  hideWaitingOffer();
-  document.getElementById('waiting-msg').classList.remove('hidden');
+  stopOfferPolling();
+  document.getElementById('offer-waiting').classList.add('hidden');
+  renderRequests();
   toast('الزبون ما وافق على عرضك');
 }
 
@@ -993,6 +997,10 @@ function renderRequests() {
   const list = document.getElementById('requests-list');
   const waiting = document.getElementById('waiting-msg');
   list.innerHTML = '';
+
+  // لو عندنا عرض معلّق، شاشة الانتظار مالته هي اللي تبين — ما نعرض شي ثاني
+  if (offeredRide) { waiting.classList.add('hidden'); return; }
+
   if (!pendingRides.size) { waiting.classList.remove('hidden'); return; }
   waiting.classList.add('hidden');
 
@@ -1074,8 +1082,8 @@ async function sendOffer(id) {
     // خزّن الطلب لحد ما الزبون يرد
     offeredRide = { rideId:id, data: pendingRides.get(id), price };
     pendingRides.delete(id);
-    renderRequests();
-    showWaitingOffer(price);
+    showWaitingOffer(price);   // نعرض شاشة الانتظار أول
+    renderRequests();          // بعدها نحدّث القائمة (تحترم حالة العرض)
   } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
 
@@ -1084,12 +1092,35 @@ function showWaitingOffer(price) {
   const box = document.getElementById('offer-waiting');
   box.classList.remove('hidden');
   document.getElementById('ow-price').textContent = price.toLocaleString() + ' د.ع';
+  startOfferPolling();   // شبكة أمان: نتأكد من الرد حتى لو انقطع الاتصال
 }
 
 function hideWaitingOffer() {
+  stopOfferPolling();
   document.getElementById('offer-waiting').classList.add('hidden');
   renderRequests();
 }
+
+// ============ شبكة أمان: نسأل السيرفر عن حالة العرض كل ٣ ثواني ============
+// (لو انقطعت رسالة WebSocket لأي سبب، هاي تضمن إنه السائق ما يفوته الرد)
+let offerPollTimer = null;
+function startOfferPolling() {
+  stopOfferPolling();
+  offerPollTimer = setInterval(async () => {
+    if (!offeredRide) { stopOfferPolling(); return; }
+    try {
+      const res = await fetch(`/api/ride/${offeredRide.rideId}/status`);
+      if (!res.ok) return;
+      const s = await res.json();
+      if (s.status === 'accepted' && s.driverId === driverId) {
+        onOfferAccepted({ rideId: offeredRide.rideId, price: s.fare, customer: s.customer });
+      } else if (s.status === 'searching' || s.driverId !== driverId) {
+        onOfferRejected({ rideId: offeredRide.rideId });
+      }
+    } catch(e) { /* نتجاهل، نحاول بالدورة الجاية */ }
+  }, 3000);
+}
+function stopOfferPolling(){ if (offerPollTimer) clearInterval(offerPollTimer); offerPollTimer = null; }
 
 function dismissRide(id){ pendingRides.delete(id); renderRequests(); }
 

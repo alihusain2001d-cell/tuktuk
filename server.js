@@ -631,6 +631,19 @@ app.get('/api/stats', async (req, res) => {
   } catch (e) { res.json({ driversOnline: onlineDrivers.size, activeRides: activeRides.size }); }
 });
 
+// حالة الطلب — يستخدمها السائق كشبكة أمان لو انقطع الاتصال
+app.get('/api/ride/:id/status', (req, res) => {
+  const ride = activeRides.get(req.params.id);
+  if (!ride) return res.status(404).json({ error: 'غير موجود' });
+  res.json({
+    rideId: ride.id,
+    status: ride.status,
+    driverId: ride.driverId,
+    fare: ride.estFare || ride.offerPrice || 0,
+    customer: ride.customer,
+  });
+});
+
 app.get('/api/ride/:id', (req, res) => {
   const ride = activeRides.get(req.params.id);
   if (!ride) return res.status(404).json({ error: 'غير موجودة' });
