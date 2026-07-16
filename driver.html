@@ -85,12 +85,11 @@
   .h-title { flex:1; }
   .h-title h1 { font-size:16px; }
   .h-title .status-text { font-size:11.5px; color:var(--muted); }
-  .switch { position:relative; width:54px; height:30px; }
-  .switch input { display:none; }
-  .slider { position:absolute; inset:0; background:#C5D5DE; border-radius:30px; cursor:pointer; transition:.2s; }
-  .slider::before { content:''; position:absolute; width:24px; height:24px; right:3px; top:3px; background:#fff; border-radius:50%; transition:.2s; }
-  .switch input:checked + .slider { background:var(--go); }
-  .switch input:checked + .slider::before { transform:translateX(-24px); }
+  .live-badge { display:flex; align-items:center; gap:6px; background:#F2FBF6; color:var(--go); font-size:12px; font-weight:700; padding:7px 12px; border-radius:20px; flex-shrink:0; }
+  .live-badge.off { background:#FEECEC; color:var(--stop); }
+  .live-dot { width:8px; height:8px; border-radius:50%; background:var(--go); animation:livePulse 1.5s infinite; }
+  .live-badge.off .live-dot { background:var(--stop); animation:none; }
+  @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.85)} }
 
   /* شريط الاشتراك */
   .sub-banner { padding:9px 16px; font-size:12.5px; text-align:center; font-weight:600; }
@@ -300,9 +299,9 @@
     <div class="h-logo">ج</div>
     <div class="h-title">
       <h1 id="drv-name-h">السائق</h1>
-      <div class="status-text" id="status-text">غير متصل</div>
+      <div class="status-text" id="status-text">نتصل...</div>
     </div>
-    <label class="switch"><input type="checkbox" id="online-switch" onchange="toggleOnline()"><span class="slider"></span></label>
+    <div class="live-badge" id="live-badge"><span class="live-dot"></span> شغّال</div>
   </header>
 
   <div class="sub-banner hidden" id="sub-banner"></div>
@@ -316,8 +315,7 @@
     <div id="map"></div>
     <div class="panel" id="panel-waiting">
       <div class="grip"></div>
-      <div id="offline-msg" class="offline-note">شغّل المفتاح فوق حتى تستلم الطلبات</div>
-      <div id="waiting-msg" class="waiting hidden">
+      <div id="waiting-msg" class="waiting">
         <div class="icon">📡</div>
         <h2>جاهز لاستلام الطلبات</h2>
         <p>راح توصلك الطلبات القريبة منك</p>
@@ -554,6 +552,7 @@ async function checkAccess(showToast) {
 }
 
 function showExpired(acc) {
+  stopWorking();
   document.getElementById('main-header').classList.add('hidden');
   document.getElementById('main-tabs').classList.add('hidden');
   document.getElementById('work-view').classList.add('hidden');
@@ -588,7 +587,10 @@ function showMainApp(acc) {
     banner.classList.add('active');
     banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
   }
-  setTimeout(() => { if (!map) initMap(); else map.invalidateSize(); }, 80);
+  setTimeout(() => {
+    if (!map) initMap(); else map.invalidateSize();
+    startWorking(); // السائق دائماً شغّال
+  }, 80);
 }
 
 function logout() {
@@ -656,8 +658,7 @@ function handleWS(type, data) {
     case 'ride:taken': pendingRides.delete(data.rideId); renderRequests(); break;
     case 'ride:cancelled': if (activeRide && activeRide.rideId===data.rideId) { toast('الزبون ألغى'); endActive(); } break;
     case 'driver:blocked': {
-      isOnline = false;
-      document.getElementById('online-switch').checked = false;
+      stopWorking();
       showExpired(data);
       break;
     }
@@ -674,13 +675,27 @@ function getMyPosition() {
   );
 }
 
-function toggleOnline() {
-  isOnline = document.getElementById('online-switch').checked;
-  document.getElementById('status-text').textContent = isOnline ? 'متصل - جاهز' : 'غير متصل';
-  document.getElementById('offline-msg').classList.toggle('hidden', isOnline);
-  document.getElementById('waiting-msg').classList.toggle('hidden', !isOnline);
-  if (isOnline) { getMyPosition(); goOnline(); startLocationUpdates(); }
-  else { goOffline(); stopLocationUpdates(); }
+// السائق دائماً شغّال — يبدأ تلقائياً بمجرد ما يفتح التطبيق
+function startWorking() {
+  isOnline = true;
+  setLive(true, 'متصل - جاهز');
+  getMyPosition();
+  goOnline();
+  startLocationUpdates();
+}
+
+function stopWorking() {
+  isOnline = false;
+  setLive(false, 'غير متصل');
+  goOffline();
+  stopLocationUpdates();
+}
+
+function setLive(on, text) {
+  const badge = document.getElementById('live-badge');
+  badge.classList.toggle('off', !on);
+  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'شغّال' : 'متوقف'}`;
+  document.getElementById('status-text').textContent = text;
 }
 
 function goOnline(){ ws.send(JSON.stringify({ type:'driver:online', data:{ driverId, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } })); }
@@ -709,7 +724,7 @@ function renderRequests() {
   const list = document.getElementById('requests-list');
   const waiting = document.getElementById('waiting-msg');
   list.innerHTML = '';
-  if (!pendingRides.size) { waiting.classList.toggle('hidden', !isOnline); return; }
+  if (!pendingRides.size) { waiting.classList.remove('hidden'); return; }
   waiting.classList.add('hidden');
 
   for (const [id, r] of pendingRides) {
