@@ -81,6 +81,9 @@ async function init() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    // ترقية: معرّف ثابت للزبون
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS id TEXT;`);
+    await pool.query(`UPDATE customers SET id = 'cus_' || md5(phone) WHERE id IS NULL;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rides (
         id             TEXT PRIMARY KEY,
@@ -264,12 +267,48 @@ async function deleteDriver(id) {
 }
 
 // ============ الزبائن ============
+function cleanPhone(p) { return String(p || '').replace(/\D/g, ''); }
+
 async function upsertCustomer(phone, name) {
-  if (!HAS_DB) { mem.customers.set(phone, { phone, name, created_at: new Date() }); return; }
-  await pool.query(`
-    INSERT INTO customers (phone, name) VALUES ($1,$2)
-    ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name;
-  `, [phone, name]);
+  const clean = cleanPhone(phone);
+  if (!clean) return null;
+  if (!HAS_DB) {
+    const ex = mem.customers.get(clean) || {};
+    const rec = { ...ex, id: ex.id || ('cus_' + clean), phone: clean, name, created_at: ex.created_at || new Date() };
+    mem.customers.set(clean, rec);
+    return rec;
+  }
+  const res = await pool.query(`
+    INSERT INTO customers (phone, name, id) VALUES ($1,$2,$3)
+    ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name
+    RETURNING *;
+  `, [clean, name, 'cus_' + clean]);
+  return res.rows[0];
+}
+
+// يدوّر على الزبون برقمه (لتسجيل الدخول)
+async function getCustomerByPhone(phone) {
+  const clean = cleanPhone(phone);
+  if (!clean) return null;
+  if (!HAS_DB) return mem.customers.get(clean) || null;
+  const res = await pool.query(
+    `SELECT * FROM customers WHERE regexp_replace(phone, '\\D', '', 'g') = $1 LIMIT 1`,
+    [clean]
+  );
+  return res.rows[0] || null;
+}
+
+// عدد رحلات الزبون
+async function getCustomerTripCount(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    return [...mem.rides.values()].filter(r => cleanPhone(r.customer?.phone) === clean && r.status === 'done').length;
+  }
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='done'`,
+    [clean]
+  );
+  return res.rows[0].n;
 }
 
 async function getAllCustomers() {
@@ -431,7 +470,7 @@ module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
-  upsertCustomer, getAllCustomers,
+  upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
 };

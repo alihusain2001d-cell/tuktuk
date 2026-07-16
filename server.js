@@ -317,6 +317,72 @@ app.get('/api/driver/:id/earnings', async (req, res) => {
 });
 
 // ============================================================
+//  API — الزبون (تسجيل ودخول)
+// ============================================================
+
+// هل الرقم مسجّل من قبل؟
+app.post('/api/customer/check-phone', async (req, res) => {
+  try {
+    const c = await db.getCustomerByPhone(req.body.phone);
+    res.json({ exists: !!c, name: c ? c.name : null });
+  } catch (e) {
+    console.error('خطأ بفحص رقم الزبون:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// حساب جديد (بعد تأكيد الكود)
+app.post('/api/customer/register', async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
+
+    // امنع التسجيل برقم موجود
+    const existing = await db.getCustomerByPhone(phone);
+    if (existing) {
+      return res.status(409).json({
+        error: 'هذا الرقم مسجّل من قبل. سجّل دخول بدل ما تسوي حساب جديد.',
+        alreadyExists: true,
+      });
+    }
+
+    const c = await db.upsertCustomer(phone, name);
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone } });
+  } catch (e) {
+    console.error('خطأ بتسجيل الزبون:', e.message);
+    res.status(500).json({ error: 'صار خطأ بالتسجيل' });
+  }
+});
+
+// تسجيل دخول برقم + كود
+app.post('/api/customer/login', async (req, res) => {
+  try {
+    const { phone, code } = req.body;
+    const clean = normalizePhone(phone);
+
+    // تأكد من الكود
+    const rec = otpCodes.get(clean);
+    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
+    if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return res.status(400).json({ error: 'الكود انتهت صلاحيته' }); }
+    if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpCodes.delete(clean); return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' }); }
+    if (rec.code !== String(code || '').trim()) {
+      rec.attempts++;
+      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
+    }
+    otpCodes.delete(clean);
+
+    const c = await db.getCustomerByPhone(clean);
+    if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم', notFound: true });
+
+    const trips = await db.getCustomerTripCount(clean);
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone }, trips });
+  } catch (e) {
+    console.error('خطأ بدخول الزبون:', e.message);
+    res.status(500).json({ error: 'صار خطأ بتسجيل الدخول' });
+  }
+});
+
+// ============================================================
 //  API — الحجز
 // ============================================================
 app.post('/api/book', async (req, res) => {
