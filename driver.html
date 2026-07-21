@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>جايك - السائق</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
+  :root {
+    --ink:#1A1A1A; --sky:#FFC800; --sky-dark:#E0AC00; --sky-light:#FFF7DE; --sky-pale:#FFFBF0;
+    --paper:#FFFFFF; --bg:#FAF7F0; --line:#EDE7DA; --go:#12A150; --stop:#E5484D; --muted:#8A8270;
+  }
+  html,body { height:100%; background:var(--bg); color:var(--ink); overflow:hidden; }
+  #app { height:100vh; position:relative; display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ============ شاشات التسجيل ============ */
+  .auth-screen { position:absolute; inset:0; z-index:2000; background:#fff; display:none; flex-direction:column; overflow-y:auto; }
+  .auth-screen.active { display:flex; }
+  .auth-hero { background:linear-gradient(160deg,var(--sky),var(--sky-dark)); padding:36px 24px 30px; color:var(--ink); text-align:center; border-radius:0 0 28px 28px; }
+  .auth-logo { width:84px; height:84px; border-radius:20px; object-fit:cover; margin:0 auto 14px; box-shadow:0 8px 20px rgba(0,0,0,.18); }
+  .auth-hero h1 { font-size:28px; margin-bottom:4px; }
+  .auth-hero p { font-size:14px; opacity:.9; }
+  .auth-body { padding:24px 20px 32px; flex:1; }
+
+  .step-bar { display:flex; align-items:center; gap:6px; margin-bottom:22px; }
+
+  /* بطاقات شاشة البداية */
+  .welcome-cards { display:flex; flex-direction:column; gap:14px; margin-top:8px; }
+  .wc-card { background:#fff; border:1.5px solid var(--line); border-radius:17px; padding:20px; display:flex; align-items:center; gap:15px; cursor:pointer; transition:transform .1s; box-shadow:0 3px 12px rgba(14,42,61,.05); }
+  .wc-card:active { transform:scale(.98); }
+  .wc-card .wc-icon { width:54px; height:54px; border-radius:14px; background:var(--sky-light); display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0; }
+  .wc-card .wc-text { flex:1; }
+  .wc-card .wc-text h3 { font-size:17px; margin-bottom:3px; }
+  .wc-card .wc-text p { font-size:12.5px; color:var(--muted); line-height:1.5; }
+  .wc-card .wc-arrow { color:var(--muted); font-size:22px; }
+  .wc-card.new { background:var(--sky); border-color:var(--sky); color:var(--ink); box-shadow:0 3px 0 var(--sky-dark); }
+  .wc-card.new .wc-icon { background:rgba(26,26,26,.08); }
+  .wc-card.new .wc-text p { color:rgba(26,26,26,.65); }
+  .wc-card.new .wc-arrow { color:rgba(26,26,26,.55); }
+  .step-dot { flex:1; height:4px; background:var(--line); border-radius:3px; transition:background .3s; }
+  .step-dot.done { background:var(--sky); }
+  .step-label { text-align:center; font-size:12px; color:var(--muted); margin-bottom:18px; }
+
+  .field { margin-bottom:15px; }
+  .field label { display:block; font-size:13px; color:var(--ink); margin-bottom:7px; font-weight:600; }
+  .field input { width:100%; padding:14px; border:1.5px solid var(--line); border-radius:13px; font-size:16px; background:var(--sky-pale); color:var(--ink); }
+  .field input:focus { outline:none; border-color:var(--sky); background:#fff; }
+  .field .hint { font-size:11.5px; color:var(--muted); margin-top:5px; }
+
+  .btn { width:100%; padding:16px; border:none; border-radius:14px; font-size:17px; font-weight:700; cursor:pointer; color:var(--ink); background:var(--sky); box-shadow:0 3px 0 var(--sky-dark); transition:transform .08s, box-shadow .08s; }
+  .btn:active { transform:translateY(2px); box-shadow:0 1px 0 var(--sky-dark); }
+  .btn:disabled { opacity:.5; }
+  .btn.ghost { background:#fff; color:var(--ink); box-shadow:0 0 0 1.5px var(--line) inset; }
+  .btn.go { background:var(--go); box-shadow:0 3px 0 #0C7A3C; }
+  .btn.danger { background:#fff; color:var(--stop); box-shadow:0 0 0 1.5px var(--line) inset; }
+  .btn-row { display:flex; gap:10px; }
+  .btn-row .btn { flex:1; }
+
+  /* كود التحقق */
+  .otp-boxes { display:flex; gap:9px; direction:ltr; justify-content:center; margin:18px 0; }
+  .otp-boxes input { width:46px; height:56px; text-align:center; font-size:23px; font-weight:700; border:1.5px solid var(--line); border-radius:12px; background:var(--sky-pale); color:var(--ink); }
+  .otp-boxes input:focus { outline:none; border-color:var(--sky); background:#fff; }
+  .otp-info { text-align:center; font-size:13.5px; color:var(--muted); margin-bottom:6px; line-height:1.7; }
+  .otp-info b { color:var(--ink); direction:ltr; display:inline-block; }
+  .resend { text-align:center; margin-top:16px; font-size:13px; color:var(--muted); }
+  .resend a { color:var(--ink); font-weight:700; cursor:pointer; text-decoration:none; }
+  .resend a.disabled { color:var(--muted); cursor:default; }
+  .dev-code { background:#FFF8E1; border:1px solid #FFE082; border-radius:10px; padding:10px 12px; font-size:12.5px; text-align:center; margin-top:14px; color:#8D6E00; }
+
+  /* رفع الصور */
+  .photo-grid { display:flex; flex-direction:column; gap:13px; margin-bottom:18px; }
+  .photo-box { border:2px dashed var(--line); border-radius:15px; padding:15px; display:flex; align-items:center; gap:14px; cursor:pointer; background:var(--sky-pale); transition:border-color .15s; }
+  .photo-box:active { border-color:var(--sky); }
+  .photo-box.filled { border-style:solid; border-color:var(--go); background:#F2FBF6; }
+  .pb-icon { width:56px; height:56px; border-radius:13px; background:var(--sky-light); display:flex; align-items:center; justify-content:center; font-size:26px; flex-shrink:0; overflow:hidden; }
+  .pb-icon img { width:100%; height:100%; object-fit:cover; }
+  .pb-text { flex:1; }
+  .pb-text h4 { font-size:14.5px; margin-bottom:2px; }
+  .pb-text p { font-size:11.5px; color:var(--muted); }
+  .pb-check { font-size:20px; color:var(--go); }
+  .photo-box input[type=file] { display:none; }
+
+  /* شاشة الحالة (تجربة/منتهي) */
+  .status-screen { position:absolute; inset:0; z-index:1900; background:#fff; display:none; flex-direction:column; align-items:center; justify-content:center; padding:32px; text-align:center; }
+  .status-screen.active { display:flex; }
+  .ss-icon { width:96px; height:96px; border-radius:28px; display:flex; align-items:center; justify-content:center; font-size:48px; margin-bottom:20px; }
+  .ss-icon.warn { background:#FFF4E5; }
+  .ss-icon.stop { background:#FEECEC; }
+  .status-screen h2 { font-size:23px; margin-bottom:10px; }
+  .status-screen p { font-size:14.5px; color:var(--muted); line-height:1.8; margin-bottom:24px; max-width:340px; }
+  .contact-card { background:var(--sky-light); border-radius:16px; padding:18px; width:100%; max-width:340px; margin-bottom:16px; }
+  .contact-card h4 { font-size:14px; margin-bottom:10px; }
+  .contact-card .num { font-size:19px; font-weight:700; color:var(--ink); direction:ltr; }
+
+  /* ============ الهيدر ============ */
+  header { background:#fff; padding:12px 16px; display:flex; align-items:center; gap:12px; z-index:800; box-shadow:0 1px 10px rgba(14,42,61,.07); position:relative; }
+  .h-logo { width:36px; height:36px; border-radius:10px; object-fit:cover; flex-shrink:0; }
+  .h-title { flex:1; }
+  .h-title h1 { font-size:16px; }
+  .h-title .status-text { font-size:11.5px; color:var(--muted); }
+  .live-badge { display:flex; align-items:center; gap:6px; background:#F2FBF6; color:var(--go); font-size:12px; font-weight:700; padding:7px 12px; border-radius:20px; flex-shrink:0; }
+  .live-badge.off { background:#FEECEC; color:var(--stop); }
+  .live-dot { width:8px; height:8px; border-radius:50%; background:var(--go); animation:livePulse 1.5s infinite; }
+  .live-badge.off .live-dot { background:var(--stop); animation:none; }
+  @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.85)} }
+
+  /* شريط الاشتراك */
+  .sub-banner { padding:9px 16px; font-size:12.5px; text-align:center; font-weight:600; }
+  .sub-banner.trial { background:#FFF4E5; color:#B26A00; }
+  .sub-banner.active { background:#F2FBF6; color:#0C7A3C; }
+
+  .tabs { display:flex; background:#fff; border-bottom:1px solid var(--line); z-index:700; }
+  .tab { flex:1; padding:13px; text-align:center; font-size:14px; font-weight:600; color:var(--muted); cursor:pointer; border-bottom:2.5px solid transparent; }
+  .tab.active { color:var(--ink); border-bottom-color:var(--sky); }
+
+  /* الخريطة تملأ كل مساحة العرض، واللوحة تطفو فوقها */
+  #map { position:absolute; inset:0; z-index:1; background:#DCE9F0; }
+
+  /* ===== وضع الخريطة الكاملة ===== */
+  .work-view.map-full .panel { transform:translateY(105%); }
+  .work-view .panel { transition:transform .3s cubic-bezier(.4,0,.2,1); }
+  .work-view.map-full .map-hint { opacity:0; pointer-events:none; }
+
+  /* تلميح: اضغط لتكبير الخريطة */
+  .map-hint {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    background:rgba(26,26,26,.82); color:#fff; font-size:12px; font-weight:600;
+    padding:7px 14px; border-radius:20px; z-index:400; pointer-events:none;
+    transition:opacity .25s; display:flex; align-items:center; gap:6px;
+  }
+
+  /* زر الخروج من الخريطة الكاملة */
+  .map-exit {
+    position:absolute; top:12px; right:12px; z-index:650;
+    background:#fff; border:none; border-radius:14px; padding:11px 16px;
+    font-size:14px; font-weight:700; color:var(--ink); cursor:pointer;
+    box-shadow:0 3px 14px rgba(0,0,0,.2); display:none; align-items:center; gap:7px;
+    font-family:inherit;
+  }
+  .work-view.map-full .map-exit { display:flex; }
+
+  /* بطاقة معلومات صغيرة بوضع الخريطة الكاملة */
+  .map-mini {
+    position:absolute; bottom:16px; right:12px; left:12px; z-index:650;
+    background:#fff; border-radius:16px; padding:14px 16px;
+    box-shadow:0 4px 20px rgba(0,0,0,.18); display:none;
+  }
+  .work-view.map-full .map-mini.show { display:block; }
+  .map-mini .mm-row { display:flex; align-items:center; gap:12px; }
+  .map-mini .mm-icon { width:42px; height:42px; border-radius:11px; background:var(--sky-light); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
+  .map-mini .mm-body { flex:1; overflow:hidden; }
+  .map-mini .mm-body h4 { font-size:14.5px; margin-bottom:2px; }
+  .map-mini .mm-body p { font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .map-mini .mm-fare { font-size:16px; font-weight:700; color:var(--ink); flex-shrink:0; }
+
+  /* زر تكبير الخريطة (يبين بوضع عادي) */
+  .map-expand {
+    position:absolute; top:12px; right:12px; z-index:400;
+    background:#fff; border:none; border-radius:12px; width:42px; height:42px;
+    font-size:18px; cursor:pointer; box-shadow:0 3px 12px rgba(0,0,0,.15);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .work-view.map-full .map-expand { display:none; }
+
+  .panel {
+    background:#fff; border-radius:22px 22px 0 0; box-shadow:0 -6px 24px rgba(14,42,61,.1);
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom)); z-index:600;
+    position:absolute; bottom:0; right:0; left:0;   /* يطفو فوق الخريطة */
+    max-height:58vh; overflow-y:auto;
+  }
+  .grip { width:40px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px; }
+
+  .waiting { text-align:center; padding:14px 0; }
+  .waiting .icon { font-size:42px; margin-bottom:8px; }
+  .waiting h2 { font-size:16px; margin-bottom:4px; }
+  .waiting p { font-size:13px; color:var(--muted); }
+  .offline-note { text-align:center; padding:18px 0; color:var(--muted); font-size:14px; }
+
+  /* طلبات */
+  .ride-request { background:#fff; border:2px solid var(--sky); border-radius:16px; padding:15px; margin-bottom:12px; animation:pop .3s; box-shadow:0 4px 16px rgba(255,200,0,.22); }
+  @keyframes pop { from{transform:scale(.94);opacity:0} to{transform:scale(1);opacity:1} }
+  .ride-request.is-delivery { border-color:#F5A623; box-shadow:0 4px 16px rgba(245,166,35,.2); }
+  .rr-top { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .rr-icon { width:44px; height:44px; border-radius:12px; background:var(--sky); color:var(--ink); display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0; }
+  .rr-info { flex:1; }
+  .rr-info h3 { font-size:16px; margin-bottom:2px; }
+  .rr-info .dist { font-size:13px; color:var(--muted); }
+  .rr-info .dist b { color:var(--go); }
+  .rr-fare { text-align:left; }
+  .rr-fare .amt { font-size:18px; font-weight:700; color:var(--ink); }
+  .rr-fare .lbl { font-size:10px; color:var(--muted); }
+  .type-badge { display:inline-block; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; margin-bottom:5px; }
+  .type-badge.ride { background:var(--sky-light); color:var(--ink); }
+  .type-badge.delivery { background:#FFF6E0; color:#B26A00; }
+  .rr-route { background:var(--sky-pale); border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px; }
+  .rr-route .leg { display:flex; align-items:center; gap:8px; padding:3px 0; }
+  .rr-route .leg .d { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .rr-route .leg .d.from { background:var(--go); }
+  .rr-route .leg .d.to { background:var(--stop); border-radius:1px; }
+  .rr-route .leg .d.store { background:#F5A623; }
+  .rr-route .leg span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item-box { background:#FFF9E8; border:1px solid #FFE9A8; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px; line-height:1.5; }
+  .item-box b { color:#B26A00; }
+
+  /* صندوق عرض السعر */
+  .offer-box { background:var(--sky-pale); border:1px solid var(--line); border-radius:12px; padding:13px; margin-bottom:12px; }
+  .offer-box label { display:block; font-size:12px; font-weight:600; color:var(--ink); margin-bottom:8px; }
+  .offer-input-row { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .offer-input-row input { flex:1; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:18px; font-weight:700; background:#fff; color:var(--ink); text-align:center; }
+  .offer-input-row input:focus { outline:none; border-color:var(--sky); }
+  .offer-input-row .cur { font-size:14px; font-weight:700; color:var(--muted); }
+  .offer-note { width:100%; padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13px; background:#fff; color:var(--ink); }
+  .offer-note:focus { outline:none; border-color:var(--sky); }
+
+  /* انتظار رد الزبون */
+  .offer-waiting { text-align:center; padding:22px 0; }
+  .ow-spin { width:44px; height:44px; border:3.5px solid var(--sky-light); border-top-color:var(--sky); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 14px; }
+  .offer-waiting h3 { font-size:17px; margin-bottom:6px; }
+  .offer-waiting p { font-size:14px; color:var(--muted); }
+  .offer-waiting p b { color:var(--ink); font-size:17px; }
+  .offer-waiting .ow-sub { font-size:12.5px; margin-top:5px; }
+  .rr-actions { display:flex; gap:10px; }
+  .rr-actions .btn { flex:1; padding:12px; font-size:15px; }
+
+  /* رحلة نشطة */
+  .ar-head { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .ar-avatar { width:52px; height:52px; border-radius:14px; background:var(--go); color:#fff; display:flex; align-items:center; justify-content:center; font-size:24px; flex-shrink:0; }
+  .ar-info { flex:1; }
+  .ar-info h2 { font-size:17px; margin-bottom:2px; }
+  .ar-info .ph { font-size:13px; color:var(--go); font-weight:700; direction:ltr; text-align:right; }
+  .ar-fare { background:var(--sky-light); border-radius:10px; padding:10px 14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+  .ar-fare .l { font-size:13px; color:var(--ink); font-weight:600; }
+  .ar-fare .a { font-size:17px; font-weight:700; color:var(--ink); }
+
+  /* كشف الحساب */
+  .earnings-view { flex:1; overflow-y:auto; padding:18px; display:none; }
+  .earnings-view.active { display:block; }
+  .earn-big { background:linear-gradient(135deg,var(--sky),var(--sky-dark)); border-radius:18px; padding:22px; color:var(--ink); margin-bottom:16px; text-align:center; }
+  .earn-big .lbl { font-size:13px; opacity:.85; margin-bottom:4px; }
+  .earn-big .amt { font-size:33px; font-weight:700; }
+  .earn-big .amt small { font-size:15px; opacity:.85; }
+  .earn-cards { display:flex; gap:11px; margin-bottom:20px; }
+  .earn-card { flex:1; background:#fff; border:1px solid var(--line); border-radius:15px; padding:14px; text-align:center; }
+  .earn-card.hl { background:var(--sky-light); border-color:var(--sky-light); }
+  .earn-card .num { font-size:20px; font-weight:700; margin-bottom:2px; color:var(--ink); }
+  .earn-card .lbl { font-size:10.5px; color:var(--muted); }
+  .earn-section-title { font-size:15px; font-weight:700; margin-bottom:12px; }
+  .trip-item { background:#fff; border:1px solid var(--line); border-radius:12px; padding:13px 15px; margin-bottom:10px; display:flex; align-items:center; gap:12px; }
+  .trip-item .ti-icon { width:38px; height:38px; border-radius:10px; background:var(--sky-pale); display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+  .trip-item .ti-body { flex:1; overflow:hidden; }
+  .trip-item .ti-body .cust { font-size:14px; font-weight:600; margin-bottom:2px; }
+  .trip-item .ti-body .route { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trip-item .ti-fare { text-align:left; flex-shrink:0; }
+  .trip-item .ti-fare .f { font-size:15px; font-weight:700; color:var(--go); }
+  .trip-item .ti-fare .k { font-size:10px; color:var(--muted); }
+  .earn-empty { text-align:center; padding:40px 20px; color:var(--muted); }
+  .earn-empty .ico { font-size:44px; margin-bottom:10px; }
+
+  .work-view { flex:1; min-height:0; position:relative; overflow:hidden; }
+  .work-view.hidden-v { display:none; }
+
+  .hidden { display:none !important; }
+  .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--ink); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.25); }
+  .spinner { width:18px; height:18px; border:2.5px solid rgba(26,26,26,.25); border-top-color:var(--ink); border-radius:50%; animation:spin .7s linear infinite; display:inline-block; vertical-align:middle; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ========== شاشة البداية: دخول أو حساب جديد ========== -->
+  <div class="auth-screen active" id="step-welcome">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <p>أنا سائق</p>
+    </div>
+    <div class="auth-body">
+      <div class="welcome-cards">
+        <div class="wc-card" onclick="gotoStep('login')">
+          <div class="wc-icon">🔑</div>
+          <div class="wc-text">
+            <h3>عندي حساب</h3>
+            <p>سجّل دخول برقم موبايلك</p>
+          </div>
+          <div class="wc-arrow">‹</div>
+        </div>
+        <div class="wc-card new" onclick="gotoStep('info')">
+          <div class="wc-icon">✨</div>
+          <div class="wc-text">
+            <h3>حساب جديد</h3>
+            <p>سجّل وابدأ الشغل — أول يوم مجاني!</p>
+          </div>
+          <div class="wc-arrow">‹</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== تسجيل الدخول ========== -->
+  <div class="auth-screen" id="step-login">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <h1>تسجيل الدخول</h1>
+      <p>أدخل رقم موبايلك</p>
+    </div>
+    <div class="auth-body">
+      <div class="field">
+        <label>رقم الموبايل</label>
+        <input id="l-phone" type="tel" inputmode="numeric" placeholder="07XX XXX XXXX" style="direction:ltr;text-align:right">
+        <div class="hint">راح نرسلك كود تأكيد على هذا الرقم</div>
+      </div>
+      <button class="btn" id="btn-login-otp" onclick="loginSendOtp()">إرسال الكود</button>
+      <button class="btn ghost" onclick="gotoStep('welcome')" style="margin-top:14px">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ========== كود تسجيل الدخول ========== -->
+  <div class="auth-screen" id="step-login-otp">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <h1>تأكيد الدخول</h1>
+      <p>أدخل الكود اللي وصلك</p>
+    </div>
+    <div class="auth-body">
+      <div class="otp-info">أرسلنا كود مكوّن من ٦ أرقام إلى<br><b id="login-otp-phone">—</b></div>
+      <div class="otp-boxes" id="login-otp-boxes">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="0">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="1">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="2">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="3">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="4">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="5">
+      </div>
+      <div id="login-dev-code" class="dev-code hidden"></div>
+      <button class="btn" id="btn-do-login" onclick="doLogin()" style="margin-top:16px">دخول</button>
+      <div class="resend">ما وصلك الكود؟ <a id="login-resend" onclick="loginResend()">إعادة الإرسال</a></div>
+      <button class="btn ghost" onclick="gotoStep('login')" style="margin-top:18px">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ========== الخطوة ١: الاسم والرقم ========== -->
+  <div class="auth-screen" id="step-info">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <h1>حساب جديد</h1>
+      <p>سجّل وابدأ الشغل</p>
+    </div>
+    <div class="auth-body">
+      <div class="step-bar"><div class="step-dot done"></div><div class="step-dot"></div><div class="step-dot"></div></div>
+      <div class="step-label">الخطوة ١ من ٣ — معلوماتك</div>
+
+      <div class="field">
+        <label>الاسم الكامل</label>
+        <input id="f-name" placeholder="مثال: علي حسن محمد">
+      </div>
+      <div class="field">
+        <label>رقم الموبايل</label>
+        <input id="f-phone" type="tel" inputmode="numeric" placeholder="07XX XXX XXXX" style="direction:ltr;text-align:right">
+        <div class="hint">راح نرسلك كود تأكيد على هذا الرقم</div>
+      </div>
+      <div class="field">
+        <label>وصف المركبة</label>
+        <input id="f-car" placeholder="مثال: نوع ولون المركبة">
+      </div>
+      <button class="btn" id="btn-send-otp" onclick="sendOtp()">إرسال كود التأكيد</button>
+      <button class="btn ghost" onclick="gotoStep('welcome')" style="margin-top:14px">← رجوع</button>
+    </div>
+  </div>
+
+  <!-- ========== الخطوة ٢: تأكيد الرقم ========== -->
+  <div class="auth-screen" id="step-otp">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <h1>تأكيد الرقم</h1>
+      <p>أدخل الكود اللي وصلك</p>
+    </div>
+    <div class="auth-body">
+      <div class="step-bar"><div class="step-dot done"></div><div class="step-dot done"></div><div class="step-dot"></div></div>
+      <div class="step-label">الخطوة ٢ من ٣ — تأكيد الرقم</div>
+
+      <div class="otp-info">أرسلنا كود مكوّن من ٦ أرقام إلى<br><b id="otp-phone">—</b></div>
+      <div class="otp-boxes">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="0">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="1">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="2">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="3">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="4">
+        <input type="tel" inputmode="numeric" maxlength="1" data-i="5">
+      </div>
+      <div id="dev-code-box" class="dev-code hidden"></div>
+      <button class="btn" id="btn-verify" onclick="verifyOtp()" style="margin-top:16px">تأكيد</button>
+      <div class="resend">ما وصلك الكود؟ <a id="resend-link" onclick="resendOtp()">إعادة الإرسال</a></div>
+      <button class="btn ghost" onclick="gotoStep('info')" style="margin-top:18px">← رجوع وتعديل الرقم</button>
+    </div>
+  </div>
+
+  <!-- ========== الخطوة ٣: الصور ========== -->
+  <div class="auth-screen" id="step-photos">
+    <div class="auth-hero">
+      <img class="auth-logo" src="/logo.png" alt="جايك">
+      <h1>صورك ووثائقك</h1>
+      <p>حتى نتأكد من هويتك</p>
+    </div>
+    <div class="auth-body">
+      <div class="step-bar"><div class="step-dot done"></div><div class="step-dot done"></div><div class="step-dot done"></div></div>
+      <div class="step-label">الخطوة ٣ من ٣ — الصور</div>
+
+      <div class="photo-grid">
+        <label class="photo-box" id="box-self">
+          <div class="pb-icon" id="ic-self">🤳</div>
+          <div class="pb-text"><h4>صورتك الشخصية</h4><p>من الكاميرا — الزبون راح يشوفها حتى يتعرف عليك</p></div>
+          <div class="pb-check hidden" id="ck-self">✓</div>
+          <input type="file" accept="image/*" capture="user" onchange="pickPhoto(this,'self')">
+        </label>
+
+        <label class="photo-box" id="box-car">
+          <div class="pb-icon" id="ic-car">🚗</div>
+          <div class="pb-text"><h4>صورة المركبة</h4><p>صورة واضحة للمركبة مالتك</p></div>
+          <div class="pb-check hidden" id="ck-car">✓</div>
+          <input type="file" accept="image/*" capture="environment" onchange="pickPhoto(this,'car')">
+        </label>
+
+        <label class="photo-box" id="box-idf">
+          <div class="pb-icon" id="ic-idf">🪪</div>
+          <div class="pb-text"><h4>البطاقة الوطنية — الوجه الأمامي</h4><p>تأكد إن المعلومات واضحة</p></div>
+          <div class="pb-check hidden" id="ck-idf">✓</div>
+          <input type="file" accept="image/*" capture="environment" onchange="pickPhoto(this,'idf')">
+        </label>
+
+        <label class="photo-box" id="box-idb">
+          <div class="pb-icon" id="ic-idb">🪪</div>
+          <div class="pb-text"><h4>البطاقة الوطنية — الوجه الخلفي</h4><p>تأكد إن المعلومات واضحة</p></div>
+          <div class="pb-check hidden" id="ck-idb">✓</div>
+          <input type="file" accept="image/*" capture="environment" onchange="pickPhoto(this,'idb')">
+        </label>
+      </div>
+
+      <button class="btn go" id="btn-finish" onclick="finishRegister()">إنهاء التسجيل وبدء الشغل 🚗</button>
+      <div class="otp-info" style="margin-top:14px;font-size:12px">أول يوم مجاني! بعده تحتاج اشتراك من الإدارة</div>
+    </div>
+  </div>
+
+  <!-- ========== شاشة انتهاء الاشتراك ========== -->
+  <div class="status-screen" id="screen-expired">
+    <div class="ss-icon stop">🔒</div>
+    <h2 id="exp-title">انتهت فترتك المجانية</h2>
+    <p id="exp-text">حتى تكمّل الشغل على جايك، تحتاج تفعيل اشتراك من الإدارة. تواصل وياهم وراح يفعّلولك حسابك فوراً.</p>
+    <div class="contact-card">
+      <h4>📞 للتفعيل، تواصل مع الإدارة</h4>
+      <div class="num" id="admin-phone">07XX XXX XXXX</div>
+    </div>
+    <div class="btn-row" style="max-width:340px;width:100%">
+      <button class="btn" onclick="checkAccess(true)">تحققت، حدّث الحالة 🔄</button>
+    </div>
+    <button class="btn danger" onclick="logout()" style="max-width:340px;margin-top:12px">تسجيل خروج</button>
+  </div>
+
+  <!-- ========== التطبيق ========== -->
+  <header id="main-header" class="hidden">
+    <img class="h-logo" src="/logo.png" alt="جايك">
+    <div class="h-title">
+      <h1 id="drv-name-h">السائق</h1>
+      <div class="status-text" id="status-text">نتصل...</div>
+    </div>
+    <div class="live-badge" id="live-badge"><span class="live-dot"></span> شغّال</div>
+  </header>
+
+  <div class="sub-banner hidden" id="sub-banner"></div>
+
+  <div class="tabs hidden" id="main-tabs">
+    <div class="tab active" id="tab-work" onclick="switchTab('work')">🚗 الشغل</div>
+    <div class="tab" id="tab-earn" onclick="switchTab('earn')">💰 كشف الحساب</div>
+  </div>
+
+  <div class="work-view hidden" id="work-view">
+    <div id="map"></div>
+
+    <div class="map-hint" id="map-hint">👆 اضغط الخريطة حتى تكبّرها</div>
+    <button class="map-expand" onclick="toggleMapFull(true)" title="كبّر الخريطة">⛶</button>
+    <button class="map-exit" onclick="toggleMapFull(false)">✕ رجوع</button>
+
+    <div class="map-mini" id="map-mini">
+      <div class="mm-row">
+        <div class="mm-icon" id="mm-icon">🚗</div>
+        <div class="mm-body">
+          <h4 id="mm-title">—</h4>
+          <p id="mm-sub">—</p>
+        </div>
+        <div class="mm-fare" id="mm-fare"></div>
+      </div>
+    </div>
+    <div class="panel" id="panel-waiting">
+      <div class="grip"></div>
+      <div id="waiting-msg" class="waiting">
+        <div class="icon">📡</div>
+        <h2>جاهز لاستلام الطلبات</h2>
+        <p>راح توصلك الطلبات القريبة منك</p>
+      </div>
+      <div id="offer-waiting" class="offer-waiting hidden">
+        <div class="ow-spin"></div>
+        <h3>أرسلنا عرضك للزبون</h3>
+        <p>عرضت <b id="ow-price">—</b></p>
+        <p class="ow-sub">ننتظر رده...</p>
+      </div>
+      <div id="requests-list"></div>
+    </div>
+
+    <div class="panel hidden" id="panel-active">
+      <div class="grip"></div>
+      <div class="ar-head">
+        <div class="ar-avatar" id="ar-avatar">؟</div>
+        <div class="ar-info"><h2 id="ar-name">—</h2><div class="ph" id="ar-phone">—</div></div>
+      </div>
+      <div class="ar-fare"><span class="l">أجرة الطلب</span><span class="a" id="ar-fare">—</span></div>
+      <div class="rr-route" id="ar-route"></div>
+      <button class="btn go" onclick="markArrived()" style="margin-bottom:10px">وصلت لموقع الزبون ✅</button>
+      <div class="btn-row">
+        <button class="btn go" onclick="callCustomer()">📞 اتصل</button>
+        <button class="btn danger" onclick="finishRide()">إنهاء الطلب</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="earnings-view" id="earn-view">
+    <div class="earn-big">
+      <div class="lbl">إجمالي الأرباح</div>
+      <div class="amt" id="total-earnings">0 <small>د.ع</small></div>
+    </div>
+    <div class="earn-cards">
+      <div class="earn-card hl"><div class="num" id="today-earnings">0</div><div class="lbl">أرباح اليوم (د.ع)</div></div>
+      <div class="earn-card"><div class="num" id="total-trips">0</div><div class="lbl">عدد الطلبات</div></div>
+      <div class="earn-card"><div class="num" id="total-km">0</div><div class="lbl">الكيلومترات</div></div>
+    </div>
+    <div class="earn-section-title">آخر الطلبات</div>
+    <div id="trips-list">
+      <div class="earn-empty"><div class="ico">🚗</div><div>لسه ماكو طلبات</div></div>
+    </div>
+    <button class="btn danger" onclick="logout()" style="margin-top:22px">تسجيل خروج</button>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const MUSAYYIB = [32.7789, 44.2892];
+const ADMIN_CONTACT = '07717533595'; // رقم الإدارة للتفعيل
+
+let map, meMarker, pickupMarker, destMarker, routeLine;
+let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
+let driver = JSON.parse(localStorage.getItem('jayak_driver') || 'null');
+let myPos = { lat: MUSAYYIB[0], lng: MUSAYYIB[1] };
+let isOnline = false, activeRide = null, customerPhone = '', locTimer = null;
+let photos = { self:null, car:null, idf:null, idb:null };
+let offeredRide = null; // العرض المعلّق اللي ننتظر رد الزبون عليه
+let pendingPhone = '', resendTimer = null;
+const pendingRides = new Map();
+
+function genId(){ const id='drv_'+Math.random().toString(36).slice(2,10); localStorage.setItem('jayak_driver_id',id); return id; }
+
+// ============ خطوات التسجيل ============
+const AUTH_STEPS = ['welcome','login','login-otp','info','otp','photos'];
+function gotoStep(name) {
+  AUTH_STEPS.forEach(s => {
+    const el = document.getElementById('step-'+s);
+    if (el) el.classList.toggle('active', s===name);
+  });
+}
+
+// ============ تسجيل الدخول ============
+let loginPhone = '', loginResendTimer = null;
+
+async function loginSendOtp() {
+  const phone = document.getElementById('l-phone').value.trim();
+  if (phone.replace(/\D/g,'').length < 10) return toast('اكتب رقم موبايل صحيح');
+
+  const btn = document.getElementById('btn-login-otp');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> نتأكد...';
+  try {
+    // تأكد إنه الرقم مسجّل أول
+    const chk = await fetch('/api/driver/check-phone', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone })
+    }).then(r=>r.json());
+
+    if (!chk.exists) {
+      toast('ماكو حساب بهذا الرقم — سوّي حساب جديد');
+      setTimeout(() => gotoStep('info'), 1200);
+      return;
+    }
+
+    // ابعث الكود
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone }) });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+
+    loginPhone = phone;
+    document.getElementById('login-otp-phone').textContent = phone;
+    if (out.devCode) {
+      const box = document.getElementById('login-dev-code');
+      box.textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      box.classList.remove('hidden');
+    }
+    clearLoginBoxes();
+    gotoStep('login-otp');
+    startLoginResendTimer();
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='إرسال الكود'; }
+}
+
+async function loginResend() {
+  const link = document.getElementById('login-resend');
+  if (link.classList.contains('disabled')) return;
+  try {
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: loginPhone }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    if (out.devCode) {
+      const box = document.getElementById('login-dev-code');
+      box.textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      box.classList.remove('hidden');
+    }
+    toast('أرسلنا كود جديد');
+    clearLoginBoxes(); startLoginResendTimer();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function startLoginResendTimer() {
+  const link = document.getElementById('login-resend');
+  let sec = 60;
+  link.classList.add('disabled');
+  link.textContent = `إعادة الإرسال (${sec})`;
+  clearInterval(loginResendTimer);
+  loginResendTimer = setInterval(() => {
+    sec--;
+    if (sec <= 0) { clearInterval(loginResendTimer); link.classList.remove('disabled'); link.textContent='إعادة الإرسال'; }
+    else link.textContent = `إعادة الإرسال (${sec})`;
+  }, 1000);
+}
+
+const loginInputs = document.querySelectorAll('#login-otp-boxes input');
+loginInputs.forEach((inp, i) => {
+  inp.addEventListener('input', () => {
+    inp.value = inp.value.replace(/\D/g,'');
+    if (inp.value && i < loginInputs.length-1) loginInputs[i+1].focus();
+    if ([...loginInputs].every(x=>x.value)) doLogin();
+  });
+  inp.addEventListener('keydown', (e) => { if (e.key==='Backspace' && !inp.value && i>0) loginInputs[i-1].focus(); });
+  inp.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6).split('');
+    digits.forEach((d,j) => { if (loginInputs[j]) loginInputs[j].value = d; });
+    if (digits.length === 6) doLogin();
+  });
+});
+function clearLoginBoxes(){ loginInputs.forEach(i=>i.value=''); setTimeout(()=>loginInputs[0]?.focus(), 200); }
+
+async function doLogin() {
+  const code = [...loginInputs].map(i=>i.value).join('');
+  if (code.length < 6) return toast('اكتب الكود كامل');
+  const btn = document.getElementById('btn-do-login');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ندخّلك...';
+  try {
+    const res = await fetch('/api/driver/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: loginPhone, code }) });
+    const out = await res.json();
+    if (!res.ok) {
+      toast(out.error || 'صار خطأ');
+      if (out.notFound) setTimeout(() => gotoStep('info'), 1200);
+      else clearLoginBoxes();
+      return;
+    }
+    // احفظ بياناته محلياً
+    driverId = out.driver.id;
+    localStorage.setItem('jayak_driver_id', driverId);
+    driver = { name: out.driver.name, phone: out.driver.phone, car: out.driver.car };
+    localStorage.setItem('jayak_driver', JSON.stringify(driver));
+    toast(`أهلاً ${driver.name}! 🎉`);
+    document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+    if (out.access.allowed) showMainApp(out.access);
+    else showExpired(out.access);
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='دخول'; }
+}
+
+async function sendOtp() {
+  const name = document.getElementById('f-name').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const car = document.getElementById('f-car').value.trim();
+  if (!name) return toast('اكتب اسمك الكامل');
+  if (phone.replace(/\D/g,'').length < 10) return toast('اكتب رقم موبايل صحيح');
+  if (!car) return toast('اكتب وصف المركبة');
+
+  const btn = document.getElementById('btn-send-otp');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> نرسل الكود...';
+  try {
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone }) });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+    pendingPhone = phone;
+    document.getElementById('otp-phone').textContent = phone;
+    // وضع التطوير: نعرض الكود
+    if (out.devCode) {
+      document.getElementById('dev-code-box').textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      document.getElementById('dev-code-box').classList.remove('hidden');
+    }
+    clearOtpBoxes();
+    gotoStep('otp');
+    startResendTimer();
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='إرسال كود التأكيد'; }
+}
+
+async function resendOtp() {
+  const link = document.getElementById('resend-link');
+  if (link.classList.contains('disabled')) return;
+  try {
+    const res = await fetch('/api/otp/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: pendingPhone }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    if (out.devCode) {
+      document.getElementById('dev-code-box').textContent = `وضع التجربة — الكود: ${out.devCode}`;
+      document.getElementById('dev-code-box').classList.remove('hidden');
+    }
+    toast('أرسلنا كود جديد');
+    clearOtpBoxes(); startResendTimer();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function startResendTimer() {
+  const link = document.getElementById('resend-link');
+  let sec = 60;
+  link.classList.add('disabled');
+  link.textContent = `إعادة الإرسال (${sec})`;
+  clearInterval(resendTimer);
+  resendTimer = setInterval(() => {
+    sec--;
+    if (sec <= 0) { clearInterval(resendTimer); link.classList.remove('disabled'); link.textContent='إعادة الإرسال'; }
+    else link.textContent = `إعادة الإرسال (${sec})`;
+  }, 1000);
+}
+
+// خانات الكود
+const otpInputs = document.querySelectorAll('.otp-boxes input');
+otpInputs.forEach((inp, i) => {
+  inp.addEventListener('input', () => {
+    inp.value = inp.value.replace(/\D/g,'');
+    if (inp.value && i < otpInputs.length-1) otpInputs[i+1].focus();
+    if ([...otpInputs].every(x=>x.value)) verifyOtp();
+  });
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace' && !inp.value && i > 0) otpInputs[i-1].focus();
+  });
+  inp.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6).split('');
+    digits.forEach((d,j) => { if (otpInputs[j]) otpInputs[j].value = d; });
+    if (digits.length === 6) verifyOtp();
+  });
+});
+function clearOtpBoxes(){ otpInputs.forEach(i=>i.value=''); setTimeout(()=>otpInputs[0].focus(), 200); }
+
+async function verifyOtp() {
+  const code = [...otpInputs].map(i=>i.value).join('');
+  if (code.length < 6) return toast('اكتب الكود كامل');
+  const btn = document.getElementById('btn-verify');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> نتأكد...';
+  try {
+    const res = await fetch('/api/otp/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: pendingPhone, code }) });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'الكود غلط'); clearOtpBoxes(); return; }
+    toast('تأكد رقمك ✅');
+    gotoStep('photos');
+  } catch(e) { toast('صار خطأ'); }
+  finally { btn.disabled=false; btn.textContent='تأكيد'; }
+}
+
+// ============ الصور ============
+function pickPhoto(input, key) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  compressImage(file, (dataUrl) => {
+    photos[key] = dataUrl;
+    const map = { self:['ic-self','ck-self','box-self'], car:['ic-car','ck-car','box-car'], idf:['ic-idf','ck-idf','box-idf'], idb:['ic-idb','ck-idb','box-idb'] };
+    const [icId, ckId, boxId] = map[key];
+    document.getElementById(icId).innerHTML = `<img src="${dataUrl}" alt="">`;
+    document.getElementById(ckId).classList.remove('hidden');
+    document.getElementById(boxId).classList.add('filled');
+  });
+}
+
+// ضغط الصورة قبل الرفع (عرض 800px، جودة 70%)
+function compressImage(file, cb) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 800;
+      let { width: w, height: h } = img;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      cb(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function finishRegister() {
+  if (!photos.self) return toast('التقط صورتك الشخصية من الكاميرا');
+  if (!photos.car) return toast('أضف صورة المركبة');
+  if (!photos.idf) return toast('أضف صورة البطاقة — الوجه الأمامي');
+  if (!photos.idb) return toast('أضف صورة البطاقة — الوجه الخلفي');
+
+  const btn = document.getElementById('btn-finish');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> نسجّلك...';
+  try {
+    const res = await fetch('/api/driver/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        driverId,
+        name: document.getElementById('f-name').value.trim(),
+        phone: document.getElementById('f-phone').value.trim(),
+        car: document.getElementById('f-car').value.trim(),
+        photoSelf: photos.self, photoCar: photos.car, photoIdFront: photos.idf, photoIdBack: photos.idb,
+        lat: myPos.lat, lng: myPos.lng,
+      }),
+    });
+    const out = await res.json();
+    if (!res.ok) {
+      toast(out.error || 'صار خطأ بالتسجيل');
+      if (out.alreadyExists) setTimeout(() => gotoStep('login'), 1500);
+      return;
+    }
+    driver = { name: out.driver.name, phone: document.getElementById('f-phone').value.trim(), car: document.getElementById('f-car').value.trim() };
+    localStorage.setItem('jayak_driver', JSON.stringify(driver));
+    toast('أهلاً بيك بجايك! 🎉');
+    document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+    await checkAccess();
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled=false; btn.textContent='إنهاء التسجيل وبدء الشغل 🚗'; }
+}
+
+// ============ حالة الاشتراك ============
+async function checkAccess(showToast) {
+  try {
+    const res = await fetch(`/api/driver/${driverId}/access`);
+    const acc = await res.json();
+    if (acc.allowed) {
+      document.getElementById('screen-expired').classList.remove('active');
+      showMainApp(acc);
+      if (showToast) toast('حسابك فعّال ✅');
+    } else {
+      showExpired(acc);
+      if (showToast) toast('لسه ما تفعّل حسابك');
+    }
+    return acc;
+  } catch(e) { toast('ما كدرنا نتأكد من حالتك'); }
+}
+
+function showExpired(acc) {
+  stopWorking();
+  document.getElementById('main-header').classList.add('hidden');
+  document.getElementById('main-tabs').classList.add('hidden');
+  document.getElementById('work-view').classList.add('hidden');
+  document.getElementById('earn-view').classList.remove('active');
+  document.getElementById('sub-banner').classList.add('hidden');
+  document.getElementById('admin-phone').textContent = ADMIN_CONTACT;
+  if (acc.reason === 'expired') {
+    document.getElementById('exp-title').textContent = 'انتهى اشتراكك';
+    document.getElementById('exp-text').textContent = 'حتى تكمّل الشغل على جايك، تحتاج تجديد اشتراكك. تواصل مع الإدارة وراح يجددولك فوراً.';
+  } else {
+    document.getElementById('exp-title').textContent = 'انتهت فترتك المجانية';
+    document.getElementById('exp-text').textContent = 'استفدت من يومك المجاني. حتى تكمّل الشغل، تحتاج تفعيل اشتراك من الإدارة.';
+  }
+  document.getElementById('screen-expired').classList.add('active');
+}
+
+function showMainApp(acc) {
+  document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-expired').classList.remove('active');
+  document.getElementById('main-header').classList.remove('hidden');
+  document.getElementById('main-tabs').classList.remove('hidden');
+  document.getElementById('work-view').classList.remove('hidden');
+  document.getElementById('drv-name-h').textContent = driver.name;
+
+  // شريط الاشتراك
+  const banner = document.getElementById('sub-banner');
+  banner.classList.remove('hidden','trial','active');
+  if (acc.reason === 'trial') {
+    banner.classList.add('trial');
+    banner.textContent = `🎁 فترتك المجانية — باقي ${acc.hoursLeft} ساعة`;
+  } else if (acc.reason === 'subscribed') {
+    banner.classList.add('active');
+    banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
+  }
+  setTimeout(() => {
+    if (!map) initMap(); else map.invalidateSize();
+    startWorking(); // السائق دائماً شغّال
+  }, 80);
+}
+
+function logout() {
+  if (!confirm('تريد تسجّل خروج؟')) return;
+  localStorage.removeItem('jayak_driver');
+  localStorage.removeItem('jayak_driver_id');
+  location.reload();
+}
+
+// ============ التبويبات ============
+function switchTab(tab) {
+  if (tab === 'earn' && mapFull) toggleMapFull(false);   // اطلع من الخريطة الكاملة
+  document.getElementById('tab-work').classList.toggle('active', tab==='work');
+  document.getElementById('tab-earn').classList.toggle('active', tab==='earn');
+  document.getElementById('work-view').classList.toggle('hidden', tab!=='work');
+  document.getElementById('earn-view').classList.toggle('active', tab==='earn');
+  if (tab==='earn') loadEarnings();
+  if (tab==='work') setTimeout(()=>{ if(map) map.invalidateSize(); }, 80);
+}
+
+async function loadEarnings() {
+  try {
+    const data = await fetch(`/api/driver/${driverId}/earnings`).then(r=>r.json());
+    document.getElementById('total-earnings').innerHTML = data.totalEarnings.toLocaleString() + ' <small>د.ع</small>';
+    document.getElementById('today-earnings').textContent = data.todayEarnings.toLocaleString();
+    document.getElementById('total-trips').textContent = data.totalTrips;
+    document.getElementById('total-km').textContent = data.totalKm;
+    renderTrips(data.trips);
+  } catch(e) { toast('ما كدرنا نجيب كشف الحساب'); }
+}
+
+function renderTrips(trips) {
+  const list = document.getElementById('trips-list');
+  if (!trips || !trips.length) { list.innerHTML = '<div class="earn-empty"><div class="ico">🚗</div><div>لسه ماكو طلبات</div></div>'; return; }
+  list.innerHTML = '';
+  trips.forEach(t => {
+    const time = new Date(t.at).toLocaleTimeString('ar', { hour:'2-digit', minute:'2-digit' });
+    const div = document.createElement('div');
+    div.className = 'trip-item';
+    div.innerHTML = `<div class="ti-icon">${t.type==='delivery'?'🛒':'🚗'}</div>
+      <div class="ti-body"><div class="cust">${t.customer} <span style="font-weight:400;color:var(--muted);font-size:11px">· ${time}</span></div>
+      <div class="route">${t.from} ← ${t.to}</div></div>
+      <div class="ti-fare"><div class="f">${t.fare.toLocaleString()}</div><div class="k">${t.km} كم</div></div>`;
+    list.appendChild(div);
+  });
+}
+
+// ============ الخريطة والاتصال ============
+let mapFull = false;
+
+function initMap() {
+  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+  L.control.zoom({ position:'topright' }).addTo(map);
+  const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🚗</div>', iconSize:[0,0] });
+  meMarker = L.marker(myPos, { icon, interactive:false }).addTo(map);
+
+  // الضغط على الخريطة يكبّرها
+  map.on('click', () => { if (!mapFull) toggleMapFull(true); });
+
+  // نخفي التلميح بعد ٦ ثواني
+  setTimeout(() => { const h = document.getElementById('map-hint'); if (h) h.style.opacity = '0'; }, 6000);
+}
+
+// تكبير/تصغير الخريطة
+function toggleMapFull(full) {
+  mapFull = full;
+  const wv = document.getElementById('work-view');
+  wv.classList.toggle('map-full', full);
+  if (full) updateMapMini();
+  // نعيد حساب حجم الخريطة بعد الحركة
+  setTimeout(() => {
+    if (!map) return;
+    map.invalidateSize();
+    // لو أكو مسار، نركّز عليه
+    if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: full ? [60,60] : [50,50], maxZoom:16 });
+  }, 320);
+}
+
+// بطاقة المعلومات الصغيرة بوضع الخريطة الكاملة
+function updateMapMini() {
+  const mini = document.getElementById('map-mini');
+  if (!activeRide) { mini.classList.remove('show'); return; }
+  const isDel = activeRide.type === 'delivery';
+  document.getElementById('mm-icon').textContent = isDel ? '🛒' : '🚗';
+  document.getElementById('mm-title').textContent = (activeRide.customer && activeRide.customer.name) || 'زبون';
+  const dest = isDel
+    ? (activeRide.pickup.label || 'موقع الزبون')
+    : (activeRide.destination ? (activeRide.destination.label || 'الوجهة') : 'الوجهة');
+  document.getElementById('mm-sub').textContent = isDel ? `يوصّل لـ: ${dest}` : `إلى: ${dest}`;
+  const fareEl = document.getElementById('mm-fare');
+  fareEl.textContent = activeRide.fare ? activeRide.fare.toLocaleString() + ' د.ع' : '';
+  mini.classList.add('show');
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onmessage = (e) => { const { type, data } = JSON.parse(e.data); handleWS(type, data); };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+function handleWS(type, data) {
+  switch(type) {
+    case 'ride:new': onNewRide(data); break;
+    case 'ride:taken': pendingRides.delete(data.rideId); renderRequests(); break;
+    case 'ride:cancelled': if (activeRide && activeRide.rideId===data.rideId) { toast('الزبون ألغى'); endActive(); } break;
+    case 'offer:accepted': onOfferAccepted(data); break;
+    case 'offer:rejected': onOfferRejected(data); break;
+    case 'driver:blocked': {
+      stopWorking();
+      showExpired(data);
+      break;
+    }
+    default: break;
+  }
+}
+
+// الزبون وافق على عرضي
+function onOfferAccepted(data) {
+  if (!offeredRide || offeredRide.rideId !== data.rideId) return;
+  const r = offeredRide.data;
+  const price = offeredRide.price;
+  offeredRide = null;
+  stopOfferPolling();
+  document.getElementById('offer-waiting').classList.add('hidden');
+
+  activeRide = {
+    rideId: data.rideId, type:'delivery', pickup: r.pickup, destination: r.destination,
+    store: r.store, storeName: r.storeName, itemDesc: r.itemDesc, customer: data.customer,
+  };
+  customerPhone = (data.customer && data.customer.phone) || '';
+  showActiveRide({ customer: data.customer || r.customer, estFare: data.price || price }, r);
+  beep();
+  toast('الزبون وافق على عرضك! 🎉 اطلع بالطريق');
+}
+
+// الزبون رفض عرضي
+function onOfferRejected(data) {
+  if (!offeredRide || offeredRide.rideId !== data.rideId) return;
+  offeredRide = null;
+  stopOfferPolling();
+  document.getElementById('offer-waiting').classList.add('hidden');
+  renderRequests();
+  toast('الزبون ما وافق على عرضك');
+}
+
+function getMyPosition() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => { myPos = { lat:pos.coords.latitude, lng:pos.coords.longitude }; if(meMarker) meMarker.setLatLng(myPos); if(map) map.setView(myPos,15); if(isOnline) goOnline(); },
+    () => { if(isOnline) goOnline(); },
+    { enableHighAccuracy:true, timeout:8000 }
+  );
+}
+
+// السائق دائماً شغّال — يبدأ تلقائياً بمجرد ما يفتح التطبيق
+function startWorking() {
+  isOnline = true;
+  setLive(true, 'متصل - جاهز');
+  getMyPosition();
+  goOnline();
+  startLocationUpdates();
+}
+
+function stopWorking() {
+  isOnline = false;
+  setLive(false, 'غير متصل');
+  goOffline();
+  stopLocationUpdates();
+}
+
+function setLive(on, text) {
+  const badge = document.getElementById('live-badge');
+  badge.classList.toggle('off', !on);
+  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'شغّال' : 'متوقف'}`;
+  document.getElementById('status-text').textContent = text;
+}
+
+function goOnline(){ ws.send(JSON.stringify({ type:'driver:online', data:{ driverId, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } })); }
+function goOffline(){ ws.send(JSON.stringify({ type:'driver:offline', data:{ driverId } })); }
+
+function startLocationUpdates() {
+  stopLocationUpdates();
+  locTimer = setInterval(() => {
+    if (!isOnline) return;
+    if (activeRide) simulateStep();
+    ws.send(JSON.stringify({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } }));
+  }, 2000);
+}
+function stopLocationUpdates(){ if(locTimer) clearInterval(locTimer); locTimer=null; }
+
+// ============ الطلبات ============
+function onNewRide(data) {
+  if (!isOnline || activeRide || offeredRide) return;
+  pendingRides.set(data.rideId, data);
+  renderRequests(); beep(); toast('🚗 طلب جديد!');
+}
+
+function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
+
+function renderRequests() {
+  const list = document.getElementById('requests-list');
+  const waiting = document.getElementById('waiting-msg');
+  list.innerHTML = '';
+
+  // لو عندنا عرض معلّق، شاشة الانتظار مالته هي اللي تبين — ما نعرض شي ثاني
+  if (offeredRide) { waiting.classList.add('hidden'); return; }
+
+  if (!pendingRides.size) { waiting.classList.remove('hidden'); return; }
+  waiting.classList.add('hidden');
+
+  for (const [id, r] of pendingRides) {
+    const dist = haversine(myPos.lat, myPos.lng, r.pickup.lat, r.pickup.lng);
+    const isDel = r.type === 'delivery';
+    const fromLbl = r.pickup.label || 'نقطة على الخريطة';
+    const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
+    const badge = isDel ? '<div class="type-badge delivery">🛒 توصيل بضاعة</div>' : '<div class="type-badge ride">🚗 رحلة</div>';
+    const div = document.createElement('div');
+    div.className = 'ride-request' + (isDel ? ' is-delivery' : '');
+
+    if (isDel) {
+      // ===== طلب توصيل: السائق يعرض سعر =====
+      const storeTxt = r.storeName || (r.store ? r.store.label : '') || 'محل غير محدد';
+      div.innerHTML = `
+        <div class="rr-top">
+          <div class="rr-icon">🛒</div>
+          <div class="rr-info">${badge}<h3>${r.customer.name}</h3>
+            <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div></div>
+        </div>
+        <div class="rr-route">
+          <div class="leg"><div class="d store"></div><span>من: ${storeTxt}</span></div>
+          <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${fromLbl}</span></div>
+        </div>
+        <div class="item-box">📦 <b>الطلب:</b> ${r.itemDesc || '—'}</div>
+        <div class="offer-box">
+          <label>سعرك (أجرة التوصيل + سعر البضاعة)</label>
+          <div class="offer-input-row">
+            <input type="number" inputmode="numeric" id="price-${id}" placeholder="مثال: 8000" min="250" step="250">
+            <span class="cur">د.ع</span>
+          </div>
+          <input type="text" id="note-${id}" class="offer-note" placeholder="ملاحظة للزبون (اختياري)">
+        </div>
+        <div class="rr-actions">
+          <button class="btn go" onclick="sendOffer('${id}')">أرسل عرضي 💬</button>
+          <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
+        </div>`;
+    } else {
+      // ===== رحلة عادية: سعر تلقائي =====
+      const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع</div></div>` : '';
+      div.innerHTML = `
+        <div class="rr-top">
+          <div class="rr-icon">🙋</div>
+          <div class="rr-info">${badge}<h3>${r.customer.name}</h3>
+            <div class="dist">يبعد عنك <b>${dist.toFixed(1)} كم</b></div></div>
+          ${fareHtml}
+        </div>
+        <div class="rr-route">
+          <div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
+          <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>
+        </div>
+        <div class="rr-actions">
+          <button class="btn go" onclick="acceptRide('${id}')">اقبل الطلب</button>
+          <button class="btn ghost" onclick="dismissRide('${id}')">تجاهل</button>
+        </div>`;
+    }
+    list.appendChild(div);
+  }
+}
+
+// السائق يرسل عرض سعر
+async function sendOffer(id) {
+  const priceEl = document.getElementById('price-'+id);
+  const noteEl = document.getElementById('note-'+id);
+  const price = parseInt(priceEl?.value, 10);
+  if (!price || price < 250) return toast('اكتب سعرك أول');
+
+  try {
+    const res = await fetch('/api/offer', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ rideId:id, driverId, price, note: noteEl?.value.trim() || '' }),
+    });
+    const out = await res.json();
+    if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
+    if (out.taken) { toast('الطلب مأخوذ من سائق ثاني'); pendingRides.delete(id); renderRequests(); return; }
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+
+    // خزّن الطلب لحد ما الزبون يرد
+    offeredRide = { rideId:id, data: pendingRides.get(id), price };
+    pendingRides.delete(id);
+    showWaitingOffer(price);   // نعرض شاشة الانتظار أول
+    renderRequests();          // بعدها نحدّث القائمة (تحترم حالة العرض)
+  } catch(e) { toast('صار خطأ، حاول مرة ثانية'); }
+}
+
+function showWaitingOffer(price) {
+  document.getElementById('waiting-msg').classList.add('hidden');
+  const box = document.getElementById('offer-waiting');
+  box.classList.remove('hidden');
+  document.getElementById('ow-price').textContent = price.toLocaleString() + ' د.ع';
+  startOfferPolling();   // شبكة أمان: نتأكد من الرد حتى لو انقطع الاتصال
+}
+
+function hideWaitingOffer() {
+  stopOfferPolling();
+  document.getElementById('offer-waiting').classList.add('hidden');
+  renderRequests();
+}
+
+// ============ شبكة أمان: نسأل السيرفر عن حالة العرض كل ٣ ثواني ============
+// (لو انقطعت رسالة WebSocket لأي سبب، هاي تضمن إنه السائق ما يفوته الرد)
+let offerPollTimer = null;
+function startOfferPolling() {
+  stopOfferPolling();
+  offerPollTimer = setInterval(async () => {
+    if (!offeredRide) { stopOfferPolling(); return; }
+    try {
+      const res = await fetch(`/api/ride/${offeredRide.rideId}/status`);
+      if (!res.ok) return;
+      const s = await res.json();
+      if (s.status === 'accepted' && s.driverId === driverId) {
+        onOfferAccepted({ rideId: offeredRide.rideId, price: s.fare, customer: s.customer });
+      } else if (s.status === 'searching' || s.driverId !== driverId) {
+        onOfferRejected({ rideId: offeredRide.rideId });
+      }
+    } catch(e) { /* نتجاهل، نحاول بالدورة الجاية */ }
+  }, 3000);
+}
+function stopOfferPolling(){ if (offerPollTimer) clearInterval(offerPollTimer); offerPollTimer = null; }
+
+function dismissRide(id){ pendingRides.delete(id); renderRequests(); }
+
+async function acceptRide(id) {
+  const r = pendingRides.get(id);
+  if (!r) return;
+  try {
+    const res = await fetch('/api/accept', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rideId:id, driverId }) });
+    const out = await res.json();
+    if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
+    if (out.taken) { toast('الطلب انحجز من سائق ثاني'); pendingRides.delete(id); renderRequests(); return; }
+    activeRide = { rideId:id, type:r.type, pickup:r.pickup, destination:r.destination, store:r.store, itemDesc:r.itemDesc, customer:out.customer };
+    customerPhone = out.customer.phone || '';
+    pendingRides.clear();
+    showActiveRide(out, r);
+  } catch(e) { toast('صار خطأ'); }
+}
+
+function showActiveRide(out, r) {
+  document.getElementById('panel-waiting').classList.add('hidden');
+  document.getElementById('panel-active').classList.remove('hidden');
+  document.getElementById('ar-name').textContent = out.customer.name || 'زبون';
+  document.getElementById('ar-avatar').textContent = (out.customer.name||'؟').charAt(0);
+  document.getElementById('ar-phone').textContent = out.customer.phone || '';
+  document.getElementById('ar-fare').textContent = out.estFare ? out.estFare.toLocaleString()+' د.ع' : 'غير محددة';
+  if (activeRide) activeRide.fare = out.estFare || 0;   // نخزنها لبطاقة الخريطة الكاملة
+
+  const isDel = r.type === 'delivery';
+  const fromLbl = r.pickup.label || 'نقطة على الخريطة';
+  const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
+  let html;
+  if (isDel) {
+    const storeTxt = r.storeName || (r.store ? r.store.label : '') || 'محل غير محدد';
+    html = `<div class="leg"><div class="d store"></div><span>يجيب من: ${storeTxt}</span></div>
+            <div class="leg"><div class="d to"></div><span>يوصّل لـ: ${fromLbl}</span></div>`;
+  } else {
+    html = `<div class="leg"><div class="d from"></div><span>${fromLbl}</span></div>
+            <div class="leg"><div class="d to"></div><span>${toLbl}</span></div>`;
+  }
+  document.getElementById('ar-route').innerHTML = html + (isDel && r.itemDesc ? `<div class="item-box" style="margin-top:8px;margin-bottom:0">📦 <b>الطلب:</b> ${r.itemDesc}</div>` : '');
+
+  const pIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">${isDel?'🏪':'🟢'}</div>`, iconSize:[0,0] });
+  if (pickupMarker) map.removeLayer(pickupMarker);
+  pickupMarker = L.marker([r.pickup.lat, r.pickup.lng], { icon:pIcon, interactive:false }).addTo(map);
+  if (r.destination) {
+    const dIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🔴</div>', iconSize:[0,0] });
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker([r.destination.lat, r.destination.lng], { icon:dIcon, interactive:false }).addTo(map);
+  }
+  drawRoute();
+}
+
+function drawRoute() {
+  if (!activeRide || !map) return;
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline([[myPos.lat,myPos.lng],[activeRide.pickup.lat,activeRide.pickup.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:16 });
+}
+
+function simulateStep() {
+  if (!activeRide) return;
+  const dLat = activeRide.pickup.lat - myPos.lat, dLng = activeRide.pickup.lng - myPos.lng;
+  if (Math.sqrt(dLat*dLat + dLng*dLng) < 0.0003) return;
+  myPos.lat += dLat*0.15; myPos.lng += dLng*0.15;
+  if (meMarker) meMarker.setLatLng(myPos);
+  drawRoute();
+}
+
+async function markArrived() {
+  if (!activeRide) return;
+  await fetch('/api/arrived', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) });
+  toast('تم إبلاغ الزبون بوصولك ✅');
+}
+function callCustomer(){ if(customerPhone) location.href=`tel:${customerPhone}`; else toast('رقم الزبون غير متوفر'); }
+
+async function finishRide() {
+  if (!activeRide) return;
+  const out = await fetch('/api/complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) }).then(r=>r.json());
+  toast('انتهى الطلب، عاشت إيدك 🙏' + (out.fare ? ` (+${out.fare.toLocaleString()} د.ع)` : ''));
+  endActive();
+}
+
+function endActive() {
+  activeRide = null; customerPhone='';
+  toggleMapFull(false);                                    // ارجع للوضع العادي
+  document.getElementById('map-mini').classList.remove('show');
+  if (pickupMarker) { map.removeLayer(pickupMarker); pickupMarker=null; }
+  if (destMarker) { map.removeLayer(destMarker); destMarker=null; }
+  if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
+  if (map) map.setView(myPos, 15);
+  document.getElementById('panel-active').classList.add('hidden');
+  document.getElementById('panel-waiting').classList.remove('hidden');
+  renderRequests();
+}
+
+// ============ أدوات ============
+let toastTimer;
+function toast(msg){ const o=document.querySelector('.toast'); if(o)o.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.remove(),3200); }
+function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.setValueAtTime(.15,c.currentTime); o.start(); o.stop(c.currentTime+.15); }catch(e){} }
+
+// ============ التشغيل ============
+connectWS();
+if (driver) {
+  // مسجّل من قبل — نتأكد من حالته
+  document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+  checkAccess();
+} else {
+  gotoStep('welcome');
+}
+</script>
+</body>
+</html>
