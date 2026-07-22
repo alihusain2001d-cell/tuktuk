@@ -9,7 +9,7 @@
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
   :root {
     --ink:#1A1A1A; --sky:#FFC800; --sky-dark:#E0AC00; --sky-light:#FFF7DE; --sky-pale:#FFFBF0;
-    --bg:#FAF7F0; --line:#EDE7DA; --go:#12A150; --stop:#E5484D; --warn:#F5A623; --muted:#8A8270;
+    --bg:#FFFFFF; --line:#EDE7DA; --go:#12A150; --stop:#E5484D; --warn:#F5A623; --muted:#8A8270;
   }
   html,body { height:100%; background:var(--bg); color:var(--ink); }
   #app { min-height:100vh; display:flex; flex-direction:column; }
@@ -80,6 +80,7 @@
   .dc-info .phone { font-size:12px; color:var(--muted); direction:ltr; text-align:right; }
   .dc-info .car { font-size:11px; color:var(--muted); display:flex; align-items:center; gap:8px; }
   .dc-paid { color:var(--go); font-weight:700; }
+  .dc-rating { color:#B8860B; font-weight:700; }
   .dc-right { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex-shrink:0; }
   .docs-btn { background:var(--sky-light); border:none; border-radius:9px; width:32px; height:32px; font-size:15px; cursor:pointer; }
   .docs-btn:active { transform:scale(.92); }
@@ -181,6 +182,7 @@
   .filter-row { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px; }
   .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; }
   .chip.active { background:var(--sky); border-color:var(--sky); color:var(--ink); }
+  .hidden { display:none !important; }
 </style>
 </head>
 <body>
@@ -237,8 +239,23 @@
       <div class="sc-label">إجمالي ما كسبه السواق من الطلبات (مو ربحك)</div>
     </div>
 
+    <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
+      <div class="sr-ico">📞</div>
+      <div class="sr-body">
+        <h4>روابط التواصل والدعم</h4>
+        <p>واتساب، فيسبوك، انستقرام، تلكرام — تظهر بصفحة الدعم بتطبيق الزبون</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openContactSettingsModal()">تعديل</button>
+    </div>
+
     <div class="section-title">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span></div>
     <div id="need-activation"></div>
+
+    <div class="section-title">🎉 وصلوا للمكافأة <span class="count" id="rewards-count">0</span></div>
+    <div id="rewards-alert"></div>
+
+    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span></div>
+    <div id="payouts-list"></div>
 
     <div class="section-title">🧾 آخر التفعيلات <span class="count" id="subs-count">0</span></div>
     <div id="subs-list"></div>
@@ -246,6 +263,9 @@
 
   <!-- ===== السواق ===== -->
   <div class="view" id="view-drivers">
+    <div class="section-title">😕 آخر الملاحظات والشكاوى <span class="count" id="complaints-count">0</span></div>
+    <div id="complaints-list" style="margin-bottom:18px"></div>
+
     <div class="search-box">
       <span class="si">🔍</span>
       <input type="text" id="driver-search" placeholder="دوّر باسم السائق أو رقمه..." oninput="onSearch()">
@@ -284,6 +304,15 @@
 
   <!-- ===== الزبائن ===== -->
   <div class="view" id="view-customers">
+    <div class="sub-row" style="cursor:pointer" onclick="openRewardSettingsModal()">
+      <div class="sr-ico">🎁</div>
+      <div class="sr-body">
+        <h4>قاعدة مكافأة الولاء</h4>
+        <p id="reward-rule-sub">نحمّل...</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openRewardSettingsModal()">تعديل</button>
+    </div>
+    <button class="btn sky full" style="margin-bottom:14px" onclick="openGrantAllModal()">🎁 امنح كل الزبائن مكافأة</button>
     <div id="customers-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
   </div>
 
@@ -328,6 +357,98 @@
   </div>
 </div>
 
+<!-- نافذة قاعدة مكافأة الولاء -->
+<div class="modal-bg" id="reward-settings-modal">
+  <div class="modal">
+    <h3>قاعدة مكافأة الولاء</h3>
+    <div class="m-sub">تنطبق تلقائياً على كل زبون أول ما يوصل لعدد الرحلات المحدد (مرة وحدة لكل زبون)</div>
+
+    <div class="m-label">بعد كم رحلة؟</div>
+    <div class="manual-row" style="margin-bottom:16px">
+      <input type="number" id="rs-threshold" min="1" placeholder="10">
+      <span class="lbl">رحلة</span>
+    </div>
+
+    <div class="m-label">نوع المكافأة</div>
+    <div class="quick-btns" id="rs-type-btns">
+      <div class="quick-btn" data-type="free_ride" onclick="pickRewardType('free_ride', this, 'rs')"><div class="qb-num">🎁</div><div class="qb-lbl">رحلة مجانية</div></div>
+      <div class="quick-btn" data-type="percent" onclick="pickRewardType('percent', this, 'rs')"><div class="qb-num">%</div><div class="qb-lbl">خصم نسبة</div></div>
+      <div class="quick-btn" data-type="amount" onclick="pickRewardType('amount', this, 'rs')" style="grid-column:span 2"><div class="qb-num">د.ع</div><div class="qb-lbl">خصم مبلغ ثابت</div></div>
+    </div>
+
+    <div id="rs-value-wrap">
+      <div class="m-label">القيمة</div>
+      <div class="amount-row">
+        <input type="number" id="rs-value" placeholder="0" min="0">
+        <span class="cur" id="rs-value-unit">%</span>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn go" onclick="saveRewardSettings()">حفظ ✅</button>
+      <button class="btn ghost" onclick="closeRewardSettingsModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة منح مكافأة يدوية -->
+<div class="modal-bg" id="grant-reward-modal">
+  <div class="modal">
+    <h3>منح مكافأة يدوية</h3>
+    <div class="m-sub" id="gr-sub">—</div>
+
+    <div class="m-label">نوع المكافأة</div>
+    <div class="quick-btns" id="gr-type-btns">
+      <div class="quick-btn" data-type="free_ride" onclick="pickRewardType('free_ride', this, 'gr')"><div class="qb-num">🎁</div><div class="qb-lbl">رحلة مجانية</div></div>
+      <div class="quick-btn" data-type="percent" onclick="pickRewardType('percent', this, 'gr')"><div class="qb-num">%</div><div class="qb-lbl">خصم نسبة</div></div>
+      <div class="quick-btn" data-type="amount" onclick="pickRewardType('amount', this, 'gr')" style="grid-column:span 2"><div class="qb-num">د.ع</div><div class="qb-lbl">خصم مبلغ ثابت</div></div>
+    </div>
+
+    <div id="gr-value-wrap">
+      <div class="m-label">القيمة</div>
+      <div class="amount-row">
+        <input type="number" id="gr-value" placeholder="0" min="0">
+        <span class="cur" id="gr-value-unit">%</span>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn go" onclick="confirmGrant()">امنح 🎁</button>
+      <button class="btn ghost" onclick="closeGrantModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة روابط التواصل -->
+<div class="modal-bg" id="contact-settings-modal">
+  <div class="modal">
+    <h3>روابط التواصل والدعم</h3>
+    <div class="m-sub">تظهر كأزرار بصفحة "الاتصال بالدعم" داخل تطبيق الزبون — اترك الحقل فارغ لو ما تريد الزر يطلع</div>
+
+    <div class="lg-field-a">
+      <label class="m-label">📱 رقم واتساب</label>
+      <input type="text" id="cs-whatsapp" class="note-input" placeholder="مثال: 9647701234567" style="direction:ltr;text-align:right;margin-bottom:14px">
+    </div>
+    <div class="lg-field-a">
+      <label class="m-label">📘 رابط فيسبوك</label>
+      <input type="text" id="cs-facebook" class="note-input" placeholder="https://facebook.com/..." style="direction:ltr;text-align:right;margin-bottom:14px">
+    </div>
+    <div class="lg-field-a">
+      <label class="m-label">📷 رابط انستقرام</label>
+      <input type="text" id="cs-instagram" class="note-input" placeholder="https://instagram.com/..." style="direction:ltr;text-align:right;margin-bottom:14px">
+    </div>
+    <div class="lg-field-a">
+      <label class="m-label">✈️ رابط تلكرام</label>
+      <input type="text" id="cs-telegram" class="note-input" placeholder="https://t.me/..." style="direction:ltr;text-align:right;margin-bottom:16px">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn go" onclick="saveContactSettings()">حفظ ✅</button>
+      <button class="btn ghost" onclick="closeContactSettingsModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
 <!-- نافذة المستمسكات -->
 <div class="modal-bg" id="docs-modal">
   <div class="modal">
@@ -348,10 +469,11 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 let KEY = localStorage.getItem('jayak_admin_key') || '';
-let allDrivers = [], allRides = [], liveMap = null, liveMarkers = [];
+let allDrivers = [], allRides = [], allCustomers = [], liveMap = null, liveMarkers = [];
 let driverFilter = 'all', rideFilter = 'all';
 let selDays = null, subTargetId = null;
 let liveTimer = null;
+let rsType = 'free_ride', grType = 'free_ride', grantTargetPhone = null;
 
 // ============ الدخول ============
 async function doLogin() {
@@ -389,7 +511,8 @@ function switchTab(name) {
 async function refreshAll() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spin');
-  await Promise.all([loadStats(), loadDrivers(), loadSubs()]);
+  await Promise.all([loadStats(), loadDrivers(), loadSubs(), loadCustomers(), loadPayouts(), loadComplaints()]);
+  renderRewardsAlert();
   document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar', {hour:'2-digit',minute:'2-digit'});
   btn.classList.remove('spin');
 }
@@ -445,6 +568,27 @@ async function loadDrivers() {
   } catch(e) { document.getElementById('drivers-list').innerHTML = '<div class="empty">صار خطأ بالتحميل</div>'; }
 }
 
+// ============ الملاحظات والشكاوى ============
+async function loadComplaints() {
+  try {
+    const list = await api('/api/admin/complaints').then(r=>r.json());
+    document.getElementById('complaints-count').textContent = list.length;
+    const box = document.getElementById('complaints-list');
+    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:22px"><div style="font-size:28px;margin-bottom:6px">😊</div><div style="font-size:12.5px">ماكو ملاحظات حالياً</div></div>'; return; }
+    box.innerHTML = list.map(c => {
+      const stars = c.rating ? '⭐'.repeat(c.rating) : '';
+      const t = c.done_at ? new Date(c.done_at).toLocaleDateString('ar',{month:'short',day:'numeric'}) : '';
+      return `<div class="sub-row">
+        <div class="sr-ico">💬</div>
+        <div class="sr-body">
+          <h4>${c.driver_name || 'سائق'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${c.customer_name || 'زبون'} · ${t}</span></h4>
+          <p>${stars} ${c.rating_note || ''}</p>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { /* هادئ */ }
+}
+
 function accessBadge(a) {
   if (!a) return '<span class="badge expired">؟</span>';
   if (a.reason === 'trial') return `<span class="badge trial">🎁 تجربة ${a.hoursLeft}س</span>`;
@@ -459,6 +603,7 @@ function driverCard(d) {
     ? `<img src="${d.photo_self}" onclick="viewImg('${d.id}','self')">`
     : (d.name||'؟').charAt(0);
   const paid = d.paidTotal ? `<span class="dc-paid">💰 ${d.paidTotal.toLocaleString()}</span>` : '';
+  const rating = d.rating && d.rating.count ? `<span class="dc-rating">⭐ ${d.rating.avg} (${d.rating.count})</span>` : '';
 
   return `<div class="driver-card" data-id="${d.id}">
     <div class="dc-head">
@@ -466,7 +611,7 @@ function driverCard(d) {
       <div class="dc-info">
         <h3>${d.name} ${d.online ? '<span class="dot-online"></span>' : ''}</h3>
         <div class="phone">${d.phone}</div>
-        <div class="car">${d.car || '—'} ${paid}</div>
+        <div class="car">${d.car || '—'} ${paid} ${rating}</div>
       </div>
       <div class="dc-right">
         ${accessBadge(a)}
@@ -735,23 +880,187 @@ function filterRides(f, el) {
 }
 
 // ============ الزبائن ============
+const REWARD_LABEL = (r) => {
+  if (!r) return '';
+  if (r.reward_type === 'free_ride') return 'رحلة مجانية 🎁';
+  if (r.reward_type === 'percent') return `خصم ${r.reward_value}% 🎁`;
+  return `خصم ${(r.reward_value||0).toLocaleString()} د.ع 🎁`;
+};
+
 async function loadCustomers() {
   try {
-    const cs = await api('/api/admin/customers').then(r=>r.json());
+    allCustomers = await api('/api/admin/customers').then(r=>r.json());
+    renderRewardRuleSub();
     const list = document.getElementById('customers-list');
-    if (!cs.length) { list.innerHTML = '<div class="empty"><div class="ico">👥</div><div>ماكو زبائن</div></div>'; return; }
-    list.innerHTML = `<div class="section-title">الزبائن <span class="count">${cs.length}</span></div>` + cs.map(c => `
+    if (!allCustomers.length) { list.innerHTML = '<div class="empty"><div class="ico">👥</div><div>ماكو زبائن</div></div>'; return; }
+    list.innerHTML = `<div class="section-title">الزبائن <span class="count">${allCustomers.length}</span></div>` + allCustomers.map(c => `
       <div class="ride-row">
         <div class="rr-ico">👤</div>
         <div class="rr-body">
           <h4>${c.name}</h4>
-          <p style="direction:ltr;text-align:right">${c.phone}</p>
+          <p style="direction:ltr;text-align:right">${c.phone} · ${c.tripsDone} رحلة${c.pendingReward ? ' · <span style="color:var(--go);font-weight:700">'+REWARD_LABEL(c.pendingReward)+'</span>' : ''}</p>
         </div>
-        <div class="rr-side">
+        <div class="rr-side" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn ghost" onclick="callDriver('${c.phone}')">📞</button>
+          <button class="btn sky" onclick="openGrantModal('${c.phone}','${c.name}')">🎁</button>
         </div>
       </div>`).join('');
   } catch(e) { document.getElementById('customers-list').innerHTML = '<div class="empty">صار خطأ</div>'; }
+}
+
+async function renderRewardRuleSub() {
+  try {
+    const s = await api('/api/admin/reward-settings').then(r=>r.json());
+    document.getElementById('reward-rule-sub').textContent = `بعد ${s.trips_threshold} رحلة → ${REWARD_LABEL({reward_type:s.reward_type, reward_value:s.reward_value})}`;
+  } catch(e) { document.getElementById('reward-rule-sub').textContent = 'اضغط لتحديد القاعدة'; }
+}
+
+function renderRewardsAlert() {
+  const auto = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto');
+  document.getElementById('rewards-count').textContent = auto.length;
+  const box = document.getElementById('rewards-alert');
+  if (!auto.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:30px;margin-bottom:6px">🎉</div><div style="font-size:12.5px">ماكو زبائن وصلوا للمكافأة حالياً</div></div>'; return; }
+  box.innerHTML = auto.map(c => `
+    <div class="sub-row">
+      <div class="sr-ico">🎉</div>
+      <div class="sr-body">
+        <h4>${c.name}</h4>
+        <p>${c.tripsDone} رحلة · ${REWARD_LABEL(c.pendingReward)}</p>
+      </div>
+    </div>`).join('');
+}
+
+// ============ روابط التواصل ============
+async function openContactSettingsModal() {
+  document.getElementById('contact-settings-modal').classList.add('show');
+  try {
+    const s = await fetch('/api/contact-settings').then(r=>r.json());
+    document.getElementById('cs-whatsapp').value = s.whatsapp || '';
+    document.getElementById('cs-facebook').value = s.facebook || '';
+    document.getElementById('cs-instagram').value = s.instagram || '';
+    document.getElementById('cs-telegram').value = s.telegram || '';
+  } catch(e) { toast('صار خطأ بجلب الروابط'); }
+}
+function closeContactSettingsModal(){ document.getElementById('contact-settings-modal').classList.remove('show'); }
+
+async function saveContactSettings() {
+  const body = {
+    whatsapp: document.getElementById('cs-whatsapp').value.trim(),
+    facebook: document.getElementById('cs-facebook').value.trim(),
+    instagram: document.getElementById('cs-instagram').value.trim(),
+    telegram: document.getElementById('cs-telegram').value.trim(),
+  };
+  try {
+    const res = await api('/api/admin/contact-settings', { method:'POST', body: JSON.stringify(body) });
+    if (!res.ok) return toast('صار خطأ');
+    closeContactSettingsModal();
+    toast('انحفظت روابط التواصل ✅');
+  } catch(e) { toast('صار خطأ'); }
+}
+
+// ============ مستحقات السواق من المكافآت ============
+async function loadPayouts() {
+  try {
+    const list = await api('/api/admin/reward-payouts').then(r=>r.json());
+    document.getElementById('payouts-count').textContent = list.length;
+    const box = document.getElementById('payouts-list');
+    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:30px;margin-bottom:6px">✅</div><div style="font-size:12.5px">ماكو مستحقات معلّقة</div></div>'; return; }
+    box.innerHTML = list.map(p => `
+      <div class="sub-row">
+        <div class="sr-ico">💸</div>
+        <div class="sr-body">
+          <h4>${p.driver_name || 'سائق'}</h4>
+          <p>مكافأة زبون · ${new Date(p.used_at).toLocaleDateString('ar',{month:'short',day:'numeric'})}</p>
+        </div>
+        <div class="sr-amt">${(p.driver_payout||0).toLocaleString()} د.ع</div>
+        <button class="btn go" style="margin-right:8px" onclick="settlePayout(${p.id})">دفعت ✅</button>
+      </div>`).join('');
+  } catch(e) { /* هادئ */ }
+}
+
+async function settlePayout(id) {
+  if (!confirm('تأكد إنك دفعت هذا المبلغ للسائق نقدي؟')) return;
+  try {
+    await api(`/api/admin/reward-payouts/${id}/settle`, { method:'POST' });
+    toast('انسجّل الدفع ✅');
+    loadPayouts();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+// ============ نافذة قاعدة المكافأة ============
+function pickRewardType(type, el, prefix) {
+  if (prefix === 'rs') rsType = type; else grType = type;
+  document.querySelectorAll(`#${prefix}-type-btns .quick-btn`).forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+  const wrap = document.getElementById(`${prefix}-value-wrap`);
+  const unit = document.getElementById(`${prefix}-value-unit`);
+  if (type === 'free_ride') { wrap.classList.add('hidden'); }
+  else { wrap.classList.remove('hidden'); unit.textContent = type === 'percent' ? '%' : 'د.ع'; }
+}
+
+async function openRewardSettingsModal() {
+  document.getElementById('reward-settings-modal').classList.add('show');
+  try {
+    const s = await api('/api/admin/reward-settings').then(r=>r.json());
+    document.getElementById('rs-threshold').value = s.trips_threshold;
+    document.getElementById('rs-value').value = s.reward_value || '';
+    const btn = document.querySelector(`#rs-type-btns .quick-btn[data-type="${s.reward_type}"]`);
+    if (btn) pickRewardType(s.reward_type, btn, 'rs');
+  } catch(e) { toast('صار خطأ بجلب الإعدادات'); }
+}
+function closeRewardSettingsModal(){ document.getElementById('reward-settings-modal').classList.remove('show'); }
+
+async function saveRewardSettings() {
+  const threshold = parseInt(document.getElementById('rs-threshold').value, 10);
+  const value = parseInt(document.getElementById('rs-value').value, 10) || 0;
+  if (!threshold || threshold < 1) return toast('اكتب عدد رحلات صحيح');
+  try {
+    const res = await api('/api/admin/reward-settings', { method:'POST', body: JSON.stringify({ threshold, type: rsType, value }) });
+    if (!res.ok) return toast('صار خطأ');
+    closeRewardSettingsModal();
+    toast('انحفظت قاعدة المكافأة ✅');
+  } catch(e) { toast('صار خطأ'); }
+}
+
+// ============ نافذة منح مكافأة يدوية ============
+function openGrantModal(phone, name) {
+  grantTargetPhone = phone;
+  document.getElementById('gr-sub').textContent = `${name} — ${phone}`;
+  document.getElementById('gr-value').value = '';
+  document.querySelectorAll('#gr-type-btns .quick-btn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('gr-value-wrap').classList.remove('hidden');
+  grType = 'free_ride';
+  document.getElementById('grant-reward-modal').classList.add('show');
+}
+
+function openGrantAllModal() {
+  grantTargetPhone = 'ALL';
+  document.getElementById('gr-sub').textContent = `لكل الزبائن (${allCustomers.length})`;
+  document.getElementById('gr-value').value = '';
+  document.querySelectorAll('#gr-type-btns .quick-btn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('gr-value-wrap').classList.remove('hidden');
+  grType = 'free_ride';
+  document.getElementById('grant-reward-modal').classList.add('show');
+}
+
+function closeGrantModal(){ document.getElementById('grant-reward-modal').classList.remove('show'); }
+
+async function confirmGrant() {
+  const value = parseInt(document.getElementById('gr-value').value, 10) || 0;
+  if (grType !== 'free_ride' && !value) return toast('اكتب قيمة المكافأة');
+
+  const isAll = grantTargetPhone === 'ALL';
+  if (isAll && !confirm(`تأكد راح تمنح مكافأة لـ ${allCustomers.length} زبون؟`)) return;
+
+  try {
+    const url = isAll ? '/api/admin/customers/grant-reward-all' : `/api/admin/customer/${encodeURIComponent(grantTargetPhone)}/grant-reward`;
+    const res = await api(url, { method:'POST', body: JSON.stringify({ type: grType, value }) });
+    const out = await res.json();
+    if (!res.ok) return toast('صار خطأ');
+    closeGrantModal();
+    toast(isAll ? `انمنحت المكافأة لـ ${out.count} زبون 🎁` : 'انمنحت المكافأة 🎁');
+    loadCustomers();
+  } catch(e) { toast('صار خطأ'); }
 }
 
 // ============ أدوات ============

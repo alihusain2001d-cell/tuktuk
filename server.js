@@ -349,7 +349,7 @@ app.post('/api/customer/register', async (req, res) => {
     }
 
     const c = await db.upsertCustomer(phone, name);
-    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone } });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo } });
   } catch (e) {
     console.error('خطأ بتسجيل الزبون:', e.message);
     res.status(500).json({ error: 'صار خطأ بالتسجيل' });
@@ -377,10 +377,101 @@ app.post('/api/customer/login', async (req, res) => {
     if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم', notFound: true });
 
     const trips = await db.getCustomerTripCount(clean);
-    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone }, trips });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo }, trips });
   } catch (e) {
     console.error('خطأ بدخول الزبون:', e.message);
     res.status(500).json({ error: 'صار خطأ بتسجيل الدخول' });
+  }
+});
+
+// سجل رحلات الزبون المنجزة
+app.get('/api/customer/:phone/trips', async (req, res) => {
+  try {
+    const trips = await db.getCustomerTrips(req.params.phone);
+    res.json({ trips });
+  } catch (e) {
+    console.error('خطأ بجلب رحلات الزبون:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// تحديث اسم/صورة الزبون
+app.post('/api/customer/:phone/profile', async (req, res) => {
+  try {
+    const { name, photo } = req.body;
+    const c = await db.updateCustomerProfile(req.params.phone, { name, photo });
+    if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم' });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo } });
+  } catch (e) {
+    console.error('خطأ بتحديث الحساب:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// تغيير رقم الزبون (بعد تحقق OTP على الرقم الجديد بواسطة /api/otp/send و /api/otp/verify)
+app.post('/api/customer/:phone/change-phone', async (req, res) => {
+  try {
+    const newPhone = normalizePhone(req.body.newPhone);
+    if (newPhone.length < 10) return res.status(400).json({ error: 'رقم غير صحيح' });
+    const existing = await db.getCustomerByPhone(newPhone);
+    if (existing) return res.status(409).json({ error: 'هذا الرقم مستخدم من حساب ثاني' });
+    const c = await db.changeCustomerPhone(req.params.phone, newPhone);
+    if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم' });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone } });
+  } catch (e) {
+    console.error('خطأ بتغيير الرقم:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// مكافآت الزبون (المتاحة الحين + رحلاته المتبقية للمكافأة الجاية)
+app.get('/api/customer/:phone/rewards', async (req, res) => {
+  try {
+    const [pending, settings, tripCount] = await Promise.all([
+      db.getPendingReward(req.params.phone),
+      db.getRewardSettings(),
+      db.getCustomerTripCount(req.params.phone),
+    ]);
+    res.json({
+      pending: pending ? { type: pending.reward_type, value: pending.reward_value } : null,
+      tripsDone: tripCount,
+      tripsThreshold: settings.trips_threshold,
+    });
+  } catch (e) {
+    console.error('خطأ بجلب مكافآت الزبون:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// المواقع المفضلة للزبون
+app.get('/api/customer/:phone/places', async (req, res) => {
+  try {
+    res.json({ places: await db.getSavedPlaces(req.params.phone) });
+  } catch (e) {
+    console.error('خطأ بجلب المواقع:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+app.post('/api/customer/:phone/places', async (req, res) => {
+  try {
+    const { name, lat, lng, address } = req.body;
+    if (!name || lat == null || lng == null) return res.status(400).json({ error: 'بيانات ناقصة' });
+    const place = await db.addSavedPlace(req.params.phone, name, lat, lng, address);
+    res.json({ ok: true, place });
+  } catch (e) {
+    console.error('خطأ بحفظ الموقع:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+app.delete('/api/customer/:phone/places/:id', async (req, res) => {
+  try {
+    await db.deleteSavedPlace(req.params.id, req.params.phone);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('خطأ بحذف الموقع:', e.message);
+    res.status(500).json({ error: 'خطأ' });
   }
 });
 
@@ -402,6 +493,17 @@ app.post('/api/book', async (req, res) => {
       estFare = calcFare(estKm);
     }
 
+    // لو الزبون عنده مكافأة متاحة، تنطبق تلقائياً على الرحلة العادية (مو التوصيل، السعر فيه ما يتحدد إلا بعد عرض السائق)
+    let customerPaid = estFare, reward = null;
+    if (type === 'ride' && phone) {
+      reward = await db.getPendingReward(phone);
+      if (reward) {
+        if (reward.reward_type === 'free_ride') customerPaid = 0;
+        else if (reward.reward_type === 'percent') customerPaid = Math.max(0, Math.round(estFare * (1 - reward.reward_value / 100)));
+        else if (reward.reward_type === 'amount') customerPaid = Math.max(0, estFare - reward.reward_value);
+      }
+    }
+
     const ride = {
       id: rideId, type,
       customer: { name: name || 'زبون', phone: phone || '' },
@@ -411,13 +513,15 @@ app.post('/api/book', async (req, res) => {
       store: type === 'delivery' && store && store.lat ? { label: store.label || '', lat: store.lat, lng: store.lng } : null,
       storeName: type === 'delivery' ? (storeName || '') : '',
       itemDesc: type === 'delivery' ? (itemDesc || '') : '',
-      estKm, estFare, status: 'searching', driverId: null,
+      estKm, estFare, customerPaid, rewardId: reward ? reward.id : null,
+      status: 'searching', driverId: null,
       customerSocketId: socketId, createdAt: Date.now(),
     };
 
     // احفظ بالقاعدة + بالذاكرة (للتتبع اللحظي)
     await db.createRide(ride);
     if (phone) await db.upsertCustomer(phone, name || 'زبون');
+    if (reward) await db.reserveRewardForRide(reward.id, rideId);
     activeRides.set(rideId, ride);
 
     broadcast('driver', 'ride:new', {
@@ -426,7 +530,10 @@ app.post('/api/book', async (req, res) => {
       estKm: Math.round(estKm*10)/10, estFare, customer: { name: ride.customer.name },
     });
 
-    res.json({ rideId, driversNotified: onlineDrivers.size, estKm: Math.round(estKm*10)/10, estFare });
+    res.json({
+      rideId, driversNotified: onlineDrivers.size, estKm: Math.round(estKm*10)/10, estFare,
+      customerPaid, reward: reward ? { type: reward.reward_type, value: reward.reward_value } : null,
+    });
   } catch (e) {
     console.error('خطأ بالحجز:', e.message);
     res.status(500).json({ error: 'صار خطأ بالحجز' });
@@ -613,9 +720,18 @@ app.post('/api/complete', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     ride.status = 'done';
     await db.updateRideStatus(ride.id, 'done');
-    sendTo(ride.customerSocketId, 'ride:done', { fare: ride.estFare });
+
+    // لو الرحلة استخدمت مكافأة، سجّل المبلغ المستحق للسائق (الفرق بين الأجرة الحقيقية واللي دفعه الزبون)
+    if (ride.rewardId) {
+      const payout = (ride.estFare || 0) - (ride.customerPaid != null ? ride.customerPaid : ride.estFare);
+      await db.markRewardUsedByRide(ride.id, ride.driverId, Math.max(0, payout));
+    }
+    // تحقق إذا الزبون وصل الحين لعدد الرحلات المطلوب لمكافأة جديدة
+    if (ride.customer?.phone) await db.maybeGrantAutoReward(ride.customer.phone);
+
+    sendTo(ride.customerSocketId, 'ride:done', { fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
     activeRides.delete(ride.id);
-    res.json({ ok: true, fare: ride.estFare });
+    res.json({ ok: true, fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
   } catch (e) {
     console.error('خطأ بالإنهاء:', e.message);
     res.status(500).json({ error: 'خطأ' });
@@ -628,6 +744,7 @@ app.post('/api/cancel', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     ride.status = 'cancelled';
     await db.updateRideStatus(ride.id, 'cancelled');
+    if (ride.rewardId) await db.releaseRewardByRide(ride.id);
     if (ride.driverId) {
       const d = onlineDrivers.get(ride.driverId);
       if (d) sendTo(d.socketId, 'ride:cancelled', { rideId: ride.id });
@@ -636,6 +753,12 @@ app.post('/api/cancel', async (req, res) => {
     activeRides.delete(ride.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
+// روابط التواصل (عامة — يحتاجها تطبيق الزبون لعرض أزرار الدعم)
+app.get('/api/contact-settings', async (req, res) => {
+  try { res.json(await db.getContactSettings()); }
+  catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
 // ============================================================
@@ -655,6 +778,7 @@ app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
       online: onlineDrivers.has(d.id),
       access: await db.getDriverAccess(d.id),
       paidTotal: await db.getDriverPaidTotal(d.id),
+      rating: await db.getDriverRatingSummary(d.id),
     })));
     res.json(withAccess);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -749,24 +873,98 @@ app.get('/api/admin/live', checkAdmin, async (req, res) => {
   }
 });
 
+// تحديث روابط التواصل (واتساب/فيسبوك/انستا/تلكرام)
+app.post('/api/admin/contact-settings', checkAdmin, async (req, res) => {
+  try { res.json(await db.setContactSettings(req.body)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ملاحظات وشكاوى الزبائن على السواق
+app.get('/api/admin/complaints', checkAdmin, async (req, res) => {
+  try { res.json(await db.getComplaints(100)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/rides', checkAdmin, async (req, res) => {
   try { res.json(await db.getAllRides(100)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/admin/customers', checkAdmin, async (req, res) => {
-  try { res.json(await db.getAllCustomers()); }
+  try {
+    const customers = await db.getAllCustomers();
+    const withRewards = await Promise.all(customers.map(async c => ({
+      ...c,
+      tripsDone: await db.getCustomerTripCount(c.phone),
+      pendingReward: await db.getPendingReward(c.phone),
+    })));
+    res.json(withRewards);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ إعدادات مكافأة الولاء ============
+app.get('/api/admin/reward-settings', checkAdmin, async (req, res) => {
+  try { res.json(await db.getRewardSettings()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/reward-settings', checkAdmin, async (req, res) => {
+  try {
+    const threshold = parseInt(req.body.threshold, 10);
+    const type = req.body.type;
+    const value = parseInt(req.body.value, 10) || 0;
+    if (!threshold || threshold < 1) return res.status(400).json({ error: 'عدد رحلات غير صحيح' });
+    if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
+    res.json(await db.setRewardSettings(threshold, type, value));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// منح مكافأة يدوية لزبون معيّن
+app.post('/api/admin/customer/:phone/grant-reward', checkAdmin, async (req, res) => {
+  try {
+    const type = req.body.type;
+    const value = parseInt(req.body.value, 10) || 0;
+    if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
+    const reward = await db.grantManualReward(req.params.phone, type, value);
+    res.json({ ok: true, reward });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// منح مكافأة يدوية لكل الزبائن دفعة وحدة
+app.post('/api/admin/customers/grant-reward-all', checkAdmin, async (req, res) => {
+  try {
+    const type = req.body.type;
+    const value = parseInt(req.body.value, 10) || 0;
+    if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
+    const customers = await db.getAllCustomers();
+    for (const c of customers) await db.grantManualReward(c.phone, type, value);
+    res.json({ ok: true, count: customers.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// مستحقات السواق من المكافآت (الزبون ما دفع، لازم تدفع إنت للسواق)
+app.get('/api/admin/reward-payouts', checkAdmin, async (req, res) => {
+  try { res.json(await db.getDriverPayouts()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/reward-payouts/:id/settle', checkAdmin, async (req, res) => {
+  try { res.json({ ok: true, reward: await db.settleDriverPayout(parseInt(req.params.id, 10)) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/admin/stats', checkAdmin, async (req, res) => {
   try {
-    const [s, subRev] = await Promise.all([db.getStats(), db.getSubscriptionRevenue()]);
+    const [s, subRev, pendingRewards, payouts] = await Promise.all([
+      db.getStats(), db.getSubscriptionRevenue(), db.getPendingAutoRewardsCount(), db.getDriverPayouts(),
+    ]);
     res.json({
       ...s,
       driversOnline: onlineDrivers.size,
       activeRides: activeRides.size,
       subRevenue: subRev,
+      pendingRewards,
+      payoutsOwed: payouts.reduce((sum, p) => sum + (p.driver_payout || 0), 0),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -796,6 +994,19 @@ app.get('/api/ride/:id', (req, res) => {
   const ride = activeRides.get(req.params.id);
   if (!ride) return res.status(404).json({ error: 'غير موجودة' });
   res.json(ride);
+});
+
+// تقييم الزبون للرحلة بعد ما تخلص
+app.post('/api/ride/:id/rate', async (req, res) => {
+  try {
+    const rating = parseInt(req.body.rating, 10);
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'تقييم غير صحيح' });
+    await db.rateRide(req.params.id, rating, (req.body.note || '').trim());
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('خطأ بالتقييم:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
 });
 
 // ============================================================

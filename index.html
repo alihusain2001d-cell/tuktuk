@@ -9,7 +9,7 @@
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
   :root {
     --ink:#1A1A1A; --brand:#FFC800; --brand-dark:#E0AC00; --accent:#1A1A1A; --accent-dark:#000000;
-    --paper:#FAF7F0; --card:#fff; --line:#EDE7DA; --go:#12A150; --stop:#E5484D; --muted:#8A8270; --dark:#1A1A1A;
+    --paper:#FFFFFF; --card:#fff; --line:#EDE7DA; --go:#12A150; --stop:#E5484D; --muted:#8A8270; --dark:#1A1A1A;
     --gold-light:#FFF7DE;
   }
   html,body { height:100%; background:var(--paper); color:var(--ink); overflow:hidden; }
@@ -177,6 +177,8 @@
   .btn.ghost { background:#fff; color:var(--stop); box-shadow:0 0 0 1.5px var(--line) inset; }
   .btn.accent { background:var(--accent); color:#fff; box-shadow:0 3px 0 var(--accent-dark); }
   .btn.go { background:var(--go); color:#fff; box-shadow:0 3px 0 #0C7A3C; }
+  .btn.outline { background:#fff; color:var(--ink); box-shadow:0 0 0 1.5px var(--line) inset; }
+  .contact-btn { display:block; text-decoration:none; text-align:center; box-sizing:border-box; }
 
   /* بحث عن مكان */
   .search-screen { position:absolute; inset:0; z-index:1800; background:#fff; display:none; flex-direction:column; }
@@ -231,6 +233,30 @@
   .sp-empty h3 { font-size:18px; color:var(--ink); margin-bottom:8px; }
   .sp-empty p { font-size:13px; line-height:1.7; }
   .soon-badge { display:inline-block; background:var(--accent); color:#fff; font-size:11px; font-weight:700; padding:4px 12px; border-radius:20px; margin-top:14px; }
+
+  .trip-item { background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:13px 15px; margin-bottom:10px; display:flex; align-items:center; gap:12px; }
+  .trip-item .ti-icon { width:42px; height:42px; border-radius:12px; background:var(--gold-light); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
+  .trip-item .ti-body { flex:1; overflow:hidden; }
+  .trip-item .ti-body .route { font-size:14px; font-weight:600; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trip-item .ti-body .date { font-size:11.5px; color:var(--muted); }
+  .trip-item .ti-fare { text-align:left; flex-shrink:0; }
+  .trip-item .ti-fare .f { font-size:15px; font-weight:700; color:var(--ink); }
+  .trip-item .ti-fare .k { font-size:10.5px; color:var(--muted); }
+
+  .reward-card { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:18px; padding:26px; text-align:center; color:var(--ink); margin-bottom:16px; }
+  .reward-card .rc-title { font-size:20px; font-weight:700; margin-bottom:6px; }
+  .reward-card .rc-sub { font-size:13px; opacity:.75; }
+  .reward-progress-box { background:#fff; border:1.5px solid var(--line); border-radius:16px; padding:18px; margin-bottom:16px; }
+  .reward-progress-box .rp-label { font-size:14px; font-weight:600; margin-bottom:10px; }
+  .reward-progress { background:var(--paper); border-radius:8px; height:10px; overflow:hidden; }
+  .reward-progress-fill { background:var(--brand); height:100%; border-radius:8px; }
+  .reward-progress-box .rp-sub { font-size:12px; color:var(--muted); margin-top:8px; }
+  .reward-banner { background:var(--brand); color:var(--ink); border-radius:14px; padding:14px 16px; margin-bottom:16px; font-weight:700; text-align:center; cursor:pointer; box-shadow:0 3px 0 var(--brand-dark); }
+
+  .star-row { display:flex; justify-content:center; gap:8px; margin-bottom:22px; direction:ltr; }
+  .star-row .star { font-size:38px; color:var(--line); cursor:pointer; transition:transform .1s; user-select:none; }
+  .star-row .star.sel { color:var(--brand); }
+  .star-row .star:active { transform:scale(.9); }
 
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
@@ -348,6 +374,8 @@
       <h2 id="hero-greet">هلا بيك 👋</h2>
       <p>شتريد تسوي اليوم؟ اختر من تحت</p>
     </div>
+
+    <div class="reward-banner hidden" id="reward-banner" onclick="openSimple('rewards')">🎉 عندك مكافأة جديدة! اضغط للتفاصيل</div>
 
     <div class="section-title">خدماتنا</div>
     <div class="order-cards">
@@ -574,6 +602,31 @@
     </div>
   </div>
 
+  <!-- ============ تقييم الرحلة ============ -->
+  <div class="flow-screen" id="flow-rate">
+    <div class="flow-head"><h2>قيّم رحلتك</h2></div>
+    <div class="offer-review">
+      <div style="text-align:center;margin-bottom:18px">
+        <div style="font-size:44px;margin-bottom:8px">⭐</div>
+        <h2 style="margin-bottom:5px">شلون كانت رحلتك؟</h2>
+        <p style="color:var(--muted);font-size:13px">تقييمك يساعدنا نحسّن الخدمة</p>
+      </div>
+      <div class="star-row" id="star-row">
+        <span class="star" data-v="1" onclick="pickStar(1)">☆</span>
+        <span class="star" data-v="2" onclick="pickStar(2)">☆</span>
+        <span class="star" data-v="3" onclick="pickStar(3)">☆</span>
+        <span class="star" data-v="4" onclick="pickStar(4)">☆</span>
+        <span class="star" data-v="5" onclick="pickStar(5)">☆</span>
+      </div>
+      <div class="item-field">
+        <label>ملاحظة أو شكوى (اختياري)</label>
+        <textarea id="rate-note" placeholder="اكتب رأيك..."></textarea>
+      </div>
+      <button class="btn go" onclick="submitRating()">إرسال التقييم</button>
+      <button class="btn ghost" onclick="skipRating()" style="margin-top:10px">تخطي</button>
+    </div>
+  </div>
+
   <!-- ============ صفحة بسيطة (عناصر شكلية) ============ -->
   <div class="simple-page" id="simple-page">
     <div class="flow-head">
@@ -734,7 +787,7 @@ async function verifyOtpAndProceed() {
         if (out.notFound) setTimeout(() => authStep('register'), 1300); else clearCustOtp();
         return;
       }
-      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id };
+      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null };
       localStorage.setItem('jayak_user', JSON.stringify(user));
       toast(`أهلاً ${user.name}! 🎉`);
       finishAuth();
@@ -750,7 +803,7 @@ async function verifyOtpAndProceed() {
         if (out.alreadyExists) setTimeout(() => authStep('login'), 1500);
         return;
       }
-      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id };
+      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null };
       localStorage.setItem('jayak_user', JSON.stringify(user));
       toast('أهلاً بيك بجايك! 🎉');
       finishAuth();
@@ -769,7 +822,17 @@ function showApp() {
   document.getElementById('hero-greet').textContent = 'هلا ' + user.name + ' 👋';
   document.getElementById('dh-name').textContent = user.name;
   document.getElementById('dh-phone').textContent = user.phone;
-  document.getElementById('dh-avatar').textContent = user.name.charAt(0);
+  const dhAvatar = document.getElementById('dh-avatar');
+  dhAvatar.innerHTML = user.photo ? `<img src="${user.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : user.name.charAt(0);
+  checkRewardBanner();
+}
+
+async function checkRewardBanner() {
+  if (!user) return;
+  try {
+    const out = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/rewards`).then(r => r.json());
+    document.getElementById('reward-banner').classList.toggle('hidden', !out.pending);
+  } catch (e) {}
 }
 
 function logout() {
@@ -796,10 +859,299 @@ function openSimple(key) {
   if (!p) return;
   closeDrawer();
   document.getElementById('simple-title').textContent = p.title;
+  if (key === 'trips') { loadTrips(); document.getElementById('simple-page').classList.add('active'); return; }
+  if (key === 'favorites') { loadFavorites(); document.getElementById('simple-page').classList.add('active'); return; }
+  if (key === 'rewards') { loadRewards(); document.getElementById('simple-page').classList.add('active'); return; }
+  if (key === 'invite') {
+    document.getElementById('simple-body').innerHTML = `
+      <div class="sp-empty">
+        <div class="ico">🎁</div>
+        <h3>ادعُ أصدقاءك</h3>
+        <p>شارك رابط جايك مع أصحابك — كل ما يكثر المستخدمين نكدر نطوّر التطبيق أكثر!</p>
+      </div>
+      <button class="btn accent" onclick="shareApp()">📤 شارك الرابط</button>
+    `;
+    document.getElementById('simple-page').classList.add('active');
+    return;
+  }
+  if (key === 'settings') { loadSettings(); document.getElementById('simple-page').classList.add('active'); return; }
+  if (key === 'support') { loadSupport(); document.getElementById('simple-page').classList.add('active'); return; }
   const soon = key !== 'about' ? '<div class="soon-badge">قريباً ✨</div>' : '';
   document.getElementById('simple-body').innerHTML =
     `<div class="sp-empty"><div class="ico">${p.ico}</div><h3>${p.h}</h3><p>${p.p}</p>${soon}</div>`;
   document.getElementById('simple-page').classList.add('active');
+}
+
+// ============ سجل الرحلات ============
+async function loadTrips() {
+  const body = document.getElementById('simple-body');
+  body.innerHTML = '<div class="spinner"></div>';
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/trips`);
+    const out = await res.json();
+    const trips = out.trips || [];
+    if (!trips.length) {
+      body.innerHTML = `<div class="sp-empty"><div class="ico">🕐</div><h3>سجل رحلاتك</h3><p>لسه ماكو رحلات مسجّلة. أول ما تخلّص رحلة أو توصيل راح تظهر هنا.</p></div>`;
+      return;
+    }
+    body.innerHTML = trips.map(t => `
+      <div class="trip-item">
+        <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
+        <div class="ti-body">
+          <div class="route">${t.from} ← ${t.to}</div>
+          <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
+        </div>
+        <div class="ti-fare">
+          <div class="f">${t.fare.toLocaleString()} د.ع</div>
+          ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    body.innerHTML = `<div class="sp-empty"><div class="ico">⚠️</div><h3>صار خطأ</h3><p>ما كدرنا نجيب رحلاتك، حاول مرة ثانية.</p></div>`;
+  }
+}
+
+// ============ المواقع المفضلة ============
+async function loadFavorites() {
+  const body = document.getElementById('simple-body');
+  body.innerHTML = '<div class="spinner"></div>';
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/places`);
+    const out = await res.json();
+    const places = out.places || [];
+    let html = `<button class="btn accent" style="margin-bottom:16px" onclick="openFavoriteSearch()">+ أضف موقع جديد</button>`;
+    if (!places.length) {
+      html += `<div class="sp-empty"><div class="ico">⭐</div><h3>مواقعك المفضلة</h3><p>احفظ عناوينك المهمة (البيت، الشغل) للوصول السريع.</p></div>`;
+    } else {
+      html += places.map(p => `
+        <div class="trip-item">
+          <div class="ti-icon">⭐</div>
+          <div class="ti-body">
+            <div class="route">${p.name}</div>
+            <div class="date">${p.address || ''}</div>
+          </div>
+          <div class="ti-fare" style="cursor:pointer" onclick="deleteFavorite(${p.id})">🗑️</div>
+        </div>
+      `).join('');
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div class="sp-empty"><div class="ico">⚠️</div><h3>صار خطأ</h3><p>ما كدرنا نجيب مواقعك، حاول مرة ثانية.</p></div>`;
+  }
+}
+
+async function deleteFavorite(id) {
+  if (!confirm('تحذف هذا الموقع؟')) return;
+  try {
+    await fetch(`/api/customer/${encodeURIComponent(user.phone)}/places/${id}`, { method: 'DELETE' });
+    loadFavorites();
+  } catch (e) { toast('صار خطأ'); }
+}
+
+function openFavoriteSearch() {
+  searchMode = 'favorite'; searchFlow = null;
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-results').innerHTML = '<div class="sr-hint">اكتب اسم منطقة أو مكان بالمسيب<br>مثال: مستشفى المسيب، حي العسكري، الجسر</div>';
+  document.querySelector('.sr-map-btn').classList.add('hidden');
+  document.getElementById('search-screen').classList.add('active');
+  setTimeout(() => document.getElementById('search-input').focus(), 100);
+}
+
+// ============ الإعدادات ============
+function loadSettings() {
+  document.getElementById('simple-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:22px">
+      <label style="position:relative;display:inline-block;cursor:pointer">
+        <div id="set-avatar" style="width:84px;height:84px;border-radius:50%;background:var(--dark);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;overflow:hidden;margin:0 auto">
+          ${user.photo ? `<img src="${user.photo}" style="width:100%;height:100%;object-fit:cover">` : (user.name||'؟').charAt(0)}
+        </div>
+        <div style="position:absolute;bottom:0;left:0;background:var(--brand);color:var(--ink);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,.25)">📷</div>
+        <input type="file" accept="image/*" style="display:none" onchange="pickSettingsPhoto(this)">
+      </label>
+    </div>
+    <div class="lg-field">
+      <label>الاسم</label>
+      <input id="set-name" value="${user.name || ''}">
+    </div>
+    <button class="btn" onclick="saveName()" style="margin-bottom:22px">حفظ الاسم</button>
+
+    <div class="lg-field">
+      <label>رقم الموبايل</label>
+      <input value="${user.phone || ''}" disabled style="direction:ltr;text-align:right;opacity:.6">
+    </div>
+    <button class="btn ghost" onclick="changePhoneFlow()">غيّر رقم الموبايل</button>
+  `;
+}
+
+function pickSettingsPhoto(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  compressAvatar(file, async (dataUrl) => {
+    document.getElementById('set-avatar').innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
+    try {
+      await fetch(`/api/customer/${encodeURIComponent(user.phone)}/profile`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ photo: dataUrl }),
+      });
+      user.photo = dataUrl;
+      localStorage.setItem('jayak_user', JSON.stringify(user));
+      showApp();
+      toast('انحفظت الصورة ✅');
+    } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
+  });
+}
+
+function compressAvatar(file, cb) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 400;
+      let { width: w, height: h } = img;
+      if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      cb(canvas.toDataURL('image/jpeg', 0.75));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveName() {
+  const name = document.getElementById('set-name').value.trim();
+  if (!name) return toast('اكتب اسمك');
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/profile`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    const out = await res.json();
+    if (!res.ok) return toast('صار خطأ');
+    user.name = out.customer.name;
+    localStorage.setItem('jayak_user', JSON.stringify(user));
+    showApp();
+    toast('انحفظ الاسم ✅');
+  } catch (e) { toast('صار خطأ'); }
+}
+
+async function changePhoneFlow() {
+  const newPhone = prompt('اكتب رقمك الجديد', '');
+  if (!newPhone) return;
+  if (newPhone.replace(/\D/g, '').length < 10) return toast('اكتب رقم موبايل صحيح');
+  try {
+    const res = await fetch('/api/otp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: newPhone }) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
+    const hint = out.devCode ? ` (وضع التجربة: ${out.devCode})` : '';
+    const code = prompt('اكتب كود التأكيد اللي وصلك عالرقم الجديد' + hint, '');
+    if (!code) return;
+    const v = await fetch('/api/otp/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: newPhone, code }) });
+    const vOut = await v.json();
+    if (!v.ok) return toast(vOut.error || 'الكود غلط');
+    const chg = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/change-phone`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newPhone }),
+    });
+    const chgOut = await chg.json();
+    if (!chg.ok) return toast(chgOut.error || 'صار خطأ');
+    user.phone = chgOut.customer.phone;
+    localStorage.setItem('jayak_user', JSON.stringify(user));
+    showApp();
+    toast('اتغيّر رقمك ✅');
+    loadSettings();
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
+}
+
+// ============ الاتصال بالدعم ============
+async function loadSupport() {
+  const body = document.getElementById('simple-body');
+  body.innerHTML = '<div class="spinner"></div>';
+  try {
+    const s = await fetch('/api/contact-settings').then(r => r.json());
+    const buttons = [];
+    if (s.whatsapp) buttons.push(`<a class="btn go contact-btn" href="https://wa.me/${s.whatsapp.replace(/\D/g,'')}?text=${encodeURIComponent('مرحبا، عندي استفسار بخصوص تطبيق جايك')}" target="_blank">💬 واتساب</a>`);
+    if (s.facebook) buttons.push(`<a class="btn outline contact-btn" href="${s.facebook}" target="_blank">📘 فيسبوك</a>`);
+    if (s.instagram) buttons.push(`<a class="btn outline contact-btn" href="${s.instagram}" target="_blank">📷 انستقرام</a>`);
+    if (s.telegram) buttons.push(`<a class="btn outline contact-btn" href="${s.telegram}" target="_blank">✈️ تلكرام</a>`);
+
+    if (!buttons.length) {
+      body.innerHTML = `<div class="sp-empty"><div class="ico">🎧</div><h3>خدمة العملاء</h3><p>تواصل معنا في حال واجهت أي مشكلة. راح نضيف طرق التواصل قريباً.</p></div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div class="sp-empty" style="padding:28px 20px 6px">
+        <div class="ico">🎧</div>
+        <h3>خدمة العملاء</h3>
+        <p>اختر الطريقة الأسهل إلك للتواصل معنا</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">${buttons.join('')}</div>
+    `;
+  } catch (e) {
+    body.innerHTML = `<div class="sp-empty"><div class="ico">⚠️</div><h3>صار خطأ</h3><p>ما كدرنا نجيب طرق التواصل، حاول مرة ثانية.</p></div>`;
+  }
+}
+
+// ============ دعوة الأصدقاء ============
+async function shareApp() {
+  const url = location.origin + '/';
+  const text = 'جرّب تطبيق جايك — وين ما تريد، جايك 🚗';
+  if (navigator.share) {
+    try { await navigator.share({ title: 'جايك', text, url }); } catch (e) {}
+  } else {
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      toast('انسخ الرابط ✅ الصقه وياهم');
+    } catch (e) { toast(url); }
+  }
+}
+
+// ============ التخفيضات والمكافآت ============
+function rewardLabel(r) {
+  if (!r) return '';
+  if (r.type === 'free_ride') return 'رحلة مجانية 🎁';
+  if (r.type === 'percent') return `خصم ${r.value}% 🎁`;
+  return `خصم ${(r.value||0).toLocaleString()} د.ع 🎁`;
+}
+
+async function loadRewards() {
+  const body = document.getElementById('simple-body');
+  body.innerHTML = '<div class="spinner"></div>';
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/rewards`);
+    const out = await res.json();
+    if (out.pending) {
+      body.innerHTML = `
+        <div class="reward-card">
+          <div class="rc-title">🎉 عندك مكافأة!</div>
+          <div class="rc-sub">${rewardLabel(out.pending)} — تنطبق تلقائياً على أقرب رحلة تطلبها</div>
+        </div>`;
+      return;
+    }
+    const done = out.tripsDone || 0, need = out.tripsThreshold || 10;
+    const pct = Math.min(100, Math.round((done / need) * 100));
+    body.innerHTML = `
+      <div class="reward-progress-box">
+        <div class="rp-label">رحلتك ${done} من ${need} للمكافأة الجاية</div>
+        <div class="reward-progress"><div class="reward-progress-fill" style="width:${pct}%"></div></div>
+        <div class="rp-sub">كمّل ${Math.max(0, need - done)} رحلة وتحصل على مكافأة تلقائياً</div>
+      </div>`;
+  } catch (e) {
+    body.innerHTML = `<div class="sp-empty"><div class="ico">⚠️</div><h3>صار خطأ</h3><p>ما كدرنا نجيب مكافآتك، حاول مرة ثانية.</p></div>`;
+  }
+}
+
+async function saveFavoritePlace(place) {
+  const name = prompt('شنو اسم هذا الموقع؟ (مثال: البيت، الشغل)', place.label || '');
+  if (!name) return;
+  closeSearch();
+  try {
+    await fetch(`/api/customer/${encodeURIComponent(user.phone)}/places`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, lat: place.lat, lng: place.lng, address: place.label }),
+    });
+    toast('انحفظ الموقع ✅');
+    loadFavorites();
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
 function closeSimple() { document.getElementById('simple-page').classList.remove('active'); }
 
@@ -916,7 +1268,10 @@ function openSearch(mode, flow) {
   document.getElementById('search-screen').classList.add('active');
   setTimeout(() => document.getElementById('search-input').focus(), 100);
 }
-function closeSearch() { document.getElementById('search-screen').classList.remove('active'); }
+function closeSearch() {
+  document.getElementById('search-screen').classList.remove('active');
+  document.querySelector('.sr-map-btn').classList.remove('hidden');
+}
 
 let searchTimer;
 function onSearchInput() {
@@ -952,6 +1307,7 @@ function renderResults(results) {
 }
 
 function selectPlace(place) {
+  if (searchMode === 'favorite') { saveFavoritePlace(place); return; }
   assignPoint(place);
   closeSearch();
   const m = searchFlow === 'r' ? mapR : mapD;
@@ -1140,6 +1496,7 @@ async function sendBooking(payload, onErr) {
     const out = await res.json();
     currentRide = out.rideId;
     exitFlow();
+    if (out.reward) { toast('🎉 تطبقت مكافأتك على هذي الرحلة: ' + rewardLabel(out.reward)); checkRewardBanner(); }
     goSearching(payload.orderType, out.driversNotified);
   } catch (err) { toast('صار خطأ، حاول مرة ثانية'); onErr(); }
 }
@@ -1200,9 +1557,55 @@ function onArrived() {
 }
 
 function onDone(data) {
-  const fareMsg = data && data.fare ? ` — الأجرة ${data.fare.toLocaleString()} د.ع` : '';
+  const fareMsg = data && data.fare != null ? (data.fare > 0 ? ` — الأجرة ${data.fare.toLocaleString()} د.ع` : ' — رحلة مجانية 🎁') : '';
   toast('انتهت الرحلة، شكراً لاستخدامك جايك 🙏' + fareMsg);
-  setTimeout(resetAll, 3000);
+  checkRewardBanner();
+  lastRideId = currentRide;
+  document.getElementById('flow-driver').classList.remove('active');
+  document.getElementById('flow-searching').classList.remove('active');
+  document.getElementById('flow-offer').classList.remove('active');
+  openRateScreen();
+}
+
+// ============ تقييم الرحلة ============
+let lastRideId = null, selectedRating = 0;
+
+function pickStar(v) {
+  selectedRating = v;
+  document.querySelectorAll('#star-row .star').forEach(s => {
+    const on = parseInt(s.dataset.v, 10) <= v;
+    s.textContent = on ? '★' : '☆';
+    s.classList.toggle('sel', on);
+  });
+}
+
+function openRateScreen() {
+  selectedRating = 0;
+  document.getElementById('rate-note').value = '';
+  document.querySelectorAll('#star-row .star').forEach(s => { s.textContent = '☆'; s.classList.remove('sel'); });
+  document.getElementById('flow-rate').classList.add('active');
+}
+
+async function submitRating() {
+  if (!selectedRating) return toast('اختر تقييم من النجوم أول');
+  if (lastRideId) {
+    try {
+      await fetch(`/api/ride/${lastRideId}/rate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating: selectedRating, note: document.getElementById('rate-note').value.trim() }),
+      });
+      toast('شكراً على تقييمك 🙏');
+    } catch (e) {}
+  }
+  closeRateScreen();
+}
+
+function skipRating() { closeRateScreen(); }
+
+function closeRateScreen() {
+  document.getElementById('flow-rate').classList.remove('active');
+  lastRideId = null;
+  resetAll();
 }
 
 async function cancelRide() {
@@ -1215,7 +1618,7 @@ function resetAll() {
   currentRide = null; driverPhone=''; currentOffer = null;
   pickup = null; destination = null; store = null;
   deliveryInfo = { storeName:'', itemDesc:'' };
-  ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer'].forEach(id => document.getElementById(id).classList.remove('active'));
+  ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer','flow-rate'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
   resetRideUI(); resetDeliveryUI();

@@ -25,7 +25,7 @@ if (HAS_DB) {
     ssl: needsSSL(url) ? { rejectUnauthorized: false } : false,
     max: 10,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 20000,
   });
   pool.on('error', (err) => console.error('خطأ بقاعدة البيانات:', err.message));
 }
@@ -84,6 +84,8 @@ async function init() {
     // ترقية: معرّف ثابت للزبون
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS id TEXT;`);
     await pool.query(`UPDATE customers SET id = 'cus_' || md5(phone) WHERE id IS NULL;`);
+    // ترقية: صورة الزبون الشخصية
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS photo TEXT;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rides (
         id             TEXT PRIMARY KEY,
@@ -132,6 +134,74 @@ async function init() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_driver ON subscriptions(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_date ON subscriptions(created_at);`);
+
+    // المواقع المفضلة للزبون
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS saved_places (
+        id         SERIAL PRIMARY KEY,
+        phone      TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        lat        DOUBLE PRECISION NOT NULL,
+        lng        DOUBLE PRECISION NOT NULL,
+        address    TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_places_phone ON saved_places(phone);`);
+
+    // إعدادات مكافأة الولاء (قاعدة عامة: بعد كم رحلة، ونوع المكافأة)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reward_settings (
+        id              INTEGER PRIMARY KEY DEFAULT 1,
+        trips_threshold INTEGER NOT NULL DEFAULT 10,
+        reward_type     TEXT NOT NULL DEFAULT 'free_ride',
+        reward_value    INTEGER NOT NULL DEFAULT 0,
+        CHECK (id = 1)
+      );
+    `);
+    await pool.query(`INSERT INTO reward_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
+
+    // مكافآت الزبائن (تلقائية أو يدوية) وربطها بمصاريف السائق
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS customer_rewards (
+        id              SERIAL PRIMARY KEY,
+        phone           TEXT NOT NULL,
+        reward_type     TEXT NOT NULL,
+        reward_value    INTEGER NOT NULL DEFAULT 0,
+        source          TEXT NOT NULL DEFAULT 'auto',
+        status          TEXT NOT NULL DEFAULT 'pending',
+        ride_id         TEXT,
+        driver_id       TEXT,
+        driver_payout   INTEGER,
+        payout_settled  BOOLEAN NOT NULL DEFAULT false,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        used_at         TIMESTAMPTZ
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cr_phone ON customer_rewards(phone);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cr_status ON customer_rewards(status);`);
+
+    // روابط التواصل (واتساب، فيسبوك، انستا، تلكرام) — يحددها الأدمن من لوحة التحكم
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS contact_settings (
+        id        INTEGER PRIMARY KEY DEFAULT 1,
+        whatsapp  TEXT,
+        facebook  TEXT,
+        instagram TEXT,
+        telegram  TEXT,
+        CHECK (id = 1)
+      );
+    `);
+    await pool.query(`INSERT INTO contact_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
+
+    // ترقية: عمود المبلغ اللي الزبون فعلاً دفعه (يختلف عن est_fare لو تطبقت مكافأة)
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS customer_paid INTEGER;`);
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS reward_id INTEGER;`);
+
+    // ترقية: تقييم الزبون للرحلة بعد ما تخلص
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS rating INTEGER;`);
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS rating_note TEXT;`);
+
     console.log('✅ قاعدة البيانات جاهزة (PostgreSQL)');
     return true;
   } catch (e) {
@@ -354,6 +424,55 @@ async function getCustomerByPhone(phone) {
   return res.rows[0] || null;
 }
 
+// تحديث الاسم و/أو الصورة
+async function updateCustomerProfile(phone, { name, photo } = {}) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    const rec = mem.customers.get(clean);
+    if (!rec) return null;
+    if (name) rec.name = name;
+    if (photo !== undefined) rec.photo = photo;
+    return rec;
+  }
+  const sets = [], vals = [clean];
+  if (name) { vals.push(name); sets.push(`name=$${vals.length}`); }
+  if (photo !== undefined) { vals.push(photo); sets.push(`photo=$${vals.length}`); }
+  if (!sets.length) return getCustomerByPhone(phone);
+  const res = await pool.query(`UPDATE customers SET ${sets.join(', ')} WHERE phone=$1 RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+// تغيير رقم الزبون (بعد التحقق بـ OTP) — لازم نحدّث كل الجداول اللي فيها رقمه القديم
+async function changeCustomerPhone(oldPhone, newPhone) {
+  const oldClean = cleanPhone(oldPhone), newClean = cleanPhone(newPhone);
+  if (!HAS_DB) {
+    const rec = mem.customers.get(oldClean);
+    if (!rec) return null;
+    rec.phone = newClean;
+    mem.customers.delete(oldClean);
+    mem.customers.set(newClean, rec);
+    for (const r of mem.rides.values()) if (cleanPhone(r.customer?.phone) === oldClean) r.customer.phone = newClean;
+    (mem.rewards || []).forEach(x => { if (x.phone === oldClean) x.phone = newClean; });
+    (mem.places || []).forEach(x => { if (x.phone === oldClean) x.phone = newClean; });
+    return rec;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE customers SET phone=$2 WHERE phone=$1', [oldClean, newClean]);
+    await client.query('UPDATE rides SET customer_phone=$2 WHERE customer_phone=$1', [oldClean, newClean]);
+    await client.query('UPDATE customer_rewards SET phone=$2 WHERE phone=$1', [oldClean, newClean]);
+    await client.query('UPDATE saved_places SET phone=$2 WHERE phone=$1', [oldClean, newClean]);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  return getCustomerByPhone(newClean);
+}
+
 // عدد رحلات الزبون
 async function getCustomerTripCount(phone) {
   const clean = cleanPhone(phone);
@@ -367,6 +486,76 @@ async function getCustomerTripCount(phone) {
   return res.rows[0].n;
 }
 
+// سجل رحلات الزبون المنجزة
+async function getCustomerTrips(phone, limit = 30) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    return [...mem.rides.values()]
+      .filter(r => cleanPhone(r.customer?.phone) === clean && r.status === 'done')
+      .slice(-limit).reverse()
+      .map(t => ({
+        rideId: t.id, type: t.type,
+        from: t.type === 'delivery' ? (t.storeName || t.store?.label || '—') : (t.pickup.label || '—'),
+        to: t.destination?.label || '—',
+        fare: t.estFare || 0, km: Math.round((t.estKm || 0) * 10) / 10,
+        at: t.done_at ? t.done_at.getTime() : Date.now(),
+      }));
+  }
+  const res = await pool.query(`
+    SELECT id, type, pickup_label, dest_label, store_label, store_name, est_km, est_fare, done_at
+    FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='done'
+    ORDER BY done_at DESC LIMIT $2;
+  `, [clean, limit]);
+  return res.rows.map(r => ({
+    rideId: r.id, type: r.type,
+    from: r.type === 'delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label || '—'),
+    to: r.dest_label || '—',
+    fare: r.est_fare || 0, km: Math.round((r.est_km || 0) * 10) / 10,
+    at: r.done_at ? new Date(r.done_at).getTime() : Date.now(),
+  }));
+}
+
+// ============ المواقع المفضلة ============
+async function addSavedPlace(phone, name, lat, lng, address) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    if (!mem.places) mem.places = [];
+    const id = (mem.places.length ? Math.max(...mem.places.map(p => p.id)) : 0) + 1;
+    const rec = { id, phone: clean, name, lat, lng, address: address || null, created_at: new Date() };
+    mem.places.push(rec);
+    return rec;
+  }
+  const res = await pool.query(
+    `INSERT INTO saved_places (phone, name, lat, lng, address) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [clean, name, lat, lng, address || null]
+  );
+  return res.rows[0];
+}
+
+async function getSavedPlaces(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) return (mem.places || []).filter(p => p.phone === clean).slice().reverse();
+  const res = await pool.query(
+    `SELECT * FROM saved_places WHERE regexp_replace(phone, '\\D', '', 'g') = $1 ORDER BY created_at DESC`,
+    [clean]
+  );
+  return res.rows;
+}
+
+async function deleteSavedPlace(id, phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    if (!mem.places) mem.places = [];
+    mem.places = mem.places.filter(p => !(p.id === Number(id) && p.phone === clean));
+    return true;
+  }
+  await pool.query(
+    `DELETE FROM saved_places WHERE id=$1 AND regexp_replace(phone, '\\D', '', 'g') = $2`,
+    [id, clean]
+  );
+  return true;
+}
+
 async function getAllCustomers() {
   if (!HAS_DB) return [...mem.customers.values()];
   const res = await pool.query('SELECT * FROM customers ORDER BY created_at DESC');
@@ -378,13 +567,14 @@ async function createRide(r) {
   if (!HAS_DB) { mem.rides.set(r.id, { ...r, created_at: new Date() }); return r; }
   await pool.query(`
     INSERT INTO rides (id, type, customer_name, customer_phone, pickup_lat, pickup_lng, pickup_label,
-      dest_lat, dest_lng, dest_label, store_lat, store_lng, store_label, store_name, item_desc, est_km, est_fare, status)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18);
+      dest_lat, dest_lng, dest_label, store_lat, store_lng, store_label, store_name, item_desc, est_km, est_fare, status, customer_paid, reward_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20);
   `, [r.id, r.type, r.customer.name, r.customer.phone,
       r.pickup.lat, r.pickup.lng, r.pickup.label,
       r.destination?.lat || null, r.destination?.lng || null, r.destination?.label || null,
       r.store?.lat || null, r.store?.lng || null, r.store?.label || null,
-      r.storeName || null, r.itemDesc || null, r.estKm, r.estFare, r.status]);
+      r.storeName || null, r.itemDesc || null, r.estKm, r.estFare, r.status,
+      r.customerPaid != null ? r.customerPaid : r.estFare, r.rewardId || null]);
   return r;
 }
 
@@ -533,12 +723,227 @@ async function getDriverPaidTotal(driverId) {
   return res.rows[0].total;
 }
 
+// ============ مكافآت الولاء ============
+async function getRewardSettings() {
+  if (!HAS_DB) {
+    return mem.rewardSettings || (mem.rewardSettings = { trips_threshold: 10, reward_type: 'free_ride', reward_value: 0 });
+  }
+  const res = await pool.query('SELECT * FROM reward_settings WHERE id=1');
+  return res.rows[0];
+}
+
+async function setRewardSettings(threshold, type, value) {
+  if (!HAS_DB) {
+    mem.rewardSettings = { trips_threshold: threshold, reward_type: type, reward_value: value };
+    return mem.rewardSettings;
+  }
+  const res = await pool.query(`
+    UPDATE reward_settings SET trips_threshold=$1, reward_type=$2, reward_value=$3 WHERE id=1 RETURNING *;
+  `, [threshold, type, value]);
+  return res.rows[0];
+}
+
+// المكافأة المتاحة حالياً للزبون (ما ارتبطت برحلة بعد)
+async function getPendingReward(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    const list = mem.rewards || [];
+    return list.find(r => r.phone === clean && r.status === 'pending' && !r.ride_id) || null;
+  }
+  const res = await pool.query(
+    `SELECT * FROM customer_rewards WHERE regexp_replace(phone, '\\D', '', 'g') = $1 AND status='pending' AND ride_id IS NULL ORDER BY created_at ASC LIMIT 1`,
+    [clean]
+  );
+  return res.rows[0] || null;
+}
+
+// منح مكافأة يدوية من الأدمن
+async function grantManualReward(phone, type, value) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    if (!mem.rewards) mem.rewards = [];
+    const id = (mem.rewards.length ? Math.max(...mem.rewards.map(r => r.id)) : 0) + 1;
+    const rec = { id, phone: clean, reward_type: type, reward_value: value, source: 'manual', status: 'pending', ride_id: null, created_at: new Date() };
+    mem.rewards.push(rec);
+    return rec;
+  }
+  const res = await pool.query(`
+    INSERT INTO customer_rewards (phone, reward_type, reward_value, source) VALUES ($1,$2,$3,'manual') RETURNING *;
+  `, [clean, type, value]);
+  return res.rows[0];
+}
+
+// تتحقق بعد كل رحلة منجزة: هل الزبون وصل لأول مرة لعدد الرحلات المطلوب؟
+async function maybeGrantAutoReward(phone) {
+  const settings = await getRewardSettings();
+  const tripCount = await getCustomerTripCount(phone);
+  if (tripCount < settings.trips_threshold) return null;
+
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    if (!mem.rewards) mem.rewards = [];
+    const alreadyGranted = mem.rewards.some(r => r.phone === clean && r.source === 'auto');
+    if (alreadyGranted) return null;
+    const id = (mem.rewards.length ? Math.max(...mem.rewards.map(r => r.id)) : 0) + 1;
+    const rec = { id, phone: clean, reward_type: settings.reward_type, reward_value: settings.reward_value, source: 'auto', status: 'pending', ride_id: null, created_at: new Date() };
+    mem.rewards.push(rec);
+    return rec;
+  }
+  const existing = await pool.query(
+    `SELECT id FROM customer_rewards WHERE regexp_replace(phone, '\\D', '', 'g') = $1 AND source='auto' LIMIT 1`,
+    [clean]
+  );
+  if (existing.rows.length) return null;
+  const res = await pool.query(`
+    INSERT INTO customer_rewards (phone, reward_type, reward_value, source) VALUES ($1,$2,$3,'auto') RETURNING *;
+  `, [clean, settings.reward_type, settings.reward_value]);
+  return res.rows[0];
+}
+
+// اربط المكافأة برحلة قيد التنفيذ (تمنع استخدامها مرتين لين الرحلة تخلص أو تنلغي)
+async function reserveRewardForRide(rewardId, rideId) {
+  if (!HAS_DB) {
+    const r = (mem.rewards || []).find(x => x.id === rewardId);
+    if (r) r.ride_id = rideId;
+    return r;
+  }
+  await pool.query('UPDATE customer_rewards SET ride_id=$2 WHERE id=$1', [rewardId, rideId]);
+}
+
+// حرر المكافأة إذا الرحلة الملغاية كانت مرتبطة فيها
+async function releaseRewardByRide(rideId) {
+  if (!HAS_DB) {
+    const r = (mem.rewards || []).find(x => x.ride_id === rideId && x.status === 'pending');
+    if (r) r.ride_id = null;
+    return;
+  }
+  await pool.query(`UPDATE customer_rewards SET ride_id=NULL WHERE ride_id=$1 AND status='pending'`, [rideId]);
+}
+
+// المكافأة صارت مستخدمة فعلاً (الرحلة خلصت) + سجل المبلغ المستحق للسائق
+async function markRewardUsedByRide(rideId, driverId, driverPayout) {
+  if (!HAS_DB) {
+    const r = (mem.rewards || []).find(x => x.ride_id === rideId);
+    if (r) { r.status = 'used'; r.driver_id = driverId; r.driver_payout = driverPayout; r.used_at = new Date(); }
+    return r;
+  }
+  const res = await pool.query(`
+    UPDATE customer_rewards SET status='used', driver_id=$2, driver_payout=$3, used_at=NOW()
+    WHERE ride_id=$1 RETURNING *;
+  `, [rideId, driverId, driverPayout]);
+  return res.rows[0];
+}
+
+// عدد المكافآت التلقائية الجديدة (للتنبيه بلوحة التحكم)
+async function getPendingAutoRewardsCount() {
+  if (!HAS_DB) return (mem.rewards || []).filter(r => r.source === 'auto' && r.status === 'pending').length;
+  const res = await pool.query(`SELECT COUNT(*)::int AS n FROM customer_rewards WHERE source='auto' AND status='pending'`);
+  return res.rows[0].n;
+}
+
+// مستحقات السواق غير المدفوعة من المكافآت
+async function getDriverPayouts() {
+  if (!HAS_DB) {
+    return (mem.rewards || []).filter(r => r.status === 'used' && !r.payout_settled).slice().reverse();
+  }
+  const res = await pool.query(`
+    SELECT cr.*, d.name AS driver_name FROM customer_rewards cr
+    LEFT JOIN drivers d ON d.id = cr.driver_id
+    WHERE cr.status='used' AND cr.payout_settled=false
+    ORDER BY cr.used_at DESC;
+  `);
+  return res.rows;
+}
+
+async function settleDriverPayout(rewardId) {
+  if (!HAS_DB) {
+    const r = (mem.rewards || []).find(x => x.id === rewardId);
+    if (r) r.payout_settled = true;
+    return r;
+  }
+  const res = await pool.query('UPDATE customer_rewards SET payout_settled=true WHERE id=$1 RETURNING *', [rewardId]);
+  return res.rows[0];
+}
+
+// ============ تقييم الرحلات ============
+async function rateRide(rideId, rating, note) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(rideId);
+    if (r) { r.rating = rating; r.ratingNote = note || null; }
+    return r;
+  }
+  const res = await pool.query(
+    `UPDATE rides SET rating=$2, rating_note=$3 WHERE id=$1 RETURNING *`,
+    [rideId, rating, note || null]
+  );
+  return res.rows[0];
+}
+
+// متوسط تقييم السائق
+async function getDriverRatingSummary(driverId) {
+  if (!HAS_DB) {
+    const rated = [...mem.rides.values()].filter(r => r.driverId === driverId && r.rating);
+    const avg = rated.length ? rated.reduce((s, r) => s + r.rating, 0) / rated.length : null;
+    return { avg: avg ? Math.round(avg * 10) / 10 : null, count: rated.length };
+  }
+  const res = await pool.query(
+    `SELECT ROUND(AVG(rating)::numeric,1) AS avg, COUNT(rating)::int AS count FROM rides WHERE driver_id=$1 AND rating IS NOT NULL`,
+    [driverId]
+  );
+  const r = res.rows[0];
+  return { avg: r.avg ? parseFloat(r.avg) : null, count: r.count };
+}
+
+// ملاحظات وشكاوى الزبائن (لكل السواق، لمراجعة الأدمن)
+async function getComplaints(limit = 50) {
+  if (!HAS_DB) {
+    return [...mem.rides.values()]
+      .filter(r => r.ratingNote)
+      .slice(-limit).reverse()
+      .map(r => ({ rideId: r.id, driverId: r.driverId, driverName: null, customer: r.customer.name, rating: r.rating, note: r.ratingNote, at: r.done_at ? r.done_at.getTime() : Date.now() }));
+  }
+  const res = await pool.query(`
+    SELECT rides.id AS ride_id, rides.driver_id, rides.customer_name, rides.rating, rides.rating_note, rides.done_at, drivers.name AS driver_name
+    FROM rides LEFT JOIN drivers ON drivers.id = rides.driver_id
+    WHERE rides.rating_note IS NOT NULL AND rides.rating_note != ''
+    ORDER BY rides.done_at DESC LIMIT $1;
+  `, [limit]);
+  return res.rows;
+}
+
+// ============ روابط التواصل ============
+async function getContactSettings() {
+  if (!HAS_DB) {
+    return mem.contactSettings || (mem.contactSettings = { whatsapp: null, facebook: null, instagram: null, telegram: null });
+  }
+  const res = await pool.query('SELECT * FROM contact_settings WHERE id=1');
+  return res.rows[0];
+}
+
+async function setContactSettings({ whatsapp, facebook, instagram, telegram }) {
+  if (!HAS_DB) {
+    mem.contactSettings = { whatsapp: whatsapp || null, facebook: facebook || null, instagram: instagram || null, telegram: telegram || null };
+    return mem.contactSettings;
+  }
+  const res = await pool.query(`
+    UPDATE contact_settings SET whatsapp=$1, facebook=$2, instagram=$3, telegram=$4 WHERE id=1 RETURNING *;
+  `, [whatsapp || null, facebook || null, instagram || null, telegram || null]);
+  return res.rows[0];
+}
+
 module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
-  upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount,
+  upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,
+  addSavedPlace, getSavedPlaces, deleteSavedPlace,
+  updateCustomerProfile, changeCustomerPhone,
   createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal,
+  getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
+  maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
+  markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout,
+  rateRide, getDriverRatingSummary, getComplaints,
+  getContactSettings, setContactSettings,
 };
