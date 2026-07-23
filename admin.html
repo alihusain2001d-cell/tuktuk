@@ -182,6 +182,9 @@
   .filter-row { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px; }
   .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; }
   .chip.active { background:var(--sky); border-color:var(--sky); color:var(--ink); }
+  .detail-modal { position:relative; padding:0; display:flex; flex-direction:column; max-height:88vh; overflow:hidden; }
+  .detail-modal-body { overflow-y:auto; padding:24px; }
+  .modal-x { position:absolute; top:12px; left:12px; background:rgba(14,42,61,.08); border:none; width:32px; height:32px; border-radius:50%; font-size:15px; cursor:pointer; z-index:5; color:var(--ink); }
   .hidden { display:none !important; }
 </style>
 </head>
@@ -505,17 +508,17 @@
 
 <!-- نافذة ملف السائق التفصيلي -->
 <div class="modal-bg" id="driver-detail-modal">
-  <div class="modal" style="max-width:420px;max-height:92vh;overflow-y:auto">
-    <div id="dd-content"></div>
-    <button class="btn ghost full" onclick="closeDriverDetail()" style="margin-top:14px">إغلاق</button>
+  <div class="modal detail-modal" style="max-width:420px">
+    <button class="modal-x" onclick="closeDriverDetail()">✕</button>
+    <div class="detail-modal-body" id="dd-content"></div>
   </div>
 </div>
 
 <!-- نافذة ملف الزبون التفصيلي -->
 <div class="modal-bg" id="customer-detail-modal">
-  <div class="modal" style="max-width:420px;max-height:92vh;overflow-y:auto">
-    <div id="cd-content"></div>
-    <button class="btn ghost full" onclick="closeCustomerDetail()" style="margin-top:14px">إغلاق</button>
+  <div class="modal detail-modal" style="max-width:420px">
+    <button class="modal-x" onclick="closeCustomerDetail()">✕</button>
+    <div class="detail-modal-body" id="cd-content"></div>
   </div>
 </div>
 
