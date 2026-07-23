@@ -441,15 +441,12 @@
     </div>
   </div>
 
-  <!-- ========== شاشة انتهاء الاشتراك ========== -->
+  <!-- ========== شاشة انتهاء الاشتراك / الحظر ========== -->
   <div class="status-screen" id="screen-expired">
-    <div class="ss-icon stop">🔒</div>
+    <div class="ss-icon stop" id="exp-icon">🔒</div>
     <h2 id="exp-title">انتهت فترتك المجانية</h2>
     <p id="exp-text">حتى تكمّل الشغل على جايك، تحتاج تفعيل اشتراك من الإدارة. تواصل وياهم وراح يفعّلولك حسابك فوراً.</p>
-    <div class="contact-card">
-      <h4>📞 للتفعيل، تواصل مع الإدارة</h4>
-      <div class="num" id="admin-phone">07XX XXX XXXX</div>
-    </div>
+    <a class="btn go" id="exp-contact-btn" href="#" target="_blank" style="max-width:340px;width:100%;text-decoration:none;display:block;text-align:center;margin-bottom:10px">💬 تواصل مع الإدارة</a>
     <div class="btn-row" style="max-width:340px;width:100%">
       <button class="btn" onclick="checkAccess(true)">تحققت، حدّث الحالة 🔄</button>
     </div>
@@ -544,7 +541,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const MUSAYYIB = [32.7789, 44.2892];
-const ADMIN_CONTACT = '07717533595'; // رقم الإدارة للتفعيل
+let contactSettings = {};
+async function loadContactSettings() {
+  try { contactSettings = await fetch('/api/contact-settings').then(r => r.json()); } catch (e) {}
+}
 
 let map, meMarker, pickupMarker, destMarker, routeLine;
 let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
@@ -858,21 +858,40 @@ async function checkAccess(showToast) {
   } catch(e) { toast('ما كدرنا نتأكد من حالتك'); }
 }
 
-function showExpired(acc) {
+async function showExpired(acc) {
   stopWorking();
   document.getElementById('main-header').classList.add('hidden');
   document.getElementById('main-tabs').classList.add('hidden');
   document.getElementById('work-view').classList.add('hidden');
   document.getElementById('earn-view').classList.remove('active');
   document.getElementById('sub-banner').classList.add('hidden');
-  document.getElementById('admin-phone').textContent = ADMIN_CONTACT;
-  if (acc.reason === 'expired') {
-    document.getElementById('exp-title').textContent = 'انتهى اشتراكك';
-    document.getElementById('exp-text').textContent = 'حتى تكمّل الشغل على جايك، تحتاج تجديد اشتراكك. تواصل مع الإدارة وراح يجددولك فوراً.';
+
+  const icon = document.getElementById('exp-icon');
+  if (acc.reason === 'banned') {
+    icon.textContent = '🚫';
+    document.getElementById('exp-title').textContent = 'حسابك محظور';
+    document.getElementById('exp-text').textContent = acc.banReason
+      ? 'السبب: ' + acc.banReason
+      : 'تواصل مع الإدارة لمعرفة السبب.';
+  } else if (acc.reason === 'expired') {
+    icon.textContent = '🔒';
+    document.getElementById('exp-title').textContent = 'انتهى تفعيل اشتراكك';
+    document.getElementById('exp-text').textContent = 'حتى تكمّل الشغل على جايك، تحتاج إعادة التفعيل. تواصل مع الإدارة وراح يجددولك فوراً.';
   } else {
+    icon.textContent = '🔒';
     document.getElementById('exp-title').textContent = 'انتهت فترتك المجانية';
     document.getElementById('exp-text').textContent = 'استفدت من يومك المجاني. حتى تكمّل الشغل، تحتاج تفعيل اشتراك من الإدارة.';
   }
+
+  if (!contactSettings || !Object.keys(contactSettings).length) await loadContactSettings();
+  const btn = document.getElementById('exp-contact-btn');
+  if (contactSettings.whatsapp) {
+    btn.href = `https://wa.me/${contactSettings.whatsapp.replace(/\D/g,'')}?text=${encodeURIComponent('مرحبا، أنا سائق بتطبيق جايك وأحتاج مساعدة بحسابي')}`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+
   document.getElementById('screen-expired').classList.add('active');
 }
 
@@ -1331,6 +1350,7 @@ function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContex
 
 // ============ التشغيل ============
 connectWS();
+loadContactSettings();
 if (driver) {
   // مسجّل من قبل — نتأكد من حالته
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));

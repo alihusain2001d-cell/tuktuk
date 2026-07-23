@@ -74,6 +74,9 @@ async function init() {
     `);
     // ترقية: أضف العمود لو الجدول موجود من قبل
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS photo_self TEXT;`);
+    // ترقية: حظر السائق من استخدام التطبيق
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false;`);
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS ban_reason TEXT;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS customers (
         phone      TEXT PRIMARY KEY,
@@ -86,6 +89,9 @@ async function init() {
     await pool.query(`UPDATE customers SET id = 'cus_' || md5(phone) WHERE id IS NULL;`);
     // ترقية: صورة الزبون الشخصية
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS photo TEXT;`);
+    // ترقية: حظر الزبون من استخدام التطبيق
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false;`);
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ban_reason TEXT;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rides (
         id             TEXT PRIMARY KEY,
@@ -302,6 +308,7 @@ async function updateDriverLocation(id, lat, lng) {
 async function getDriverAccess(id) {
   const d = await getDriver(id);
   if (!d) return { allowed: false, reason: 'not_found' };
+  if (d.banned) return { allowed: false, reason: 'banned', banReason: d.ban_reason || null };
 
   const now = Date.now();
   const subEnds = d.sub_ends_at ? new Date(d.sub_ends_at).getTime() : 0;
@@ -402,6 +409,27 @@ async function revokeDriverSubscription(id) {
   return res.rows[0];
 }
 
+// حظر/إلغاء حظر السائق من استخدام التطبيق
+async function banDriver(id, reason) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(id);
+    if (d) { d.banned = true; d.ban_reason = reason || null; }
+    return d;
+  }
+  const res = await pool.query('UPDATE drivers SET banned=true, ban_reason=$2 WHERE id=$1 RETURNING *', [id, reason || null]);
+  return res.rows[0] || null;
+}
+
+async function unbanDriver(id) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(id);
+    if (d) { d.banned = false; d.ban_reason = null; }
+    return d;
+  }
+  const res = await pool.query('UPDATE drivers SET banned=false, ban_reason=NULL WHERE id=$1 RETURNING *', [id]);
+  return res.rows[0] || null;
+}
+
 // حذف سائق (مع رحلاته)
 async function deleteDriver(id) {
   if (!HAS_DB) { mem.drivers.delete(id); return true; }
@@ -457,6 +485,29 @@ async function updateCustomerProfile(phone, { name, photo } = {}) {
   if (photo !== undefined) { vals.push(photo); sets.push(`photo=$${vals.length}`); }
   if (!sets.length) return getCustomerByPhone(phone);
   const res = await pool.query(`UPDATE customers SET ${sets.join(', ')} WHERE phone=$1 RETURNING *`, vals);
+  return res.rows[0] || null;
+}
+
+// حظر/إلغاء حظر الزبون من استخدام التطبيق
+async function banCustomer(phone, reason) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    const rec = mem.customers.get(clean);
+    if (rec) { rec.banned = true; rec.ban_reason = reason || null; }
+    return rec;
+  }
+  const res = await pool.query('UPDATE customers SET banned=true, ban_reason=$2 WHERE phone=$1 RETURNING *', [clean, reason || null]);
+  return res.rows[0] || null;
+}
+
+async function unbanCustomer(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    const rec = mem.customers.get(clean);
+    if (rec) { rec.banned = false; rec.ban_reason = null; }
+    return rec;
+  }
+  const res = await pool.query('UPDATE customers SET banned=false, ban_reason=NULL WHERE phone=$1 RETURNING *', [clean]);
   return res.rows[0] || null;
 }
 
@@ -740,6 +791,50 @@ async function getStats() {
   };
 }
 
+// كل رحلات سائق معيّن (أي حالة) — لملف السائق التفصيلي بلوحة التحكم
+async function getDriverRides(driverId, limit = 100) {
+  if (!HAS_DB) return [...mem.rides.values()].filter(r => r.driverId === driverId).slice(-limit).reverse();
+  const res = await pool.query(
+    `SELECT * FROM rides WHERE driver_id=$1 ORDER BY created_at DESC LIMIT $2`, [driverId, limit]
+  );
+  return res.rows;
+}
+
+// شكد مرة زبون ألغى طلب بعد ما هذا السائق وافق عليه (مؤشر مسؤولية)
+async function getDriverCancelledOnCount(driverId) {
+  if (!HAS_DB) return [...mem.rides.values()].filter(r => r.driverId === driverId && r.status === 'cancelled').length;
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM rides WHERE driver_id=$1 AND status='cancelled'`, [driverId]
+  );
+  return res.rows[0].n;
+}
+
+// كل طلبات زبون معيّن (أي حالة) — لملف الزبون التفصيلي بلوحة التحكم
+async function getCustomerRides(phone, limit = 100) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    return [...mem.rides.values()].filter(r => cleanPhone(r.customer?.phone) === clean).slice(-limit).reverse();
+  }
+  const res = await pool.query(
+    `SELECT * FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 ORDER BY created_at DESC LIMIT $2`,
+    [clean, limit]
+  );
+  return res.rows;
+}
+
+// شكد مرة الزبون ألغى طلب (على أي سائق)
+async function getCustomerCancelCount(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    return [...mem.rides.values()].filter(r => cleanPhone(r.customer?.phone) === clean && r.status === 'cancelled').length;
+  }
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='cancelled'`,
+    [clean]
+  );
+  return res.rows[0].n;
+}
+
 // إجمالي اللي دفعه سائق معيّن
 async function getDriverPaidTotal(driverId) {
   if (!HAS_DB) {
@@ -924,19 +1019,22 @@ async function getDriverRatingSummary(driverId) {
 }
 
 // ملاحظات وشكاوى الزبائن (لكل السواق، لمراجعة الأدمن)
-async function getComplaints(limit = 50) {
+async function getComplaints(limit = 50, driverId = null) {
   if (!HAS_DB) {
-    return [...mem.rides.values()]
-      .filter(r => r.ratingNote)
-      .slice(-limit).reverse()
+    let list = [...mem.rides.values()].filter(r => r.ratingNote);
+    if (driverId) list = list.filter(r => r.driverId === driverId);
+    return list.slice(-limit).reverse()
       .map(r => ({ rideId: r.id, driverId: r.driverId, driverName: null, customer: r.customer.name, rating: r.rating, note: r.ratingNote, at: r.done_at ? r.done_at.getTime() : Date.now() }));
   }
+  const params = [limit];
+  let where = `rides.rating_note IS NOT NULL AND rides.rating_note != ''`;
+  if (driverId) { params.push(driverId); where += ` AND rides.driver_id = $${params.length}`; }
   const res = await pool.query(`
     SELECT rides.id AS ride_id, rides.driver_id, rides.customer_name, rides.rating, rides.rating_note, rides.done_at, drivers.name AS driver_name
     FROM rides LEFT JOIN drivers ON drivers.id = rides.driver_id
-    WHERE rides.rating_note IS NOT NULL AND rides.rating_note != ''
+    WHERE ${where}
     ORDER BY rides.done_at DESC LIMIT $1;
-  `, [limit]);
+  `, params);
   return res.rows;
 }
 
@@ -984,12 +1082,14 @@ module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
+  banDriver, unbanDriver,
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
-  updateCustomerProfile, changeCustomerPhone,
+  updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount,
+  banCustomer, unbanCustomer,
   createRide, updateRideStatus, cancelRideWithReason, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
-  getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal,
+  getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout,

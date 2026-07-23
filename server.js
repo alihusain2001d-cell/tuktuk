@@ -369,6 +369,12 @@ app.post('/api/customer/login', async (req, res) => {
 
     const c = await db.getCustomerByPhone(clean);
     if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم', notFound: true });
+    if (c.banned) {
+      return res.status(403).json({
+        error: 'حسابك محظور من استخدام التطبيق' + (c.ban_reason ? ' — السبب: ' + c.ban_reason : ''),
+        banned: true,
+      });
+    }
 
     const trips = await db.getCustomerTripCount(clean);
     res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo }, trips });
@@ -477,6 +483,16 @@ app.post('/api/book', async (req, res) => {
   try {
     const { name, phone, pickup, destination, socketId, orderType, store, storeName, itemDesc } = req.body;
     if (!pickup || !pickup.lat) return res.status(400).json({ error: 'موقعك مطلوب' });
+
+    if (phone) {
+      const existing = await db.getCustomerByPhone(phone);
+      if (existing && existing.banned) {
+        return res.status(403).json({
+          error: 'حسابك محظور من استخدام التطبيق' + (existing.ban_reason ? ' — السبب: ' + existing.ban_reason : ''),
+          banned: true,
+        });
+      }
+    }
 
     const type = orderType === 'delivery' ? 'delivery' : 'ride';
     const rideId = uid();
@@ -787,6 +803,52 @@ app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ملف السائق التفصيلي (كل شي عنه — للمساءلة)
+app.get('/api/admin/driver/:id/detail', checkAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const driver = await db.getDriver(id);
+    if (!driver) return res.status(404).json({ error: 'ماكو سائق' });
+    const [access, rating, paidTotal, rides, cancelledOnCount, complaints] = await Promise.all([
+      db.getDriverAccess(id), db.getDriverRatingSummary(id), db.getDriverPaidTotal(id),
+      db.getDriverRides(id, 50), db.getDriverCancelledOnCount(id), db.getComplaints(50, id),
+    ]);
+    res.json({ driver, access, rating, paidTotal, rides, cancelledOnCount, complaints, online: onlineDrivers.has(id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ملف الزبون التفصيلي (كل شي عنه)
+app.get('/api/admin/customer/:phone/detail', checkAdmin, async (req, res) => {
+  try {
+    const phone = req.params.phone;
+    const customer = await db.getCustomerByPhone(phone);
+    if (!customer) return res.status(404).json({ error: 'ماكو زبون' });
+    const [rides, cancelCount, tripCount, pendingReward] = await Promise.all([
+      db.getCustomerRides(phone, 50), db.getCustomerCancelCount(phone),
+      db.getCustomerTripCount(phone), db.getPendingReward(phone),
+    ]);
+    res.json({ customer, rides, cancelCount, tripCount, pendingReward });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// حظر زبون من استخدام التطبيق (مع سبب)
+app.post('/api/admin/customer/:phone/ban', checkAdmin, async (req, res) => {
+  try {
+    const c = await db.banCustomer(req.params.phone, (req.body.reason || '').trim());
+    if (!c) return res.status(404).json({ error: 'ماكو زبون' });
+    res.json({ ok: true, customer: c });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// إلغاء حظر زبون
+app.post('/api/admin/customer/:phone/unban', checkAdmin, async (req, res) => {
+  try {
+    const c = await db.unbanCustomer(req.params.phone);
+    if (!c) return res.status(404).json({ error: 'ماكو زبون' });
+    res.json({ ok: true, customer: c });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/driver/:id/subscribe', checkAdmin, async (req, res) => {
   try {
     const days = parseInt(req.body.days, 10);
@@ -830,6 +892,29 @@ app.post('/api/admin/driver/:id/revoke', checkAdmin, async (req, res) => {
       sendTo(online.socketId, 'driver:blocked', { reason: 'expired', allowed: false });
       onlineDrivers.delete(req.params.id);
     }
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// حظر سائق من استخدام التطبيق (مع سبب)
+app.post('/api/admin/driver/:id/ban', checkAdmin, async (req, res) => {
+  try {
+    const d = await db.banDriver(req.params.id, (req.body.reason || '').trim());
+    if (!d) return res.status(404).json({ error: 'ماكو سائق' });
+    const online = onlineDrivers.get(req.params.id);
+    if (online) {
+      sendTo(online.socketId, 'driver:blocked', { reason: 'banned', allowed: false, banReason: d.ban_reason || null });
+      onlineDrivers.delete(req.params.id);
+    }
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// إلغاء حظر سائق
+app.post('/api/admin/driver/:id/unban', checkAdmin, async (req, res) => {
+  try {
+    const d = await db.unbanDriver(req.params.id);
+    if (!d) return res.status(404).json({ error: 'ماكو سائق' });
     res.json({ ok: true, driver: d });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

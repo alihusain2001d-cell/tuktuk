@@ -811,7 +811,9 @@ async function verifyOtpAndProceed() {
       const out = await res.json();
       if (!res.ok) {
         toast(out.error || 'صار خطأ');
-        if (out.notFound) setTimeout(() => authStep('register'), 1300); else clearCustOtp();
+        if (out.banned) setTimeout(() => authStep('welcome'), 2200);
+        else if (out.notFound) setTimeout(() => authStep('register'), 1300);
+        else clearCustOtp();
         return;
       }
       user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null };
@@ -1561,6 +1563,7 @@ async function sendBooking(payload, onErr) {
       body: JSON.stringify({ name:user.name, phone:user.phone, socketId, ...payload }),
     });
     const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); onErr(); return; }
     currentRide = out.rideId;
     exitFlow();
     if (out.reward) { toast('🎉 تطبقت مكافأتك على هذي الرحلة: ' + rewardLabel(out.reward)); checkRewardBanner(); }
