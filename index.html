@@ -253,6 +253,10 @@
   .reward-progress-box .rp-sub { font-size:12px; color:var(--muted); margin-top:8px; }
   .reward-banner { background:var(--brand); color:var(--ink); border-radius:14px; padding:14px 16px; margin-bottom:16px; font-weight:700; text-align:center; cursor:pointer; box-shadow:0 3px 0 var(--brand-dark); }
 
+  .filter-row { display:flex; gap:8px; margin-bottom:14px; overflow-x:auto; padding-bottom:2px; }
+  .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; flex-shrink:0; }
+  .chip.active { background:var(--brand); border-color:var(--brand); color:var(--ink); }
+
   .star-row { display:flex; justify-content:center; gap:8px; margin-bottom:22px; direction:ltr; }
   .star-row .star { font-size:38px; color:var(--line); cursor:pointer; transition:transform .1s; user-select:none; }
   .star-row .star.sel { color:var(--brand); }
@@ -637,6 +641,16 @@
     </div>
   </div>
 
+  <!-- ============ نافذة الحظر ============ -->
+  <div class="cancel-modal-bg" id="ban-modal-bg">
+    <div class="cancel-modal" style="text-align:center">
+      <div style="font-size:44px;margin-bottom:10px">🚫</div>
+      <h3 style="margin-bottom:8px">تم حظرك من استخدام التطبيق</h3>
+      <p id="ban-reason-text" style="color:var(--muted);font-size:14px;margin-bottom:20px;line-height:1.7">—</p>
+      <a class="btn go contact-btn" id="ban-contact-btn" href="#" target="_blank">💬 تواصل مع الإدارة</a>
+    </div>
+  </div>
+
   <!-- ============ نافذة إلغاء الطلب ============ -->
   <div class="cancel-modal-bg" id="cancel-modal-bg">
     <div class="cancel-modal">
@@ -810,9 +824,9 @@ async function verifyOtpAndProceed() {
       const res = await fetch('/api/customer/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: pendingPhone, code }) });
       const out = await res.json();
       if (!res.ok) {
+        if (out.banned) { showBannedScreen(out.banReason); setTimeout(() => authStep('welcome'), 300); return; }
         toast(out.error || 'صار خطأ');
-        if (out.banned) setTimeout(() => authStep('welcome'), 2200);
-        else if (out.notFound) setTimeout(() => authStep('register'), 1300);
+        if (out.notFound) setTimeout(() => authStep('register'), 1300);
         else clearCustOtp();
         return;
       }
@@ -854,6 +868,19 @@ function showApp() {
   const dhAvatar = document.getElementById('dh-avatar');
   dhAvatar.innerHTML = user.photo ? `<img src="${user.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : user.name.charAt(0);
   checkRewardBanner();
+}
+
+async function showBannedScreen(reason) {
+  document.getElementById('ban-reason-text').textContent = reason ? 'السبب: ' + reason : 'تواصل مع الإدارة لمعرفة السبب.';
+  const btn = document.getElementById('ban-contact-btn');
+  try {
+    const cs = await fetch('/api/contact-settings').then(r => r.json());
+    if (cs.whatsapp) {
+      btn.href = `https://wa.me/${cs.whatsapp.replace(/\D/g,'')}?text=${encodeURIComponent('مرحبا، حسابي محظور بتطبيق جايك وأحتاج مساعدة')}`;
+      btn.classList.remove('hidden');
+    } else btn.classList.add('hidden');
+  } catch (e) { btn.classList.add('hidden'); }
+  document.getElementById('ban-modal-bg').classList.add('show');
 }
 
 async function checkRewardBanner() {
@@ -912,30 +939,60 @@ function openSimple(key) {
 }
 
 // ============ سجل الرحلات ============
+// فلترة بالتاريخ (مشتركة بين كل قوائم الرحلات)
+function filterByDate(items, filter, dateField) {
+  if (filter === 'all') return items;
+  const ranges = { today: 86400000, week: 7*86400000, month: 30*86400000 };
+  const cutoff = Date.now() - ranges[filter];
+  return items.filter(it => it[dateField] >= cutoff);
+}
+function dateFilterBarHTML(id, current, onClick) {
+  const opts = [['all','الكل'],['today','اليوم'],['week','آخر أسبوع'],['month','آخر شهر']];
+  return `<div class="filter-row" id="${id}">${opts.map(([f,l]) =>
+    `<div class="chip ${current===f?'active':''}" onclick="${onClick}('${f}', this)">${l}</div>`
+  ).join('')}</div>`;
+}
+
+let allTrips = [], tripDateFilter = 'all';
+function setTripDateFilter(f, el) {
+  tripDateFilter = f;
+  document.querySelectorAll('#trips-filter .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderTrips();
+}
+function renderTrips() {
+  const body = document.getElementById('simple-body');
+  const filtered = filterByDate(allTrips, tripDateFilter, 'at');
+  const bar = dateFilterBarHTML('trips-filter', tripDateFilter, 'setTripDateFilter');
+  if (!filtered.length) {
+    const msg = allTrips.length ? 'ماكو رحلات بهذي الفترة.' : 'لسه ماكو رحلات مسجّلة. أول ما تخلّص رحلة أو توصيل راح تظهر هنا.';
+    body.innerHTML = bar + `<div class="sp-empty"><div class="ico">🕐</div><h3>سجل رحلاتك</h3><p>${msg}</p></div>`;
+    return;
+  }
+  body.innerHTML = bar + filtered.map(t => `
+    <div class="trip-item">
+      <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
+      <div class="ti-body">
+        <div class="route">${t.from} ← ${t.to}</div>
+        <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
+      </div>
+      <div class="ti-fare">
+        <div class="f">${t.fare.toLocaleString()} د.ع</div>
+        ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
 async function loadTrips() {
   const body = document.getElementById('simple-body');
   body.innerHTML = '<div class="spinner"></div>';
   try {
     const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/trips`);
     const out = await res.json();
-    const trips = out.trips || [];
-    if (!trips.length) {
-      body.innerHTML = `<div class="sp-empty"><div class="ico">🕐</div><h3>سجل رحلاتك</h3><p>لسه ماكو رحلات مسجّلة. أول ما تخلّص رحلة أو توصيل راح تظهر هنا.</p></div>`;
-      return;
-    }
-    body.innerHTML = trips.map(t => `
-      <div class="trip-item">
-        <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
-        <div class="ti-body">
-          <div class="route">${t.from} ← ${t.to}</div>
-          <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
-        </div>
-        <div class="ti-fare">
-          <div class="f">${t.fare.toLocaleString()} د.ع</div>
-          ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
-        </div>
-      </div>
-    `).join('');
+    allTrips = out.trips || [];
+    tripDateFilter = 'all';
+    renderTrips();
   } catch (e) {
     body.innerHTML = `<div class="sp-empty"><div class="ico">⚠️</div><h3>صار خطأ</h3><p>ما كدرنا نجيب رحلاتك، حاول مرة ثانية.</p></div>`;
   }
@@ -1563,7 +1620,12 @@ async function sendBooking(payload, onErr) {
       body: JSON.stringify({ name:user.name, phone:user.phone, socketId, ...payload }),
     });
     const out = await res.json();
-    if (!res.ok) { toast(out.error || 'صار خطأ'); onErr(); return; }
+    if (!res.ok) {
+      onErr();
+      if (out.banned) { showBannedScreen(out.banReason); return; }
+      toast(out.error || 'صار خطأ');
+      return;
+    }
     currentRide = out.rideId;
     exitFlow();
     if (out.reward) { toast('🎉 تطبقت مكافأتك على هذي الرحلة: ' + rewardLabel(out.reward)); checkRewardBanner(); }

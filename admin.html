@@ -302,11 +302,17 @@
 
   <!-- ===== الطلبات ===== -->
   <div class="view" id="view-rides">
-    <div class="filter-row">
+    <div class="filter-row" id="rides-type-filter">
       <div class="chip active" onclick="filterRides('all', this)">الكل</div>
       <div class="chip" onclick="filterRides('ride', this)">🚗 رحلات</div>
       <div class="chip" onclick="filterRides('delivery', this)">🛒 توصيل</div>
       <div class="chip" onclick="filterRides('done', this)">منجزة</div>
+    </div>
+    <div class="filter-row" id="rides-date-filter">
+      <div class="chip active" onclick="filterRidesDate('all', this)">أي وقت</div>
+      <div class="chip" onclick="filterRidesDate('today', this)">اليوم</div>
+      <div class="chip" onclick="filterRidesDate('week', this)">آخر أسبوع</div>
+      <div class="chip" onclick="filterRidesDate('month', this)">آخر شهر</div>
     </div>
     <div id="rides-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
   </div>
@@ -534,7 +540,7 @@
 <script>
 let KEY = localStorage.getItem('jayak_admin_key') || '';
 let allDrivers = [], allRides = [], allCustomers = [], liveMap = null, liveMarkers = [];
-let driverFilter = 'all', rideFilter = 'all';
+let driverFilter = 'all', rideFilter = 'all', rideDateFilter = 'all';
 let selDays = null, subTargetId = null;
 let liveTimer = null;
 let rsType = 'free_ride', grType = 'free_ride', grantTargetPhone = null;
@@ -1066,7 +1072,13 @@ function renderRides() {
   else if (rideFilter === 'delivery') arr = arr.filter(r=>r.type==='delivery');
   else if (rideFilter === 'done') arr = arr.filter(r=>r.status==='done');
 
-  if (!arr.length) { list.innerHTML = '<div class="empty"><div class="ico">📋</div><div>ماكو طلبات</div></div>'; return; }
+  if (rideDateFilter !== 'all') {
+    const ranges = { today: 86400000, week: 7*86400000, month: 30*86400000 };
+    const cutoff = Date.now() - ranges[rideDateFilter];
+    arr = arr.filter(r => r.created_at && new Date(r.created_at).getTime() >= cutoff);
+  }
+
+  if (!arr.length) { list.innerHTML = '<div class="empty"><div class="ico">📋</div><div>ماكو طلبات بهذي الفترة</div></div>'; return; }
 
   list.innerHTML = arr.map(r => {
     const isDel = r.type === 'delivery';
@@ -1092,7 +1104,14 @@ function renderRides() {
 
 function filterRides(f, el) {
   rideFilter = f;
-  document.querySelectorAll('#view-rides .chip').forEach(c=>c.classList.remove('active'));
+  document.querySelectorAll('#rides-type-filter .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderRides();
+}
+
+function filterRidesDate(f, el) {
+  rideDateFilter = f;
+  document.querySelectorAll('#rides-date-filter .chip').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
   renderRides();
 }

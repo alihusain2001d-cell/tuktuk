@@ -372,7 +372,7 @@ app.post('/api/customer/login', async (req, res) => {
     if (c.banned) {
       return res.status(403).json({
         error: 'حسابك محظور من استخدام التطبيق' + (c.ban_reason ? ' — السبب: ' + c.ban_reason : ''),
-        banned: true,
+        banned: true, banReason: c.ban_reason || null,
       });
     }
 
@@ -489,7 +489,7 @@ app.post('/api/book', async (req, res) => {
       if (existing && existing.banned) {
         return res.status(403).json({
           error: 'حسابك محظور من استخدام التطبيق' + (existing.ban_reason ? ' — السبب: ' + existing.ban_reason : ''),
-          banned: true,
+          banned: true, banReason: existing.ban_reason || null,
         });
       }
     }
