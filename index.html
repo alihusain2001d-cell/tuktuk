@@ -258,6 +258,15 @@
   .star-row .star.sel { color:var(--brand); }
   .star-row .star:active { transform:scale(.9); }
 
+  .cancel-modal-bg { position:fixed; inset:0; background:rgba(26,26,26,.6); z-index:2600; display:none; align-items:center; justify-content:center; padding:20px; }
+  .cancel-modal-bg.show { display:flex; }
+  .cancel-modal { background:#fff; border-radius:20px; padding:22px; width:100%; max-width:360px; }
+  .cancel-modal h3 { font-size:17px; margin-bottom:14px; }
+  .cancel-reason { padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; margin-bottom:9px; cursor:pointer; font-size:14px; }
+  .cancel-reason.sel { border-color:var(--brand); background:var(--gold-light); font-weight:600; }
+  .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
+  .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
+
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -479,6 +488,7 @@
           <div class="tp-edit">✎</div>
         </div>
       </div>
+      <div class="reward-banner hidden" id="r-reward-banner" style="cursor:default">🎁 عندك مكافأة — راح تنطبق تلقائياً على هذي الرحلة</div>
       <div class="fare-preview hidden" id="r-fare-box">
         <div><div class="fp-label">الأجرة التقديرية</div><div class="fp-km" id="r-fare-km">— كم</div></div>
         <div class="fp-amount" id="r-fare-amount">—</div>
@@ -624,6 +634,23 @@
       </div>
       <button class="btn go" onclick="submitRating()">إرسال التقييم</button>
       <button class="btn ghost" onclick="skipRating()" style="margin-top:10px">تخطي</button>
+    </div>
+  </div>
+
+  <!-- ============ نافذة إلغاء الطلب ============ -->
+  <div class="cancel-modal-bg" id="cancel-modal-bg">
+    <div class="cancel-modal">
+      <h3>ليش تريد تلغي الطلب؟</h3>
+      <div id="cancel-reasons-list">
+        <div class="cancel-reason" onclick="pickCancelReason('غيّرت رأيي', this)">غيّرت رأيي</div>
+        <div class="cancel-reason" onclick="pickCancelReason('السائق تأخر', this)">السائق تأخر</div>
+        <div class="cancel-reason" onclick="pickCancelReason('طلبت بالخطأ', this)">طلبت بالخطأ</div>
+        <div class="cancel-reason" onclick="pickCancelReason('لقيت وسيلة ثانية', this)">لقيت وسيلة ثانية</div>
+        <div class="cancel-reason" onclick="pickCancelReason('سبب ثاني', this)">سبب ثاني</div>
+      </div>
+      <textarea id="cancel-custom-reason" class="cancel-custom hidden" placeholder="اكتب السبب..."></textarea>
+      <button class="btn ghost" onclick="closeCancelModal()" style="margin-bottom:10px">تراجع</button>
+      <button class="btn danger-solid" id="btn-confirm-cancel" onclick="confirmCancelRide()" disabled>ألغِ الطلب</button>
     </div>
   </div>
 
@@ -1119,6 +1146,10 @@ async function loadRewards() {
   try {
     const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/rewards`);
     const out = await res.json();
+    if (out.enabled === false) {
+      body.innerHTML = `<div class="sp-empty"><div class="ico">🏷️</div><h3>مكافآتك</h3><p>نظام المكافآت متوقف مؤقتاً — ترقبونا قريباً.</p></div>`;
+      return;
+    }
     if (out.pending) {
       body.innerHTML = `
         <div class="reward-card">
@@ -1156,6 +1187,22 @@ async function saveFavoritePlace(place) {
 function closeSimple() { document.getElementById('simple-page').classList.remove('active'); }
 
 // ============ بدء التدفق ============
+let pendingRewardInfo = null;
+
+async function checkRideReward() {
+  pendingRewardInfo = null;
+  document.getElementById('r-reward-banner').classList.add('hidden');
+  try {
+    const out = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/rewards`).then(r => r.json());
+    if (out.pending) {
+      pendingRewardInfo = out.pending;
+      document.getElementById('r-reward-banner').textContent = `🎁 عندك مكافأة (${rewardLabel(out.pending)}) — راح تنطبق تلقائياً على هذي الرحلة`;
+      document.getElementById('r-reward-banner').classList.remove('hidden');
+    }
+  } catch (e) {}
+  updateFare('r', pickup, destination);
+}
+
 function startFlow(type) {
   currentType = type;
   pickup = null; destination = null; store = null;
@@ -1163,6 +1210,7 @@ function startFlow(type) {
     document.getElementById('flow-ride').classList.add('active');
     resetRideUI();
     tapTarget = 'destination'; // الضغط على الخريطة يحدد الوصول
+    checkRideReward();
     setTimeout(() => {
       if (!mapR) mapR = makeMap('map','r'); else mapR.invalidateSize();
       autoLocatePickup('r');
@@ -1350,8 +1398,20 @@ function updateFare(prefix, a, b) {
   const box = document.getElementById(prefix+'-fare-box');
   if (a && b) {
     const km = haversine(a.lat, a.lng, b.lat, b.lng);
+    const fare = calcFare(km);
     document.getElementById(prefix+'-fare-km').textContent = km.toFixed(1) + ' كم تقريباً';
-    document.getElementById(prefix+'-fare-amount').textContent = calcFare(km).toLocaleString() + ' د.ع';
+    const amountEl = document.getElementById(prefix+'-fare-amount');
+    if (prefix === 'r' && pendingRewardInfo) {
+      let paid = fare;
+      if (pendingRewardInfo.type === 'free_ride') paid = 0;
+      else if (pendingRewardInfo.type === 'percent') paid = Math.max(0, Math.round(fare * (1 - pendingRewardInfo.value / 100)));
+      else if (pendingRewardInfo.type === 'amount') paid = Math.max(0, fare - pendingRewardInfo.value);
+      amountEl.innerHTML = paid === fare
+        ? fare.toLocaleString() + ' د.ع'
+        : `<s style="opacity:.5;font-size:13px">${fare.toLocaleString()}</s> ${paid > 0 ? paid.toLocaleString()+' د.ع' : 'مجاناً 🎁'}`;
+    } else {
+      amountEl.textContent = fare.toLocaleString() + ' د.ع';
+    }
     box.classList.remove('hidden');
   } else box.classList.add('hidden');
 }
@@ -1382,7 +1442,14 @@ function drawPlanMarkers() {
   }
 }
 
-function calcFare(km) { return Math.max(1500, Math.round((1000 + km*500)/250)*250); }
+let fareSettings = { mode: 'per_km', base: 1000, per_km: 500, minimum: 1500, fixed_price: 2000 };
+async function loadFareSettings() {
+  try { fareSettings = await fetch('/api/fare-settings').then(r => r.json()); } catch (e) {}
+}
+function calcFare(km) {
+  if (fareSettings.mode === 'fixed') return fareSettings.fixed_price;
+  return Math.max(fareSettings.minimum, Math.round((fareSettings.base + km * fareSettings.per_km) / 250) * 250);
+}
 
 // ============ WebSocket ============
 function connectWS() {
@@ -1608,8 +1675,37 @@ function closeRateScreen() {
   resetAll();
 }
 
-async function cancelRide() {
-  if (currentRide) await fetch('/api/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId: currentRide }) });
+function cancelRide() {
+  if (!currentRide) return;
+  selectedCancelReason = null;
+  document.querySelectorAll('.cancel-reason').forEach(el => el.classList.remove('sel'));
+  document.getElementById('cancel-custom-reason').classList.add('hidden');
+  document.getElementById('cancel-custom-reason').value = '';
+  document.getElementById('btn-confirm-cancel').disabled = true;
+  document.getElementById('cancel-modal-bg').classList.add('show');
+}
+function closeCancelModal() { document.getElementById('cancel-modal-bg').classList.remove('show'); }
+
+let selectedCancelReason = null;
+function pickCancelReason(reason, el) {
+  selectedCancelReason = reason;
+  document.querySelectorAll('.cancel-reason').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('btn-confirm-cancel').disabled = false;
+  const custom = document.getElementById('cancel-custom-reason');
+  custom.classList.toggle('hidden', reason !== 'سبب ثاني');
+  if (reason === 'سبب ثاني') setTimeout(() => custom.focus(), 100);
+}
+
+async function confirmCancelRide() {
+  if (!selectedCancelReason) return;
+  let reason = selectedCancelReason;
+  if (reason === 'سبب ثاني') {
+    const custom = document.getElementById('cancel-custom-reason').value.trim();
+    if (custom) reason = custom;
+  }
+  closeCancelModal();
+  if (currentRide) await fetch('/api/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId: currentRide, reason }) });
   resetAll();
 }
 function callDriver() { if (driverPhone) location.href = `tel:${driverPhone}`; else toast('رقم السواق غير متوفر'); }
@@ -1628,6 +1724,7 @@ function resetRideUI() {
   const b = document.getElementById('r-book-btn'); b.disabled=false; b.textContent='اطلب رحلة 🚗';
   setEmpty('r-pickup','نحدد موقعك تلقائياً...'); setEmpty('r-dest','اضغط على الخريطة أو ابحث');
   document.getElementById('r-fare-box').classList.add('hidden');
+  document.getElementById('r-reward-banner').classList.add('hidden');
 }
 function resetDeliveryUI() {
   const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='أرسل الطلب للسواق 🛒';
@@ -1644,6 +1741,7 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 
 // ============ التشغيل ============
 connectWS();
+loadFareSettings();
 if (user) {
   // مسجّل من قبل — ادخل مباشرة
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));

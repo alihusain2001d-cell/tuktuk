@@ -239,6 +239,15 @@
       <div class="sc-label">إجمالي ما كسبه السواق من الطلبات (مو ربحك)</div>
     </div>
 
+    <div class="sub-row" style="cursor:pointer" onclick="openFareSettingsModal()">
+      <div class="sr-ico">💰</div>
+      <div class="sr-body">
+        <h4>إعدادات الأجرة</h4>
+        <p id="fare-rule-sub">نحمّل...</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openFareSettingsModal()">تعديل</button>
+    </div>
+
     <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
       <div class="sr-ico">📞</div>
       <div class="sr-body">
@@ -363,6 +372,12 @@
     <h3>قاعدة مكافأة الولاء</h3>
     <div class="m-sub">تنطبق تلقائياً على كل زبون أول ما يوصل لعدد الرحلات المحدد (مرة وحدة لكل زبون)</div>
 
+    <div class="m-label">حالة نظام المكافآت</div>
+    <div class="quick-btns" id="rs-enabled-btns" style="margin-bottom:16px">
+      <div class="quick-btn" data-enabled="true" onclick="pickRewardEnabled(true, this)"><div class="qb-num">✅</div><div class="qb-lbl">شغّال</div></div>
+      <div class="quick-btn" data-enabled="false" onclick="pickRewardEnabled(false, this)"><div class="qb-num">⏸️</div><div class="qb-lbl">متوقف</div></div>
+    </div>
+
     <div class="m-label">بعد كم رحلة؟</div>
     <div class="manual-row" style="margin-bottom:16px">
       <input type="number" id="rs-threshold" min="1" placeholder="10">
@@ -415,6 +430,39 @@
     <div class="modal-actions">
       <button class="btn go" onclick="confirmGrant()">امنح 🎁</button>
       <button class="btn ghost" onclick="closeGrantModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة إعدادات الأجرة -->
+<div class="modal-bg" id="fare-settings-modal">
+  <div class="modal">
+    <h3>إعدادات الأجرة</h3>
+    <div class="m-sub">تتحكم بسعر الرحلات العادية فقط — التوصيل يحدد سعره السائق نفسه بعد الطلب</div>
+
+    <div class="m-label">طريقة الحساب</div>
+    <div class="quick-btns" id="fs-mode-btns" style="margin-bottom:16px">
+      <div class="quick-btn" data-mode="per_km" onclick="pickFareMode('per_km', this)"><div class="qb-num">📏</div><div class="qb-lbl">حسب الكيلومتر</div></div>
+      <div class="quick-btn" data-mode="fixed" onclick="pickFareMode('fixed', this)"><div class="qb-num">💵</div><div class="qb-lbl">سعر ثابت</div></div>
+    </div>
+
+    <div id="fs-perkm-wrap">
+      <div class="m-label">أجرة الأساس</div>
+      <div class="amount-row"><input type="number" id="fs-base" placeholder="1000" min="0"><span class="cur">د.ع</span></div>
+      <div class="m-label" style="margin-top:12px">سعر الكيلومتر</div>
+      <div class="amount-row"><input type="number" id="fs-perkm" placeholder="500" min="0"><span class="cur">د.ع</span></div>
+      <div class="m-label" style="margin-top:12px">أقل أجرة</div>
+      <div class="amount-row"><input type="number" id="fs-min" placeholder="1500" min="0"><span class="cur">د.ع</span></div>
+    </div>
+
+    <div id="fs-fixed-wrap" class="hidden">
+      <div class="m-label">السعر الثابت لكل رحلة</div>
+      <div class="amount-row"><input type="number" id="fs-fixed" placeholder="2000" min="0"><span class="cur">د.ع</span></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn go" onclick="saveFareSettings()">حفظ ✅</button>
+      <button class="btn ghost" onclick="closeFareSettingsModal()">إلغاء</button>
     </div>
   </div>
 </div>
@@ -511,7 +559,7 @@ function switchTab(name) {
 async function refreshAll() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spin');
-  await Promise.all([loadStats(), loadDrivers(), loadSubs(), loadCustomers(), loadPayouts(), loadComplaints()]);
+  await Promise.all([loadStats(), loadDrivers(), loadSubs(), loadCustomers(), loadPayouts(), loadComplaints(), renderFareRuleSub()]);
   renderRewardsAlert();
   document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar', {hour:'2-digit',minute:'2-digit'});
   btn.classList.remove('spin');
@@ -863,6 +911,7 @@ function renderRides() {
       <div class="rr-body">
         <h4>${r.customer_name || 'زبون'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
         <p>${from} ← ${to}</p>
+        ${r.cancel_reason ? `<p style="color:var(--stop);font-size:10.5px">❌ ${r.cancel_reason}</p>` : ''}
       </div>
       <div class="rr-side">
         <div class="fare">${r.est_fare ? r.est_fare.toLocaleString() : '—'}</div>
@@ -911,7 +960,8 @@ async function loadCustomers() {
 async function renderRewardRuleSub() {
   try {
     const s = await api('/api/admin/reward-settings').then(r=>r.json());
-    document.getElementById('reward-rule-sub').textContent = `بعد ${s.trips_threshold} رحلة → ${REWARD_LABEL({reward_type:s.reward_type, reward_value:s.reward_value})}`;
+    const status = s.enabled !== false ? '' : ' — ⏸️ متوقف حالياً';
+    document.getElementById('reward-rule-sub').textContent = `بعد ${s.trips_threshold} رحلة → ${REWARD_LABEL({reward_type:s.reward_type, reward_value:s.reward_value})}${status}`;
   } catch(e) { document.getElementById('reward-rule-sub').textContent = 'اضغط لتحديد القاعدة'; }
 }
 
@@ -928,6 +978,58 @@ function renderRewardsAlert() {
         <p>${c.tripsDone} رحلة · ${REWARD_LABEL(c.pendingReward)}</p>
       </div>
     </div>`).join('');
+}
+
+// ============ إعدادات الأجرة ============
+let fsMode = 'per_km';
+function pickFareMode(mode, el) {
+  fsMode = mode;
+  document.querySelectorAll('#fs-mode-btns .quick-btn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('fs-perkm-wrap').classList.toggle('hidden', mode !== 'per_km');
+  document.getElementById('fs-fixed-wrap').classList.toggle('hidden', mode !== 'fixed');
+}
+
+async function openFareSettingsModal() {
+  document.getElementById('fare-settings-modal').classList.add('show');
+  try {
+    const s = await fetch('/api/fare-settings').then(r=>r.json());
+    document.getElementById('fs-base').value = s.base;
+    document.getElementById('fs-perkm').value = s.per_km;
+    document.getElementById('fs-min').value = s.minimum;
+    document.getElementById('fs-fixed').value = s.fixed_price;
+    const btn = document.querySelector(`#fs-mode-btns .quick-btn[data-mode="${s.mode}"]`);
+    if (btn) pickFareMode(s.mode, btn);
+  } catch(e) { toast('صار خطأ بجلب الإعدادات'); }
+}
+function closeFareSettingsModal(){ document.getElementById('fare-settings-modal').classList.remove('show'); }
+
+async function saveFareSettings() {
+  const body = {
+    mode: fsMode,
+    base: parseInt(document.getElementById('fs-base').value,10)||0,
+    per_km: parseInt(document.getElementById('fs-perkm').value,10)||0,
+    minimum: parseInt(document.getElementById('fs-min').value,10)||0,
+    fixed_price: parseInt(document.getElementById('fs-fixed').value,10)||0,
+  };
+  if (fsMode==='per_km' && !body.per_km) return toast('اكتب سعر الكيلومتر');
+  if (fsMode==='fixed' && !body.fixed_price) return toast('اكتب السعر الثابت');
+  try {
+    const res = await api('/api/admin/fare-settings', { method:'POST', body: JSON.stringify(body) });
+    if (!res.ok) return toast('صار خطأ');
+    closeFareSettingsModal();
+    toast('انحفظت إعدادات الأجرة ✅');
+    renderFareRuleSub();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+async function renderFareRuleSub() {
+  try {
+    const s = await fetch('/api/fare-settings').then(r=>r.json());
+    document.getElementById('fare-rule-sub').textContent = s.mode === 'fixed'
+      ? `سعر ثابت: ${s.fixed_price.toLocaleString()} د.ع لكل رحلة`
+      : `${s.base.toLocaleString()} د.ع أساس + ${s.per_km.toLocaleString()} د.ع لكل كم (أقل أجرة ${s.minimum.toLocaleString()})`;
+  } catch(e) { document.getElementById('fare-rule-sub').textContent = 'اضغط لتحديد السعر'; }
 }
 
 // ============ روابط التواصل ============
@@ -998,6 +1100,13 @@ function pickRewardType(type, el, prefix) {
   else { wrap.classList.remove('hidden'); unit.textContent = type === 'percent' ? '%' : 'د.ع'; }
 }
 
+let rsEnabled = true;
+function pickRewardEnabled(val, el) {
+  rsEnabled = val;
+  document.querySelectorAll('#rs-enabled-btns .quick-btn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
 async function openRewardSettingsModal() {
   document.getElementById('reward-settings-modal').classList.add('show');
   try {
@@ -1006,6 +1115,8 @@ async function openRewardSettingsModal() {
     document.getElementById('rs-value').value = s.reward_value || '';
     const btn = document.querySelector(`#rs-type-btns .quick-btn[data-type="${s.reward_type}"]`);
     if (btn) pickRewardType(s.reward_type, btn, 'rs');
+    const enBtn = document.querySelector(`#rs-enabled-btns .quick-btn[data-enabled="${s.enabled !== false}"]`);
+    if (enBtn) pickRewardEnabled(s.enabled !== false, enBtn);
   } catch(e) { toast('صار خطأ بجلب الإعدادات'); }
 }
 function closeRewardSettingsModal(){ document.getElementById('reward-settings-modal').classList.remove('show'); }
@@ -1015,10 +1126,11 @@ async function saveRewardSettings() {
   const value = parseInt(document.getElementById('rs-value').value, 10) || 0;
   if (!threshold || threshold < 1) return toast('اكتب عدد رحلات صحيح');
   try {
-    const res = await api('/api/admin/reward-settings', { method:'POST', body: JSON.stringify({ threshold, type: rsType, value }) });
+    const res = await api('/api/admin/reward-settings', { method:'POST', body: JSON.stringify({ threshold, type: rsType, value, enabled: rsEnabled }) });
     if (!res.ok) return toast('صار خطأ');
     closeRewardSettingsModal();
     toast('انحفظت قاعدة المكافأة ✅');
+    renderRewardRuleSub();
   } catch(e) { toast('صار خطأ'); }
 }
 

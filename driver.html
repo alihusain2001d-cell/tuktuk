@@ -1147,7 +1147,9 @@ function renderRequests() {
         </div>`;
     } else {
       // ===== رحلة عادية: سعر تلقائي =====
-      const fareHtml = r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع</div></div>` : '';
+      const fareHtml = r.rewardApplied
+        ? `<div class="rr-fare"><div class="amt" style="color:var(--go);font-size:12.5px">🎁 مدفوعة من الإدارة</div><div class="lbl">أجرتك ${(r.estFare||0).toLocaleString()} د.ع</div></div>`
+        : (r.estFare ? `<div class="rr-fare"><div class="amt">${r.estFare.toLocaleString()}</div><div class="lbl">د.ع</div></div>` : '');
       div.innerHTML = `
         <div class="rr-top">
           <div class="rr-icon">🙋</div>

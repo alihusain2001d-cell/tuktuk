@@ -160,6 +160,21 @@ async function init() {
       );
     `);
     await pool.query(`INSERT INTO reward_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
+    await pool.query(`ALTER TABLE reward_settings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;`);
+
+    // إعدادات الأجرة (حسب الكيلومتر أو سعر ثابت)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS fare_settings (
+        id          INTEGER PRIMARY KEY DEFAULT 1,
+        mode        TEXT NOT NULL DEFAULT 'per_km',
+        base        INTEGER NOT NULL DEFAULT 1000,
+        per_km      INTEGER NOT NULL DEFAULT 500,
+        minimum     INTEGER NOT NULL DEFAULT 1500,
+        fixed_price INTEGER NOT NULL DEFAULT 2000,
+        CHECK (id = 1)
+      );
+    `);
+    await pool.query(`INSERT INTO fare_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
 
     // مكافآت الزبائن (تلقائية أو يدوية) وربطها بمصاريف السائق
     await pool.query(`
@@ -201,6 +216,9 @@ async function init() {
     // ترقية: تقييم الزبون للرحلة بعد ما تخلص
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS rating INTEGER;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS rating_note TEXT;`);
+
+    // ترقية: سبب إلغاء الزبون للطلب
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancel_reason TEXT;`);
 
     console.log('✅ قاعدة البيانات جاهزة (PostgreSQL)');
     return true;
@@ -635,6 +653,16 @@ async function updateRideStatus(id, status, driverId) {
   }
 }
 
+// إلغاء الرحلة مع تسجيل سبب الزبون
+async function cancelRideWithReason(id, reason) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(id);
+    if (r) { r.status = 'cancelled'; r.cancelReason = reason || null; }
+    return;
+  }
+  await pool.query('UPDATE rides SET status=$2, cancel_reason=$3 WHERE id=$1', [id, 'cancelled', reason || null]);
+}
+
 async function getAllRides(limit = 100) {
   if (!HAS_DB) return [...mem.rides.values()].reverse().slice(0, limit);
   const res = await pool.query('SELECT * FROM rides ORDER BY created_at DESC LIMIT $1', [limit]);
@@ -726,20 +754,20 @@ async function getDriverPaidTotal(driverId) {
 // ============ مكافآت الولاء ============
 async function getRewardSettings() {
   if (!HAS_DB) {
-    return mem.rewardSettings || (mem.rewardSettings = { trips_threshold: 10, reward_type: 'free_ride', reward_value: 0 });
+    return mem.rewardSettings || (mem.rewardSettings = { trips_threshold: 10, reward_type: 'free_ride', reward_value: 0, enabled: true });
   }
   const res = await pool.query('SELECT * FROM reward_settings WHERE id=1');
   return res.rows[0];
 }
 
-async function setRewardSettings(threshold, type, value) {
+async function setRewardSettings(threshold, type, value, enabled) {
   if (!HAS_DB) {
-    mem.rewardSettings = { trips_threshold: threshold, reward_type: type, reward_value: value };
+    mem.rewardSettings = { trips_threshold: threshold, reward_type: type, reward_value: value, enabled: !!enabled };
     return mem.rewardSettings;
   }
   const res = await pool.query(`
-    UPDATE reward_settings SET trips_threshold=$1, reward_type=$2, reward_value=$3 WHERE id=1 RETURNING *;
-  `, [threshold, type, value]);
+    UPDATE reward_settings SET trips_threshold=$1, reward_type=$2, reward_value=$3, enabled=$4 WHERE id=1 RETURNING *;
+  `, [threshold, type, value, !!enabled]);
   return res.rows[0];
 }
 
@@ -776,6 +804,7 @@ async function grantManualReward(phone, type, value) {
 // تتحقق بعد كل رحلة منجزة: هل الزبون وصل لأول مرة لعدد الرحلات المطلوب؟
 async function maybeGrantAutoReward(phone) {
   const settings = await getRewardSettings();
+  if (!settings.enabled) return null;
   const tripCount = await getCustomerTripCount(phone);
   if (tripCount < settings.trips_threshold) return null;
 
@@ -911,6 +940,26 @@ async function getComplaints(limit = 50) {
   return res.rows;
 }
 
+// ============ إعدادات الأجرة ============
+async function getFareSettings() {
+  if (!HAS_DB) {
+    return mem.fareSettings || (mem.fareSettings = { mode: 'per_km', base: 1000, per_km: 500, minimum: 1500, fixed_price: 2000 });
+  }
+  const res = await pool.query('SELECT * FROM fare_settings WHERE id=1');
+  return res.rows[0];
+}
+
+async function setFareSettings({ mode, base, per_km, minimum, fixed_price }) {
+  if (!HAS_DB) {
+    mem.fareSettings = { mode, base, per_km, minimum, fixed_price };
+    return mem.fareSettings;
+  }
+  const res = await pool.query(`
+    UPDATE fare_settings SET mode=$1, base=$2, per_km=$3, minimum=$4, fixed_price=$5 WHERE id=1 RETURNING *;
+  `, [mode, base, per_km, minimum, fixed_price]);
+  return res.rows[0];
+}
+
 // ============ روابط التواصل ============
 async function getContactSettings() {
   if (!HAS_DB) {
@@ -938,7 +987,7 @@ module.exports = {
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
   updateCustomerProfile, changeCustomerPhone,
-  createRide, updateRideStatus, getAllRides, getDriverEarnings, getStats,
+  createRide, updateRideStatus, cancelRideWithReason, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal,
   getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
@@ -946,4 +995,5 @@ module.exports = {
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout,
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
+  getFareSettings, setFareSettings,
 };

@@ -18,13 +18,6 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
-// ============ إعدادات الأجرة ============
-const FARE = {
-  base: 1000,       // أجرة الأساس (دينار)
-  perKm: 500,       // سعر الكيلومتر (دينار)
-  minimum: 1500,    // أقل أجرة
-};
-
 // ============ مفتاح لوحة التحكم ============
 const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
 
@@ -44,9 +37,10 @@ const activeRides = new Map();   // rideId -> بيانات الرحلة النش
 
 function uid() { return crypto.randomBytes(6).toString('hex'); }
 
-function calcFare(km) {
-  const raw = FARE.base + km * FARE.perKm;
-  return Math.max(FARE.minimum, Math.round(raw / 250) * 250);
+async function calcFare(km) {
+  const s = await db.getFareSettings();
+  if (s.mode === 'fixed') return s.fixed_price;
+  return Math.max(s.minimum, Math.round((s.base + km * s.per_km) / 250) * 250);
 }
 
 function broadcast(role, type, data) {
@@ -433,7 +427,8 @@ app.get('/api/customer/:phone/rewards', async (req, res) => {
       db.getCustomerTripCount(req.params.phone),
     ]);
     res.json({
-      pending: pending ? { type: pending.reward_type, value: pending.reward_value } : null,
+      enabled: settings.enabled,
+      pending: settings.enabled && pending ? { type: pending.reward_type, value: pending.reward_value } : null,
       tripsDone: tripCount,
       tripsThreshold: settings.trips_threshold,
     });
@@ -490,13 +485,14 @@ app.post('/api/book', async (req, res) => {
     // التوصيل: ماكو سعر — السائق يعرض والزبون يوافق
     if (type === 'ride' && destination && destination.lat) {
       estKm = haversine(pickup.lat, pickup.lng, destination.lat, destination.lng);
-      estFare = calcFare(estKm);
+      estFare = await calcFare(estKm);
     }
 
     // لو الزبون عنده مكافأة متاحة، تنطبق تلقائياً على الرحلة العادية (مو التوصيل، السعر فيه ما يتحدد إلا بعد عرض السائق)
     let customerPaid = estFare, reward = null;
     if (type === 'ride' && phone) {
-      reward = await db.getPendingReward(phone);
+      const rewardSettings = await db.getRewardSettings();
+      if (rewardSettings.enabled) reward = await db.getPendingReward(phone);
       if (reward) {
         if (reward.reward_type === 'free_ride') customerPaid = 0;
         else if (reward.reward_type === 'percent') customerPaid = Math.max(0, Math.round(estFare * (1 - reward.reward_value / 100)));
@@ -528,6 +524,7 @@ app.post('/api/book', async (req, res) => {
       rideId, type: ride.type, pickup: ride.pickup, destination: ride.destination,
       store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc,
       estKm: Math.round(estKm*10)/10, estFare, customer: { name: ride.customer.name },
+      rewardApplied: !!reward,
     });
 
     res.json({
@@ -743,7 +740,7 @@ app.post('/api/cancel', async (req, res) => {
     const ride = activeRides.get(req.body.rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     ride.status = 'cancelled';
-    await db.updateRideStatus(ride.id, 'cancelled');
+    await db.cancelRideWithReason(ride.id, (req.body.reason || '').trim());
     if (ride.rewardId) await db.releaseRewardByRide(ride.id);
     if (ride.driverId) {
       const d = onlineDrivers.get(ride.driverId);
@@ -753,6 +750,12 @@ app.post('/api/cancel', async (req, res) => {
     activeRides.delete(ride.id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
+// إعدادات الأجرة (عامة — يحتاجها تطبيق الزبون لعرض تقدير السعر قبل الحجز)
+app.get('/api/fare-settings', async (req, res) => {
+  try { res.json(await db.getFareSettings()); }
+  catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
 // روابط التواصل (عامة — يحتاجها تطبيق الزبون لعرض أزرار الدعم)
@@ -873,6 +876,21 @@ app.get('/api/admin/live', checkAdmin, async (req, res) => {
   }
 });
 
+// تحديث إعدادات الأجرة
+app.post('/api/admin/fare-settings', checkAdmin, async (req, res) => {
+  try {
+    const mode = req.body.mode;
+    if (!['per_km', 'fixed'].includes(mode)) return res.status(400).json({ error: 'طريقة حساب غير معروفة' });
+    const base = parseInt(req.body.base, 10) || 0;
+    const perKm = parseInt(req.body.per_km, 10) || 0;
+    const minimum = parseInt(req.body.minimum, 10) || 0;
+    const fixedPrice = parseInt(req.body.fixed_price, 10) || 0;
+    if (mode === 'per_km' && !perKm) return res.status(400).json({ error: 'اكتب سعر الكيلومتر' });
+    if (mode === 'fixed' && !fixedPrice) return res.status(400).json({ error: 'اكتب السعر الثابت' });
+    res.json(await db.setFareSettings({ mode, base, per_km: perKm, minimum, fixed_price: fixedPrice }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // تحديث روابط التواصل (واتساب/فيسبوك/انستا/تلكرام)
 app.post('/api/admin/contact-settings', checkAdmin, async (req, res) => {
   try { res.json(await db.setContactSettings(req.body)); }
@@ -913,15 +931,18 @@ app.post('/api/admin/reward-settings', checkAdmin, async (req, res) => {
     const threshold = parseInt(req.body.threshold, 10);
     const type = req.body.type;
     const value = parseInt(req.body.value, 10) || 0;
+    const enabled = req.body.enabled !== false;
     if (!threshold || threshold < 1) return res.status(400).json({ error: 'عدد رحلات غير صحيح' });
     if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
-    res.json(await db.setRewardSettings(threshold, type, value));
+    res.json(await db.setRewardSettings(threshold, type, value, enabled));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // منح مكافأة يدوية لزبون معيّن
 app.post('/api/admin/customer/:phone/grant-reward', checkAdmin, async (req, res) => {
   try {
+    const settings = await db.getRewardSettings();
+    if (!settings.enabled) return res.status(400).json({ error: 'نظام المكافآت متوقف حالياً — فعّله أول من الإعدادات' });
     const type = req.body.type;
     const value = parseInt(req.body.value, 10) || 0;
     if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
@@ -933,6 +954,8 @@ app.post('/api/admin/customer/:phone/grant-reward', checkAdmin, async (req, res)
 // منح مكافأة يدوية لكل الزبائن دفعة وحدة
 app.post('/api/admin/customers/grant-reward-all', checkAdmin, async (req, res) => {
   try {
+    const settings = await db.getRewardSettings();
+    if (!settings.enabled) return res.status(400).json({ error: 'نظام المكافآت متوقف حالياً — فعّله أول من الإعدادات' });
     const type = req.body.type;
     const value = parseInt(req.body.value, 10) || 0;
     if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
