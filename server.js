@@ -156,7 +156,7 @@ async function sendOTP(phone, code) {
     const res = await fetch('https://api.otpiq.com/api/sms', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phoneNumber: intlPhone, smsType: 'verification', verificationCode: code, senderId: 'Jayak' }),
+      body: JSON.stringify({ phoneNumber: intlPhone, smsType: 'verification', verificationCode: code }),
     });
     const out = await res.json();
     if (!res.ok) {
