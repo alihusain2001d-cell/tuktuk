@@ -116,6 +116,10 @@ wss.on('connection', (ws) => {
         }
 
         case 'customer:hello': { ws._role = 'customer'; break; }
+
+        // نبضة حياة — تأكيد إنه الاتصال شغّال فعلاً (يفيد بكشف انقطاع صامت بسبب شبكة الموبايل)
+        case 'ping': { ws.send(JSON.stringify({ type: 'pong' })); break; }
+
         default: break;
       }
     } catch (e) { console.error('خطأ بالرسالة:', e.message); }
@@ -575,6 +579,23 @@ app.post('/api/book', async (req, res) => {
   }
 });
 
+// شبكة أمان: يرجع كل الطلبات المعروضة حالياً على السواق (لو فاتت رسالة WebSocket بسبب انقطاع صامت بشبكة الموبايل)
+app.get('/api/driver/pending-rides', async (req, res) => {
+  try {
+    const list = [];
+    for (const ride of activeRides.values()) {
+      if (ride.status !== 'searching') continue;
+      list.push({
+        rideId: ride.id, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+        store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc,
+        estKm: Math.round((ride.estKm || 0) * 10) / 10, estFare: ride.estFare,
+        customer: { name: ride.customer.name }, rewardApplied: !!ride.rewardId,
+      });
+    }
+    res.json(list);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/accept', async (req, res) => {
   try {
     const { rideId, driverId } = req.body;
@@ -775,14 +796,26 @@ app.post('/api/complete', async (req, res) => {
 
 app.post('/api/cancel', async (req, res) => {
   try {
-    const ride = activeRides.get(req.body.rideId);
+    const { rideId, reason, by, driverId } = req.body;
+    const ride = activeRides.get(rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+
+    // إلغاء السائق بسبب "الزبون ما حضر" — مسموح بس للسائق المكلّف بالرحلة، وبس بعد ما وصل فعلاً
+    let cancelledBy = 'customer';
+    if (by === 'driver_noshow') {
+      if (!driverId || ride.driverId !== driverId) return res.status(403).json({ error: 'غير مصرح' });
+      if (ride.status !== 'arrived') return res.status(409).json({ error: 'لازم توصل أول قبل الإلغاء' });
+      cancelledBy = 'driver_noshow';
+    }
+
     ride.status = 'cancelled';
-    await db.cancelRideWithReason(ride.id, (req.body.reason || '').trim());
+    await db.cancelRideWithReason(ride.id, (reason || '').trim(), cancelledBy);
     if (ride.rewardId) await db.releaseRewardByRide(ride.id);
-    if (ride.driverId) {
+    if (cancelledBy === 'driver_noshow') {
+      sendTo(ride.customerSocketId, 'ride:cancelled', { rideId: ride.id, by: 'driver', reason: (reason || '').trim() });
+    } else if (ride.driverId) {
       const d = onlineDrivers.get(ride.driverId);
-      if (d) sendTo(d.socketId, 'ride:cancelled', { rideId: ride.id });
+      if (d) sendTo(d.socketId, 'ride:cancelled', { rideId: ride.id, by: 'customer' });
     }
     broadcast('driver', 'ride:taken', { rideId: ride.id });
     activeRides.delete(ride.id);
@@ -848,11 +881,11 @@ app.get('/api/admin/customer/:phone/detail', checkAdmin, async (req, res) => {
     const phone = req.params.phone;
     const customer = await db.getCustomerByPhone(phone);
     if (!customer) return res.status(404).json({ error: 'ماكو زبون' });
-    const [rides, cancelCount, tripCount, pendingReward] = await Promise.all([
-      db.getCustomerRides(phone, 50), db.getCustomerCancelCount(phone),
+    const [rides, cancelCount, noShowCount, tripCount, pendingReward] = await Promise.all([
+      db.getCustomerRides(phone, 50), db.getCustomerCancelCount(phone), db.getCustomerNoShowCount(phone),
       db.getCustomerTripCount(phone), db.getPendingReward(phone),
     ]);
-    res.json({ customer, rides, cancelCount, tripCount, pendingReward });
+    res.json({ customer, rides, cancelCount, noShowCount, tripCount, pendingReward });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -802,7 +802,7 @@ function rideRowHTML(r, opts = {}) {
     <div class="rr-body">
       <h4>${nameLabel} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
       <p>${from} ← ${to}</p>
-      ${r.cancel_reason ? `<p style="color:var(--stop);font-size:10.5px">❌ ${r.cancel_reason}</p>` : ''}
+      ${r.cancel_reason ? `<p style="color:var(--stop);font-size:10.5px">${r.cancelled_by === 'driver_noshow' ? '🚪 ألغى السائق (الزبون ما حضر) — ' : '❌ '}${r.cancel_reason}</p>` : ''}
     </div>
     <div class="rr-side">
       <div class="fare">${r.est_fare ? r.est_fare.toLocaleString() : '—'}</div>
@@ -922,6 +922,7 @@ function renderCustomerDetailModal() {
     <div class="stat-grid" style="margin-bottom:14px">
       <div class="stat-card"><div class="sc-num">${d.tripCount}</div><div class="sc-label">رحلات منجزة</div></div>
       <div class="stat-card warn"><div class="sc-num">${d.cancelCount}</div><div class="sc-label">طلبات ألغاها</div></div>
+      <div class="stat-card warn"><div class="sc-num">${d.noShowCount||0}</div><div class="sc-label">مرات ما حضر بعد وصول السائق</div></div>
     </div>
     ${d.pendingReward ? `<div class="badge sub" style="margin-bottom:14px">🎁 عنده مكافأة معلّقة (${REWARD_LABEL({reward_type:d.pendingReward.reward_type, reward_value:d.pendingReward.reward_value})})</div>` : ''}
     ${d.customer.banned
@@ -1158,7 +1159,7 @@ function renderRides() {
         <h4>${r.customer_name || 'زبون'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
         <p>${from} ← ${to}</p>
         ${driver ? `<p style="color:var(--muted);font-size:10.5px">🚗 ${driver.name}</p>` : ''}
-        ${r.cancel_reason ? `<p style="color:var(--stop);font-size:10.5px">❌ ${r.status==='cancelled' && driver ? 'ألغى الزبون بعد ما وافق ' + driver.name + ' — ' : ''}${r.cancel_reason}</p>` : ''}
+        ${r.cancel_reason ? `<p style="color:var(--stop);font-size:10.5px">❌ ${r.cancelled_by === 'driver_noshow' ? 'ألغى السائق' + (driver?(' '+driver.name):'') + ' — الزبون ما حضر — ' : (r.status==='cancelled' && driver ? 'ألغى الزبون بعد ما وافق ' + driver.name + ' — ' : '')}${r.cancel_reason}</p>` : ''}
       </div>
       <div class="rr-side">
         <div class="fare">${r.est_fare ? r.est_fare.toLocaleString() : '—'}</div>

@@ -230,6 +230,10 @@ async function init() {
     // ترقية: سبب إلغاء الزبون للطلب
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancel_reason TEXT;`);
 
+    // ترقية: مين ألغى الرحلة — 'customer' أو 'driver_noshow' (السائق وصل والزبون ما حضر)
+    // هاي تفرّق بين إلغاء الزبون العادي وإلغاء السائق بسبب عدم حضور الزبون، حتى ما يتحاسب السائق عليه
+    await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS cancelled_by TEXT;`);
+
     console.log('✅ قاعدة البيانات جاهزة (PostgreSQL)');
     return true;
   } catch (e) {
@@ -728,13 +732,13 @@ async function updateRideStatus(id, status, driverId) {
 }
 
 // إلغاء الرحلة مع تسجيل سبب الزبون
-async function cancelRideWithReason(id, reason) {
+async function cancelRideWithReason(id, reason, cancelledBy = 'customer') {
   if (!HAS_DB) {
     const r = mem.rides.get(id);
-    if (r) { r.status = 'cancelled'; r.cancelReason = reason || null; }
+    if (r) { r.status = 'cancelled'; r.cancelReason = reason || null; r.cancelledBy = cancelledBy; }
     return;
   }
-  await pool.query('UPDATE rides SET status=$2, cancel_reason=$3 WHERE id=$1', [id, 'cancelled', reason || null]);
+  await pool.query('UPDATE rides SET status=$2, cancel_reason=$3, cancelled_by=$4 WHERE id=$1', [id, 'cancelled', reason || null, cancelledBy]);
 }
 
 async function getAllRides(limit = 100) {
@@ -826,10 +830,11 @@ async function getDriverRides(driverId, limit = 100) {
 }
 
 // شكد مرة زبون ألغى طلب بعد ما هذا السائق وافق عليه (مؤشر مسؤولية)
+// عدد الرحلات اللي ألغاها الزبون بعد ما وافق السائق — ما نحسب فيها إلغاء السائق بسبب عدم حضور الزبون (مو ذنب السائق)
 async function getDriverCancelledOnCount(driverId) {
-  if (!HAS_DB) return [...mem.rides.values()].filter(r => r.driverId === driverId && r.status === 'cancelled').length;
+  if (!HAS_DB) return [...mem.rides.values()].filter(r => r.driverId === driverId && r.status === 'cancelled' && r.cancelledBy !== 'driver_noshow').length;
   const res = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM rides WHERE driver_id=$1 AND status='cancelled'`, [driverId]
+    `SELECT COUNT(*)::int AS n FROM rides WHERE driver_id=$1 AND status='cancelled' AND (cancelled_by IS DISTINCT FROM 'driver_noshow')`, [driverId]
   );
   return res.rows[0].n;
 }
@@ -855,6 +860,20 @@ async function getCustomerCancelCount(phone) {
   }
   const res = await pool.query(
     `SELECT COUNT(*)::int AS n FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='cancelled'`,
+    [clean]
+  );
+  return res.rows[0].n;
+}
+
+// عدد مرات "الزبون ما حضر" تحديداً — السائق وصل وألغى الرحلة لأن الزبون ما جاوب/ما نزل
+// نستخدمها بلوحة التحكم حتى نميّز الزبون المتكرر بهذا السلوك عن زبون بس غيّر رأيه
+async function getCustomerNoShowCount(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    return [...mem.rides.values()].filter(r => cleanPhone(r.customer?.phone) === clean && r.status === 'cancelled' && r.cancelledBy === 'driver_noshow').length;
+  }
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='cancelled' AND cancelled_by='driver_noshow'`,
     [clean]
   );
   return res.rows[0].n;
@@ -1184,7 +1203,7 @@ module.exports = {
   banDriver, unbanDriver, approveDriver,
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
-  updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount,
+  updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount, getCustomerNoShowCount,
   banCustomer, unbanCustomer,
   createRide, updateRideStatus, cancelRideWithReason, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,

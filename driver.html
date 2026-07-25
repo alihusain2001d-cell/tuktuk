@@ -264,6 +264,15 @@
   .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; flex-shrink:0; }
   .chip.active { background:var(--sky); border-color:var(--sky); color:var(--ink); }
 
+  .cancel-modal-bg { position:fixed; inset:0; background:rgba(26,26,26,.6); z-index:2600; display:none; align-items:center; justify-content:center; padding:20px; }
+  .cancel-modal-bg.show { display:flex; }
+  .cancel-modal { background:#fff; border-radius:20px; padding:22px; width:100%; max-width:360px; }
+  .cancel-modal h3 { font-size:17px; margin-bottom:14px; }
+  .cancel-reason { padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; margin-bottom:9px; cursor:pointer; font-size:14px; }
+  .cancel-reason.sel { border-color:var(--sky-dark); background:var(--sky-light); font-weight:600; }
+  .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
+  .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
+
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--ink); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.25); }
   .spinner { width:18px; height:18px; border:2.5px solid rgba(26,26,26,.25); border-top-color:var(--ink); border-radius:50%; animation:spin .7s linear infinite; display:inline-block; vertical-align:middle; }
@@ -515,11 +524,30 @@
       </div>
       <div class="ar-fare"><span class="l">أجرة الطلب</span><span class="a" id="ar-fare">—</span></div>
       <div class="rr-route" id="ar-route"></div>
-      <button class="btn go" onclick="markArrived()" style="margin-bottom:10px">وصلت لموقع الزبون ✅</button>
+      <button class="btn go" id="ar-arrived-btn" onclick="markArrived()" style="margin-bottom:10px">وصلت لموقع الزبون ✅</button>
+      <div id="ar-waiting-actions" class="hidden">
+        <button class="btn go" id="ar-start-btn" onclick="startTrip()" style="margin-bottom:10px">🚗 الزبون طلع، ابدأ الرحلة</button>
+        <button class="btn danger" onclick="openNoShowModal()" style="margin-bottom:10px">❌ الزبون ما حضر — إلغاء</button>
+      </div>
       <div class="btn-row">
         <button class="btn go" onclick="callCustomer()">📞 اتصل</button>
         <button class="btn danger" onclick="finishRide()">إنهاء الطلب</button>
       </div>
+    </div>
+  </div>
+
+  <div class="cancel-modal-bg" id="noshow-modal-bg">
+    <div class="cancel-modal">
+      <h3>ليش تريد تلغي الرحلة؟</h3>
+      <div id="noshow-reasons-list">
+        <div class="cancel-reason" onclick="pickNoShowReason('ما جاوب على الاتصال', this)">ما جاوب على الاتصال</div>
+        <div class="cancel-reason" onclick="pickNoShowReason('انتظرته وما نزل', this)">انتظرته وما نزل</div>
+        <div class="cancel-reason" onclick="pickNoShowReason('قالي يلغي بس ما ألغى', this)">قالي يلغي بس ما ألغى</div>
+        <div class="cancel-reason" onclick="pickNoShowReason('سبب ثاني', this)">سبب ثاني</div>
+      </div>
+      <textarea id="noshow-custom-reason" class="cancel-custom hidden" placeholder="اكتب السبب..."></textarea>
+      <button class="btn ghost" onclick="closeNoShowModal()" style="margin-bottom:10px">تراجع</button>
+      <button class="btn danger-solid" id="btn-confirm-noshow" onclick="confirmNoShowCancel()" disabled>ألغِ الرحلة</button>
     </div>
   </div>
 
@@ -1052,10 +1080,19 @@ function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
   // لو السوكت اتصل (أول مرة أو بعد انقطاع)، سجّل حالة الاتصال الحقيقية فوراً
-  ws.onopen = () => { if (isOnline) goOnline(); };
+  ws.onopen = () => { if (isOnline) goOnline(); if (isOnline) pollPendingRides(); };
   ws.onmessage = (e) => { const { type, data } = JSON.parse(e.data); handleWS(type, data); };
   ws.onclose = () => setTimeout(connectWS, 2000);
 }
+
+// شبكة موبايل الأحيان تسكّر الاتصال بصمت (بدون onclose) لو قفلت الشاشة أو تبدلت الشبكة
+// من يرجع السائق يفتح التطبيق نتأكد الاتصال شغّال فعلاً ونجيب أي طلب فاتنا
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !isOnline) return;
+  if (!ws || ws.readyState === WebSocket.CLOSED) connectWS();
+  else if (ws.readyState === WebSocket.OPEN) goOnline();
+  pollPendingRides();
+});
 
 function handleWS(type, data) {
   switch(type) {
@@ -1132,6 +1169,7 @@ function startWorking() {
   startWatchingPosition();
   goOnline();
   startLocationUpdates();
+  startRidePolling();
 }
 
 function stopWorking() {
@@ -1140,6 +1178,7 @@ function stopWorking() {
   goOffline();
   stopLocationUpdates();
   stopWatchingPosition();
+  stopRidePolling();
 }
 
 function setLive(on, text) {
@@ -1171,6 +1210,35 @@ function onNewRide(data) {
   if (!isOnline || activeRide || offeredRide) return;
   pendingRides.set(data.rideId, data);
   renderRequests(); beep(); toast('🚗 طلب جديد!');
+}
+
+// ============ شبكة أمان: نسأل السيرفر عن الطلبات الجديدة كل ٥ ثواني ============
+// (لو انقطع اتصال الـ WebSocket بصمت — بسبب شبكة الموبايل أو قفل الشاشة — هاي تضمن إنه الطلب ما يفوت السائق)
+let ridePollTimer = null;
+function startRidePolling() {
+  stopRidePolling();
+  pollPendingRides();
+  ridePollTimer = setInterval(pollPendingRides, 5000);
+}
+function stopRidePolling() { if (ridePollTimer) clearInterval(ridePollTimer); ridePollTimer = null; }
+
+async function pollPendingRides() {
+  if (!isOnline || activeRide || offeredRide) return;
+  try {
+    const res = await fetch('/api/driver/pending-rides');
+    if (!res.ok) return;
+    const list = await res.json();
+    const seenIds = new Set(list.map(r => r.rideId));
+    let changed = false, addedNew = false;
+    for (const id of pendingRides.keys()) {
+      if (!seenIds.has(id)) { pendingRides.delete(id); changed = true; }
+    }
+    for (const r of list) {
+      if (!pendingRides.has(r.rideId)) { pendingRides.set(r.rideId, r); changed = true; addedNew = true; }
+    }
+    if (changed) renderRequests();
+    if (addedNew) { beep(); toast('🚗 طلب جديد!'); }
+  } catch (e) { /* نتجاهل، نحاول بالدورة الجاية */ }
 }
 
 function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
@@ -1333,6 +1401,15 @@ function showActiveRide(out, r) {
   if (activeRide) activeRide.fare = out.estFare || 0;   // نخزنها لبطاقة الخريطة الكاملة
 
   const isDel = r.type === 'delivery';
+  if (activeRide) activeRide.phase = 'leg1'; // متجه للنقطة الأولى (المحل أو نقطة الزبون)
+
+  const arrivedBtn = document.getElementById('ar-arrived-btn');
+  arrivedBtn.classList.remove('hidden');
+  arrivedBtn.disabled = false; arrivedBtn.style.opacity = '';
+  arrivedBtn.textContent = isDel ? 'وصلت للمحل ✅' : 'وصلت لموقع الزبون ✅';
+  document.getElementById('ar-waiting-actions').classList.add('hidden');
+  document.getElementById('ar-start-btn').textContent = isDel ? '📦 استلمت الطلب، بالطريق للزبون' : '🚗 الزبون طلع، ابدأ الرحلة';
+
   const fromLbl = r.pickup.label || 'نقطة على الخريطة';
   const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
   let html;
@@ -1377,10 +1454,18 @@ let lastRouteFetch = 0;
 
 async function drawRoute() {
   if (!activeRide || !map) return;
+  const isDel = activeRide.type === 'delivery';
+  // المسار يتبع المرحلة الحالية: للنقطة الأولى (محل/زبون) وهو بالطريق، وللوجهة النهائية بعد ما يبدأ الرحلة
+  const target = activeRide.phase === 'leg2'
+    ? (isDel ? activeRide.pickup : activeRide.destination)
+    : (isDel ? activeRide.store : activeRide.pickup);
+  if (activeRide.phase === 'waiting' || !target) {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    return;
+  }
   const now = Date.now();
   if (routeLine && now - lastRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
   lastRouteFetch = now;
-  const target = activeRide.pickup;
   const route = await fetchRoute(myPos, target);
   if (!activeRide) return; // الرحلة خلصت وإحنا ننتظر الرد
   if (routeLine) map.removeLayer(routeLine);
@@ -1393,11 +1478,67 @@ async function drawRoute() {
 }
 
 async function markArrived() {
-  if (!activeRide) return;
+  if (!activeRide || activeRide.phase !== 'leg1') return;
+  activeRide.phase = 'waiting';
+  document.getElementById('ar-arrived-btn').classList.add('hidden');
+  document.getElementById('ar-waiting-actions').classList.remove('hidden');
   await fetch('/api/arrived', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) });
   toast('تم إبلاغ الزبون بوصولك ✅');
 }
+
+// الزبون طلع بالسيارة (أو استلم السائق الطلب بحالة التوصيل) — نبدأ نوجّه للوجهة النهائية
+function startTrip() {
+  if (!activeRide || activeRide.phase !== 'waiting') return;
+  activeRide.phase = 'leg2';
+  document.getElementById('ar-waiting-actions').classList.add('hidden');
+  lastRouteFetch = 0; // نجبر تحديث فوري للمسار الجديد
+  drawRoute();
+  toast('بالطريق للوجهة 🚗');
+}
+
 function callCustomer(){ if(customerPhone) location.href=`tel:${customerPhone}`; else toast('رقم الزبون غير متوفر'); }
+
+// ============ إلغاء السائق بسبب عدم حضور الزبون ============
+let selectedNoShowReason = null;
+function openNoShowModal() {
+  if (!activeRide || activeRide.phase !== 'waiting') return;
+  selectedNoShowReason = null;
+  document.querySelectorAll('#noshow-reasons-list .cancel-reason').forEach(el => el.classList.remove('sel'));
+  document.getElementById('noshow-custom-reason').classList.add('hidden');
+  document.getElementById('noshow-custom-reason').value = '';
+  document.getElementById('btn-confirm-noshow').disabled = true;
+  document.getElementById('noshow-modal-bg').classList.add('show');
+}
+function closeNoShowModal() { document.getElementById('noshow-modal-bg').classList.remove('show'); }
+function pickNoShowReason(reason, el) {
+  selectedNoShowReason = reason;
+  document.querySelectorAll('#noshow-reasons-list .cancel-reason').forEach(x => x.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('btn-confirm-noshow').disabled = false;
+  const custom = document.getElementById('noshow-custom-reason');
+  custom.classList.toggle('hidden', reason !== 'سبب ثاني');
+  if (reason === 'سبب ثاني') setTimeout(() => custom.focus(), 100);
+}
+async function confirmNoShowCancel() {
+  if (!selectedNoShowReason || !activeRide) return;
+  let reason = selectedNoShowReason;
+  if (reason === 'سبب ثاني') {
+    const custom = document.getElementById('noshow-custom-reason').value.trim();
+    if (custom) reason = custom;
+  }
+  const rideId = activeRide.rideId;
+  closeNoShowModal();
+  try {
+    const res = await fetch('/api/cancel', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ rideId, reason, by:'driver_noshow', driverId }),
+    });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+    toast('تم إلغاء الرحلة');
+    endActive();
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
+}
 
 async function finishRide() {
   if (!activeRide) return;

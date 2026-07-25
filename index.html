@@ -1552,7 +1552,15 @@ function handleWS(type, data) {
     case 'driver:moved': onDriverMoved(data); break;
     case 'ride:arrived': onArrived(); break;
     case 'ride:done': onDone(data); break;
+    case 'ride:cancelled': onDriverCancelled(data); break;
   }
+}
+
+// السائق ألغى الرحلة (مثلاً وصل وما لقاك) — نبلغك ونرجعك للصفحة الرئيسية
+function onDriverCancelled(data) {
+  if (!currentRide || data.rideId !== currentRide) return;
+  toast('السائق ألغى الرحلة' + (data.reason ? ' — ' + data.reason : ''));
+  resetAll();
 }
 
 // ============ عرض السائق ============
