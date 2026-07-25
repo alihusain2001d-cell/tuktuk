@@ -144,11 +144,30 @@ function genOTP() {
   return String(Math.floor(100000 + Math.random() * 900000)); // ٦ أرقام
 }
 
-// إرسال الكود — حالياً يطبعه بالسجل. لاحقاً نربطه بـ Firebase أو واتساب
+// إرسال الكود — عبر OTPIQ (واتساب/SMS) لو مفتاح API موجود، وإلا يطبعه بالسجل (وضع تجربة)
 async function sendOTP(phone, code) {
-  console.log(`📱 كود التحقق لـ ${phone}: ${code}`);
-  // TODO: اربط هنا Firebase Phone Auth أو GreenAPI واتساب
-  return true;
+  const apiKey = process.env.OTPIQ_API_KEY;
+  if (!apiKey) {
+    console.log(`📱 كود التحقق لـ ${phone}: ${code}`);
+    return true;
+  }
+  try {
+    const intlPhone = phone.replace(/^0/, '964'); // 07XXXXXXXXX → 964XXXXXXXXXX
+    const res = await fetch('https://api.otpiq.com/api/sms', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phoneNumber: intlPhone, smsType: 'verification', verificationCode: code, senderId: 'Jayak' }),
+    });
+    const out = await res.json();
+    if (!res.ok) {
+      console.error('فشل إرسال الكود عبر OTPIQ:', out.error || out.message || res.status);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('خطأ بالاتصال مع OTPIQ:', e.message);
+    return false;
+  }
 }
 
 function normalizePhone(p) {
@@ -169,7 +188,10 @@ app.post('/api/otp/send', async (req, res) => {
 
     const code = genOTP();
     otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL, attempts: 0, lastSentAt: Date.now() });
-    await sendOTP(phone, code);
+    const sent = await sendOTP(phone, code);
+    if (!sent && !OTP_DEV_MODE) {
+      return res.status(500).json({ error: 'ما كدرنا نرسل الكود، حاول مرة ثانية' });
+    }
 
     res.json({ ok: true, sent: true, ...(OTP_DEV_MODE ? { devCode: code } : {}) });
   } catch (e) {

@@ -1096,20 +1096,34 @@ function onOfferRejected(data) {
   toast('الزبون ما وافق على عرضك');
 }
 
-function getMyPosition() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(
-    (pos) => { myPos = { lat:pos.coords.latitude, lng:pos.coords.longitude }; if(meMarker) meMarker.setLatLng(myPos); if(map) map.setView(myPos,15); if(isOnline) goOnline(); },
-    () => { if(isOnline) goOnline(); },
-    { enableHighAccuracy:true, timeout:8000 }
+let watchId = null;
+
+// تتبع GPS حقيقي مستمر (بدل التحديد لمرة وحدة)
+function startWatchingPosition() {
+  if (!navigator.geolocation) { if (isOnline) goOnline(); return; }
+  if (watchId !== null) return; // أصلاً شغّال
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const first = !watchId || (myPos.lat === MUSAYYIB[0] && myPos.lng === MUSAYYIB[1]);
+      myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      if (meMarker) meMarker.setLatLng(myPos);
+      if (map && !activeRide) map.setView(myPos, 15);
+      if (activeRide) drawRoute();
+      if (first && isOnline) goOnline();
+    },
+    () => { if (isOnline) goOnline(); },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
   );
+}
+function stopWatchingPosition() {
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
 }
 
 // السائق دائماً شغّال — يبدأ تلقائياً بمجرد ما يفتح التطبيق
 function startWorking() {
   isOnline = true;
   setLive(true, 'متصل - جاهز');
-  getMyPosition();
+  startWatchingPosition();
   goOnline();
   startLocationUpdates();
 }
@@ -1119,6 +1133,7 @@ function stopWorking() {
   setLive(false, 'غير متصل');
   goOffline();
   stopLocationUpdates();
+  stopWatchingPosition();
 }
 
 function setLive(on, text) {
@@ -1135,7 +1150,6 @@ function startLocationUpdates() {
   stopLocationUpdates();
   locTimer = setInterval(() => {
     if (!isOnline) return;
-    if (activeRide) simulateStep();
     ws.send(JSON.stringify({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } }));
   }, 2000);
 }
@@ -1332,20 +1346,39 @@ function showActiveRide(out, r) {
   drawRoute();
 }
 
-function drawRoute() {
-  if (!activeRide || !map) return;
-  if (routeLine) map.removeLayer(routeLine);
-  routeLine = L.polyline([[myPos.lat,myPos.lng],[activeRide.pickup.lat,activeRide.pickup.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
-  map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:16 });
+// مسار حقيقي على الطرق عبر OSRM (مجاني، بدون مفتاح API)
+async function fetchRoute(from, to) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
+    const route = data.routes[0];
+    return {
+      coords: route.geometry.coordinates.map(c => [c[1], c[0]]), // [lng,lat] → [lat,lng]
+      km: route.distance / 1000,
+      minutes: route.duration / 60,
+    };
+  } catch (e) { return null; }
 }
 
-function simulateStep() {
-  if (!activeRide) return;
-  const dLat = activeRide.pickup.lat - myPos.lat, dLng = activeRide.pickup.lng - myPos.lng;
-  if (Math.sqrt(dLat*dLat + dLng*dLng) < 0.0003) return;
-  myPos.lat += dLat*0.15; myPos.lng += dLng*0.15;
-  if (meMarker) meMarker.setLatLng(myPos);
-  drawRoute();
+let lastRouteFetch = 0;
+
+async function drawRoute() {
+  if (!activeRide || !map) return;
+  const now = Date.now();
+  if (routeLine && now - lastRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
+  lastRouteFetch = now;
+  const target = activeRide.pickup;
+  const route = await fetchRoute(myPos, target);
+  if (!activeRide) return; // الرحلة خلصت وإحنا ننتظر الرد
+  if (routeLine) map.removeLayer(routeLine);
+  if (route) {
+    routeLine = L.polyline(route.coords, { color:'#2BA9E0', weight:5, opacity:.9, lineCap:'round' }).addTo(map);
+  } else {
+    routeLine = L.polyline([[myPos.lat,myPos.lng],[target.lat,target.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
+  }
+  map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:16 });
 }
 
 async function markArrived() {

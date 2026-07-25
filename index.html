@@ -1475,6 +1475,24 @@ function updateFare(prefix, a, b) {
   } else box.classList.add('hidden');
 }
 
+// مسار حقيقي على الطرق عبر OSRM (مجاني، بدون مفتاح API)
+async function fetchRoute(from, to) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
+    const route = data.routes[0];
+    return {
+      coords: route.geometry.coordinates.map(c => [c[1], c[0]]), // [lng,lat] → [lat,lng]
+      km: route.distance / 1000,
+      minutes: route.duration / 60,
+    };
+  } catch (e) { return null; }
+}
+
+let planRouteReq = 0;
+
 function drawPlanMarkers() {
   const m = activeMap();
   if (!m) return;
@@ -1495,9 +1513,17 @@ function drawPlanMarkers() {
   if (pickup) { if (pkMarker) m.removeLayer(pkMarker); pkMarker = L.marker([pickup.lat,pickup.lng],{icon:green,interactive:false}).addTo(m); }
   if (destination) { if (dsMarker) m.removeLayer(dsMarker); dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m); }
   if (pickup && destination) {
-    if (routeLine) m.removeLayer(routeLine);
-    routeLine = L.polyline([[pickup.lat,pickup.lng],[destination.lat,destination.lng]], { color:'#1652F0', weight:4, opacity:.7, dashArray:'2,9', lineCap:'round' }).addTo(m);
+    const myReq = ++planRouteReq;
+    if (routeLine) { m.removeLayer(routeLine); routeLine = null; }
+    // خط مستقيم فوري كمعاينة سريعة، ونستبدله بالمسار الحقيقي أول ما يوصل
+    routeLine = L.polyline([[pickup.lat,pickup.lng],[destination.lat,destination.lng]], { color:'#1652F0', weight:4, opacity:.5, dashArray:'2,9', lineCap:'round' }).addTo(m);
     m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
+    fetchRoute(pickup, destination).then(route => {
+      if (!route || myReq !== planRouteReq || !m) return; // تغيّرت النقاط وإحنا ننتظر
+      if (routeLine) m.removeLayer(routeLine);
+      routeLine = L.polyline(route.coords, { color:'#1652F0', weight:4, opacity:.7, lineCap:'round' }).addTo(m);
+      m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
+    });
   }
 }
 
@@ -1670,14 +1696,29 @@ function placeDriver(lat, lng) {
 
 function onDriverMoved(data) { if (mapT) { placeDriver(data.lat, data.lng); drawDriverRoute(data.lat, data.lng); } }
 
-function drawDriverRoute(dlat, dlng) {
+let lastDriverRouteFetch = 0;
+
+async function drawDriverRoute(dlat, dlng) {
   // الرحلة: السائق يجي لنقطة الانطلاق | التوصيل: السائق يجي لموقع الزبون
   const target = currentType === 'ride' ? pickup : destination;
   if (!target || !mapT) return;
-  if (routeLine) mapT.removeLayer(routeLine);
-  routeLine = L.polyline([[dlat,dlng],[target.lat,target.lng]], { color:'#FFC107', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(mapT);
+
   const tIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">🟢</div>`, iconSize:[0,0] });
-  L.marker([target.lat,target.lng],{icon:tIcon,interactive:false}).addTo(mapT);
+  if (!stMarker) {
+    stMarker = L.marker([target.lat,target.lng],{icon:tIcon,interactive:false}).addTo(mapT);
+  }
+
+  const now = Date.now();
+  if (routeLine && now - lastDriverRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
+  lastDriverRouteFetch = now;
+  const route = await fetchRoute({lat:dlat,lng:dlng}, target);
+  if (currentType !== 'ride' && currentType !== 'delivery') return; // خرج من شاشة التتبع وإحنا ننتظر
+  if (routeLine) mapT.removeLayer(routeLine);
+  if (route) {
+    routeLine = L.polyline(route.coords, { color:'#FFC107', weight:5, opacity:.9, lineCap:'round' }).addTo(mapT);
+  } else {
+    routeLine = L.polyline([[dlat,dlng],[target.lat,target.lng]], { color:'#FFC107', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(mapT);
+  }
   mapT.fitBounds(routeLine.getBounds(), { padding:[60,60], maxZoom:16 });
 }
 
@@ -1782,6 +1823,7 @@ function resetAll() {
   ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer','flow-rate'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
+  if (stMarker && mapT) { mapT.removeLayer(stMarker); stMarker = null; }
   resetRideUI(); resetDeliveryUI();
 }
 

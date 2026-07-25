@@ -23,7 +23,7 @@ if (HAS_DB) {
   pool = new Pool({
     connectionString: url,
     ssl: needsSSL(url) ? { rejectUnauthorized: false } : false,
-    max: 10,
+    max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 20000,
   });
