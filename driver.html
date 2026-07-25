@@ -1047,6 +1047,8 @@ function updateMapMini() {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
+  // لو السوكت اتصل (أول مرة أو بعد انقطاع)، سجّل حالة الاتصال الحقيقية فوراً
+  ws.onopen = () => { if (isOnline) goOnline(); };
   ws.onmessage = (e) => { const { type, data } = JSON.parse(e.data); handleWS(type, data); };
   ws.onclose = () => setTimeout(connectWS, 2000);
 }
@@ -1143,14 +1145,19 @@ function setLive(on, text) {
   document.getElementById('status-text').textContent = text;
 }
 
-function goOnline(){ ws.send(JSON.stringify({ type:'driver:online', data:{ driverId, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } })); }
-function goOffline(){ ws.send(JSON.stringify({ type:'driver:offline', data:{ driverId } })); }
+// يرسل بس لو السوكت فعلاً مفتوح — يفادي خطأ "Still in CONNECTING state"
+function wsSend(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function goOnline(){ wsSend({ type:'driver:online', data:{ driverId, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } }); }
+function goOffline(){ wsSend({ type:'driver:offline', data:{ driverId } }); }
 
 function startLocationUpdates() {
   stopLocationUpdates();
   locTimer = setInterval(() => {
     if (!isOnline) return;
-    ws.send(JSON.stringify({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } }));
+    wsSend({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } });
   }, 2000);
 }
 function stopLocationUpdates(){ if(locTimer) clearInterval(locTimer); locTimer=null; }
