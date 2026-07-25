@@ -303,10 +303,9 @@ async function updateDriverLocation(id, lat, lng) {
   await pool.query('UPDATE drivers SET last_lat=$2, last_lng=$3 WHERE id=$1', [id, lat, lng]);
 }
 
-// حالة السواق: هل يقدر يشتغل؟
+// حالة السواق: هل يقدر يشتغل؟ (دالة صافية — تحسب من صف السائق مباشرة، بدون استعلام إضافي)
 // pending = ينتظر التفعيل | active = مفعّل باشتراك | trial = بفترة التجربة | expired = انتهى
-async function getDriverAccess(id) {
-  const d = await getDriver(id);
+function computeAccess(d) {
   if (!d) return { allowed: false, reason: 'not_found' };
   if (d.banned) return { allowed: false, reason: 'banned', banReason: d.ban_reason || null };
 
@@ -326,6 +325,11 @@ async function getDriverAccess(id) {
   }
   // انتهى كلشي
   return { allowed: false, reason: subEnds ? 'expired' : 'trial_ended' };
+}
+
+async function getDriverAccess(id) {
+  const d = await getDriver(id);
+  return computeAccess(d);
 }
 
 // المالك يفعّل اشتراك ويسجّل المبلغ المقبوض
@@ -738,19 +742,21 @@ async function getDriverEarnings(driverId) {
       })),
     };
   }
-  const totals = await pool.query(`
-    SELECT COUNT(*)::int AS trips, COALESCE(SUM(est_fare),0)::int AS earnings,
-           COALESCE(SUM(est_km),0) AS km
-    FROM rides WHERE driver_id=$1 AND status='done';
-  `, [driverId]);
-  const todayRes = await pool.query(`
-    SELECT COUNT(*)::int AS trips, COALESCE(SUM(est_fare),0)::int AS earnings
-    FROM rides WHERE driver_id=$1 AND status='done' AND done_at >= CURRENT_DATE;
-  `, [driverId]);
-  const list = await pool.query(`
-    SELECT id, type, customer_name, est_km, est_fare, pickup_label, dest_label, store_label, store_name, done_at
-    FROM rides WHERE driver_id=$1 AND status='done' ORDER BY done_at DESC LIMIT 20;
-  `, [driverId]);
+  const [totals, todayRes, list] = await Promise.all([
+    pool.query(`
+      SELECT COUNT(*)::int AS trips, COALESCE(SUM(est_fare),0)::int AS earnings,
+             COALESCE(SUM(est_km),0) AS km
+      FROM rides WHERE driver_id=$1 AND status='done';
+    `, [driverId]),
+    pool.query(`
+      SELECT COUNT(*)::int AS trips, COALESCE(SUM(est_fare),0)::int AS earnings
+      FROM rides WHERE driver_id=$1 AND status='done' AND done_at >= CURRENT_DATE;
+    `, [driverId]),
+    pool.query(`
+      SELECT id, type, customer_name, est_km, est_fare, pickup_label, dest_label, store_label, store_name, done_at
+      FROM rides WHERE driver_id=$1 AND status='done' ORDER BY done_at DESC LIMIT 20;
+    `, [driverId]),
+  ]);
   const t = totals.rows[0], td = todayRes.rows[0];
   return {
     totalEarnings: t.earnings, totalKm: Math.round(t.km*10)/10, totalTrips: t.trips,
@@ -833,6 +839,80 @@ async function getCustomerCancelCount(phone) {
     [clean]
   );
   return res.rows[0].n;
+}
+
+// إجمالي المدفوع لكل السواق دفعة وحدة (بدل استعلام منفصل لكل سائق — لقائمة لوحة التحكم)
+async function getDriverPaidTotalsBulk() {
+  if (!HAS_DB) {
+    const map = {};
+    (mem.subs || []).forEach(s => { map[s.driver_id] = (map[s.driver_id] || 0) + (s.amount || 0); });
+    return map;
+  }
+  const res = await pool.query(`SELECT driver_id, COALESCE(SUM(amount),0)::int AS total FROM subscriptions GROUP BY driver_id`);
+  const map = {};
+  res.rows.forEach(r => { map[r.driver_id] = r.total; });
+  return map;
+}
+
+// تقييم كل السواق دفعة وحدة
+async function getDriverRatingSummariesBulk() {
+  if (!HAS_DB) {
+    const map = {};
+    for (const r of mem.rides.values()) {
+      if (!r.driverId || !r.rating) continue;
+      if (!map[r.driverId]) map[r.driverId] = [];
+      map[r.driverId].push(r.rating);
+    }
+    const out = {};
+    for (const [id, ratings] of Object.entries(map)) {
+      out[id] = { avg: Math.round((ratings.reduce((s,x)=>s+x,0) / ratings.length) * 10) / 10, count: ratings.length };
+    }
+    return out;
+  }
+  const res = await pool.query(`
+    SELECT driver_id, ROUND(AVG(rating)::numeric,1) AS avg, COUNT(rating)::int AS count
+    FROM rides WHERE driver_id IS NOT NULL AND rating IS NOT NULL GROUP BY driver_id
+  `);
+  const map = {};
+  res.rows.forEach(r => { map[r.driver_id] = { avg: r.avg ? parseFloat(r.avg) : null, count: r.count }; });
+  return map;
+}
+
+// عدد رحلات كل زبون المنجزة دفعة وحدة
+async function getCustomerTripCountsBulk() {
+  if (!HAS_DB) {
+    const map = {};
+    for (const r of mem.rides.values()) {
+      if (r.status !== 'done') continue;
+      const p = cleanPhone(r.customer?.phone);
+      map[p] = (map[p] || 0) + 1;
+    }
+    return map;
+  }
+  const res = await pool.query(`
+    SELECT regexp_replace(customer_phone, '\\D', '', 'g') AS phone, COUNT(*)::int AS n
+    FROM rides WHERE status='done' GROUP BY 1
+  `);
+  const map = {};
+  res.rows.forEach(r => { map[r.phone] = r.n; });
+  return map;
+}
+
+// المكافأة المتاحة لكل الزبائن دفعة وحدة
+async function getPendingRewardsBulk() {
+  if (!HAS_DB) {
+    const map = {};
+    (mem.rewards || []).filter(r => r.status === 'pending' && !r.ride_id).forEach(r => { map[r.phone] = r; });
+    return map;
+  }
+  const res = await pool.query(`
+    SELECT DISTINCT ON (phone) * FROM customer_rewards
+    WHERE status='pending' AND ride_id IS NULL
+    ORDER BY phone, created_at ASC
+  `);
+  const map = {};
+  res.rows.forEach(r => { map[cleanPhone(r.phone)] = r; });
+  return map;
 }
 
 // إجمالي اللي دفعه سائق معيّن
@@ -1090,6 +1170,7 @@ module.exports = {
   createRide, updateRideStatus, cancelRideWithReason, getAllRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
+  computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,
   getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout,

@@ -791,14 +791,16 @@ function checkAdmin(req, res, next) {
 
 app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
   try {
-    const drivers = await db.getAllDrivers();
-    const withAccess = await Promise.all(drivers.map(async d => ({
+    const [drivers, paidTotals, ratings] = await Promise.all([
+      db.getAllDrivers(), db.getDriverPaidTotalsBulk(), db.getDriverRatingSummariesBulk(),
+    ]);
+    const withAccess = drivers.map(d => ({
       ...d,
       online: onlineDrivers.has(d.id),
-      access: await db.getDriverAccess(d.id),
-      paidTotal: await db.getDriverPaidTotal(d.id),
-      rating: await db.getDriverRatingSummary(d.id),
-    })));
+      access: db.computeAccess(d),
+      paidTotal: paidTotals[d.id] || 0,
+      rating: ratings[d.id] || { avg: null, count: 0 },
+    }));
     res.json(withAccess);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -809,10 +811,11 @@ app.get('/api/admin/driver/:id/detail', checkAdmin, async (req, res) => {
     const id = req.params.id;
     const driver = await db.getDriver(id);
     if (!driver) return res.status(404).json({ error: 'ماكو سائق' });
-    const [access, rating, paidTotal, rides, cancelledOnCount, complaints] = await Promise.all([
-      db.getDriverAccess(id), db.getDriverRatingSummary(id), db.getDriverPaidTotal(id),
+    const [rating, paidTotal, rides, cancelledOnCount, complaints] = await Promise.all([
+      db.getDriverRatingSummary(id), db.getDriverPaidTotal(id),
       db.getDriverRides(id, 50), db.getDriverCancelledOnCount(id), db.getComplaints(50, id),
     ]);
+    const access = db.computeAccess(driver);
     res.json({ driver, access, rating, paidTotal, rides, cancelledOnCount, complaints, online: onlineDrivers.has(id) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -935,10 +938,14 @@ app.delete('/api/admin/driver/:id', checkAdmin, async (req, res) => {
 // السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
 app.get('/api/admin/live', checkAdmin, async (req, res) => {
   try {
+    const allDriverRows = await db.getAllDrivers();
+    const driverMap = {};
+    allDriverRows.forEach(r => { driverMap[r.id] = r; });
+
     const list = [];
     for (const [id, d] of onlineDrivers) {
-      const rec = await db.getDriver(id);
-      const access = await db.getDriverAccess(id);
+      const rec = driverMap[id] || null;
+      const access = rec ? db.computeAccess(rec) : { allowed: false, reason: 'not_found' };
       // هل عنده رحلة نشطة؟
       let busy = null;
       for (const ride of activeRides.values()) {
@@ -995,12 +1002,13 @@ app.get('/api/admin/rides', checkAdmin, async (req, res) => {
 
 app.get('/api/admin/customers', checkAdmin, async (req, res) => {
   try {
-    const customers = await db.getAllCustomers();
-    const withRewards = await Promise.all(customers.map(async c => ({
-      ...c,
-      tripsDone: await db.getCustomerTripCount(c.phone),
-      pendingReward: await db.getPendingReward(c.phone),
-    })));
+    const [customers, tripCounts, pendingRewards] = await Promise.all([
+      db.getAllCustomers(), db.getCustomerTripCountsBulk(), db.getPendingRewardsBulk(),
+    ]);
+    const withRewards = customers.map(c => {
+      const clean = normalizePhone(c.phone);
+      return { ...c, tripsDone: tripCounts[clean] || 0, pendingReward: pendingRewards[clean] || null };
+    });
     res.json(withRewards);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
