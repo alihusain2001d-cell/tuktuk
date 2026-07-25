@@ -799,11 +799,15 @@ async function getDriverEarnings(driverId) {
     return {
       totalEarnings: total, totalKm: Math.round(km*10)/10, totalTrips: trips.length,
       todayEarnings: todayTrips.reduce((s,t)=>s+(t.estFare||0),0), todayTrips: todayTrips.length,
-      trips: trips.slice(-20).reverse().map(t => ({
-        rideId: t.id, customer: t.customer.name, km: Math.round((t.estKm||0)*10)/10,
-        fare: t.estFare||0, from: t.pickup.label||'—', to: t.destination?.label||'—',
-        at: t.done_at ? t.done_at.getTime() : Date.now(), type: t.type,
-      })),
+      trips: trips.slice(-20).reverse().map(t => {
+        const reward = t.rewardId ? (mem.rewards || []).find(r => r.id === t.rewardId) : null;
+        return {
+          rideId: t.id, customer: t.customer.name, km: Math.round((t.estKm||0)*10)/10,
+          fare: t.estFare||0, from: t.pickup.label||'—', to: t.destination?.label||'—',
+          at: t.done_at ? t.done_at.getTime() : Date.now(), type: t.type,
+          rewardPayout: reward ? reward.driver_payout : null, rewardSettled: reward ? !!reward.payout_settled : false,
+        };
+      }),
     };
   }
   const [totals, todayRes, list] = await Promise.all([
@@ -817,8 +821,11 @@ async function getDriverEarnings(driverId) {
       FROM rides WHERE driver_id=$1 AND status='done' AND done_at >= CURRENT_DATE;
     `, [driverId]),
     pool.query(`
-      SELECT id, type, customer_name, est_km, est_fare, pickup_label, dest_label, store_label, store_name, done_at
-      FROM rides WHERE driver_id=$1 AND status='done' ORDER BY done_at DESC LIMIT 20;
+      SELECT r.id, r.type, r.customer_name, r.est_km, r.est_fare, r.pickup_label, r.dest_label,
+             r.store_label, r.store_name, r.done_at, cr.driver_payout, cr.payout_settled
+      FROM rides r
+      LEFT JOIN customer_rewards cr ON cr.ride_id = r.id AND cr.status = 'used'
+      WHERE r.driver_id=$1 AND r.status='done' ORDER BY r.done_at DESC LIMIT 20;
     `, [driverId]),
   ]);
   const t = totals.rows[0], td = todayRes.rows[0];
@@ -830,6 +837,7 @@ async function getDriverEarnings(driverId) {
       fare: r.est_fare||0,
       from: r.type==='delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label||'—'),
       to: r.dest_label||'—', at: r.done_at ? new Date(r.done_at).getTime() : Date.now(), type: r.type,
+      rewardPayout: r.driver_payout != null ? r.driver_payout : null, rewardSettled: !!r.payout_settled,
     })),
   };
 }

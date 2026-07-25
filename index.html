@@ -1767,7 +1767,11 @@ function onArrived() {
 }
 
 function onDone(data) {
-  const fareMsg = data && data.fare != null ? (data.fare > 0 ? ` — الأجرة ${data.fare.toLocaleString()} د.ع` : ' — رحلة مجانية 🎁') : '';
+  let fareMsg = '';
+  if (data && data.fare != null) {
+    if (data.fare > 0) fareMsg = ` — الأجرة ${data.fare.toLocaleString()} د.ع`;
+    else fareMsg = data.estFare ? ` — قيمة رحلتك ${data.estFare.toLocaleString()} د.ع، مجانية من جايك 🎁` : ' — رحلة مجانية 🎁';
+  }
   toast('انتهت الرحلة، شكراً لاستخدامك جايك 🙏' + fareMsg);
   checkRewardBanner();
   lastRideId = currentRide;

@@ -1020,9 +1020,12 @@ function renderTrips(allTrips) {
     const time = new Date(t.at).toLocaleTimeString('ar', { hour:'2-digit', minute:'2-digit' });
     const div = document.createElement('div');
     div.className = 'trip-item';
+    const rewardNote = t.rewardPayout != null
+      ? `<div style="font-size:10.5px;font-weight:600;color:${t.rewardSettled ? 'var(--go)' : 'var(--sky-dark)'};margin-top:2px">🎁 ${t.rewardSettled ? 'مدفوعة من الإدارة ✅' : 'بانتظار الدفع من الإدارة ⏳'}</div>`
+      : '';
     div.innerHTML = `<div class="ti-icon">${t.type==='delivery'?'🛒':'🚗'}</div>
       <div class="ti-body"><div class="cust">${t.customer} <span style="font-weight:400;color:var(--muted);font-size:11px">· ${time}</span></div>
-      <div class="route">${t.from} ← ${t.to}</div></div>
+      <div class="route">${t.from} ← ${t.to}</div>${rewardNote}</div>
       <div class="ti-fare"><div class="f">${t.fare.toLocaleString()}</div><div class="k">${t.km} كم</div></div>`;
     list.appendChild(div);
   });
@@ -1572,7 +1575,9 @@ async function confirmNoShowCancel() {
 async function finishRide() {
   if (!activeRide) return;
   const out = await fetch('/api/complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) }).then(r=>r.json());
-  toast('انتهى الطلب، عاشت إيدك 🙏' + (out.fare ? ` (+${out.fare.toLocaleString()} د.ع)` : ''));
+  let msg = 'انتهى الطلب، عاشت إيدك 🙏';
+  if (out.rewardPayout != null) { msg += ` — رحلة مجانية للزبون 🎁 (${(out.estFare||0).toLocaleString()} د.ع) — الإدارة تدفعلك ${out.rewardPayout.toLocaleString()} د.ع`; toast(msg, 6000); }
+  else { if (out.fare) msg += ` (+${out.fare.toLocaleString()} د.ع)`; toast(msg); }
   endActive();
 }
 
@@ -1591,7 +1596,7 @@ function endActive() {
 
 // ============ أدوات ============
 let toastTimer;
-function toast(msg){ const o=document.querySelector('.toast'); if(o)o.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.remove(),3200); }
+function toast(msg, ms){ const o=document.querySelector('.toast'); if(o)o.remove(); const t=document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.appendChild(t); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.remove(), ms||3200); }
 function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.setValueAtTime(.15,c.currentTime); o.start(); o.stop(c.currentTime+.15); }catch(e){} }
 
 // ============ التشغيل ============

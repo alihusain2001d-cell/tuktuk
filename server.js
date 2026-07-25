@@ -857,17 +857,19 @@ app.post('/api/complete', async (req, res) => {
     await db.updateRideStatus(ride.id, 'done');
 
     // لو الرحلة استخدمت مكافأة، سجّل المبلغ المستحق للسائق (الفرق بين الأجرة الحقيقية واللي دفعه الزبون)
+    let rewardPayout = null;
     if (ride.rewardId) {
-      const payout = (ride.estFare || 0) - (ride.customerPaid != null ? ride.customerPaid : ride.estFare);
-      await db.markRewardUsedByRide(ride.id, ride.driverId, Math.max(0, payout));
+      rewardPayout = Math.max(0, (ride.estFare || 0) - (ride.customerPaid != null ? ride.customerPaid : ride.estFare));
+      await db.markRewardUsedByRide(ride.id, ride.driverId, rewardPayout);
     }
     // تحقق إذا الزبون وصل الحين لعدد الرحلات المطلوب لمكافأة جديدة
     if (ride.customer?.phone) await db.maybeGrantAutoReward(ride.customer.phone);
 
-    sendTo(ride.customerSocketId, 'ride:done', { fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
+    const paidByCustomer = ride.customerPaid != null ? ride.customerPaid : ride.estFare;
+    sendTo(ride.customerSocketId, 'ride:done', { fare: paidByCustomer, estFare: ride.estFare });
     pushToCustomer(ride.customer.phone, { title: '✅ انتهت الرحلة', body: 'شكراً لاستخدامك جايك 🙏', url: '/index.html' });
     activeRides.delete(ride.id);
-    res.json({ ok: true, fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
+    res.json({ ok: true, fare: paidByCustomer, estFare: ride.estFare, rewardPayout });
   } catch (e) {
     console.error('خطأ بالإنهاء:', e.message);
     res.status(500).json({ error: 'خطأ' });
