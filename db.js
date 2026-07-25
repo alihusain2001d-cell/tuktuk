@@ -81,6 +81,8 @@ async function init() {
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;`);
     // السواق القدماء اللي عندهم سجل تفعيل/تجربة من قبل هذا التحديث نعتبرهم موافق عليهم تلقائياً
     await pool.query(`UPDATE drivers SET approved=true WHERE approved=false AND (sub_ends_at IS NOT NULL OR trial_ends_at IS NOT NULL);`);
+    // ترقية: اشتراك إشعارات المتصفح (Web Push) — يوصل الطلب للسائق حتى لو التطبيق مقفل بالخلفية
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS push_subscription JSONB;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS customers (
         phone      TEXT PRIMARY KEY,
@@ -96,6 +98,8 @@ async function init() {
     // ترقية: حظر الزبون من استخدام التطبيق
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false;`);
     await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS ban_reason TEXT;`);
+    // ترقية: اشتراك إشعارات المتصفح (Web Push) — يبلغ الزبون بحالة رحلته حتى لو التطبيق مقفل بالخلفية
+    await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS push_subscription JSONB;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rides (
         id             TEXT PRIMARY KEY,
@@ -311,6 +315,22 @@ async function updateDriverLocation(id, lat, lng) {
   await pool.query('UPDATE drivers SET last_lat=$2, last_lng=$3 WHERE id=$1', [id, lat, lng]);
 }
 
+// ============ إشعارات المتصفح (Web Push) — السواق ============
+async function saveDriverPushSubscription(id, subscription) {
+  if (!HAS_DB) { const d = mem.drivers.get(id); if (d) d.push_subscription = subscription; return; }
+  await pool.query('UPDATE drivers SET push_subscription=$2 WHERE id=$1', [id, subscription]);
+}
+async function clearDriverPushSubscription(id) {
+  if (!HAS_DB) { const d = mem.drivers.get(id); if (d) d.push_subscription = null; return; }
+  await pool.query('UPDATE drivers SET push_subscription=NULL WHERE id=$1', [id]);
+}
+// كل السواق المسموحلهم يشتغلون وعندهم اشتراك إشعارات مسجّل — نرسلها بغض النظر عن حالة اتصال الـ WebSocket
+async function getDriversForPush() {
+  if (!HAS_DB) return [...mem.drivers.values()].filter(d => d.push_subscription && computeAccess(d).allowed);
+  const res = await pool.query('SELECT * FROM drivers WHERE push_subscription IS NOT NULL');
+  return res.rows.filter(d => computeAccess(d).allowed);
+}
+
 // حالة السواق: هل يقدر يشتغل؟ (دالة صافية — تحسب من صف السائق مباشرة، بدون استعلام إضافي)
 // pending = ينتظر التفعيل | active = مفعّل باشتراك | trial = بفترة التجربة | expired = انتهى
 function computeAccess(d) {
@@ -495,6 +515,27 @@ async function getCustomerByPhone(phone) {
     [clean]
   );
   return res.rows[0] || null;
+}
+
+// ============ إشعارات المتصفح (Web Push) — الزبون ============
+async function saveCustomerPushSubscription(phone, subscription) {
+  const clean = cleanPhone(phone);
+  if (!clean) return;
+  if (!HAS_DB) { const c = mem.customers.get(clean); if (c) c.push_subscription = subscription; return; }
+  await pool.query('UPDATE customers SET push_subscription=$2 WHERE phone=$1', [clean, subscription]);
+}
+async function clearCustomerPushSubscription(phone) {
+  const clean = cleanPhone(phone);
+  if (!clean) return;
+  if (!HAS_DB) { const c = mem.customers.get(clean); if (c) c.push_subscription = null; return; }
+  await pool.query('UPDATE customers SET push_subscription=NULL WHERE phone=$1', [clean]);
+}
+async function getCustomerPushSubscription(phone) {
+  const clean = cleanPhone(phone);
+  if (!clean) return null;
+  if (!HAS_DB) return mem.customers.get(clean)?.push_subscription || null;
+  const res = await pool.query('SELECT push_subscription FROM customers WHERE phone=$1', [clean]);
+  return res.rows[0]?.push_subscription || null;
 }
 
 // تحديث الاسم و/أو الصورة
@@ -1215,4 +1256,6 @@ module.exports = {
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
   getFareSettings, setFareSettings,
+  saveDriverPushSubscription, clearDriverPushSubscription, getDriversForPush,
+  saveCustomerPushSubscription, clearCustomerPushSubscription, getCustomerPushSubscription,
 };

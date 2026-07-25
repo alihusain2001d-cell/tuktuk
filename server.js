@@ -10,6 +10,7 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const webpush = require('web-push');
 const db = require('./db');
 
 const app = express();
@@ -20,6 +21,17 @@ app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
 // ============ مفتاح لوحة التحكم ============
 const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
+
+// ============ إشعارات المتصفح (Web Push) ============
+// توصل حتى لو التطبيق مقفل بالخلفية أو الشاشة مقفلة — عكس WebSocket اللي يحتاج التبويب شغّال
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+const PUSH_ENABLED = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails('mailto:support@jayak.app', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.log('⚠️ إشعارات المتصفح غير مفعّلة — أضف VAPID_PUBLIC_KEY و VAPID_PRIVATE_KEY بملف .env');
+}
 
 // المسارات
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
@@ -54,6 +66,44 @@ function broadcast(role, type, data) {
 function sendTo(socketId, type, data) {
   const ws = sockets.get(socketId);
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type, data }));
+}
+
+// أرسل إشعار متصفح لاشتراك واحد — يمسح الاشتراك تلقائياً لو صار غير صالح (410/404)
+async function pushToSubscription(subscription, payload, onInvalid) {
+  if (!PUSH_ENABLED || !subscription) return;
+  try {
+    await webpush.sendNotification(subscription, JSON.stringify(payload));
+  } catch (e) {
+    if ((e.statusCode === 410 || e.statusCode === 404) && onInvalid) await onInvalid();
+    else console.error('خطأ بإرسال إشعار:', e.message);
+  }
+}
+
+// إشعار لكل السواق المسموحلهم يشتغلون وعندهم اشتراك — بغض النظر عن حالة اتصال الـ WebSocket
+async function pushToAllDrivers(payload) {
+  if (!PUSH_ENABLED) return;
+  try {
+    const drivers = await db.getDriversForPush();
+    await Promise.all(drivers.map(d =>
+      pushToSubscription(d.push_subscription, payload, () => db.clearDriverPushSubscription(d.id))
+    ));
+  } catch (e) { console.error('خطأ بإشعارات السواق:', e.message); }
+}
+
+async function pushToDriver(driverId, payload) {
+  if (!PUSH_ENABLED || !driverId) return;
+  try {
+    const d = await db.getDriver(driverId);
+    if (d && d.push_subscription) await pushToSubscription(d.push_subscription, payload, () => db.clearDriverPushSubscription(driverId));
+  } catch (e) { console.error('خطأ بإشعار السائق:', e.message); }
+}
+
+async function pushToCustomer(phone, payload) {
+  if (!PUSH_ENABLED || !phone) return;
+  try {
+    const sub = await db.getCustomerPushSubscription(phone);
+    if (sub) await pushToSubscription(sub, payload, () => db.clearCustomerPushSubscription(phone));
+  } catch (e) { console.error('خطأ بإشعار الزبون:', e.message); }
 }
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -568,6 +618,11 @@ app.post('/api/book', async (req, res) => {
       estKm: Math.round(estKm*10)/10, estFare, customer: { name: ride.customer.name },
       rewardApplied: !!reward,
     });
+    // إشعار متصفح لكل السواق المتاحين — يوصل حتى لو التطبيق مقفل بالخلفية (تكملة للـ WebSocket)
+    pushToAllDrivers({
+      title: '🚗 طلب جديد!', body: type === 'delivery' ? 'طلب توصيل جديد بالقرب منك' : 'رحلة جديدة بالقرب منك',
+      url: '/driver.html',
+    });
 
     res.json({
       rideId, driversNotified: onlineDrivers.size, estKm: Math.round(estKm*10)/10, estFare,
@@ -593,6 +648,27 @@ app.get('/api/driver/pending-rides', async (req, res) => {
       });
     }
     res.json(list);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ إشعارات المتصفح (Web Push) ============
+app.get('/api/push/vapid-public-key', (req, res) => res.json({ key: VAPID_PUBLIC_KEY, enabled: PUSH_ENABLED }));
+
+app.post('/api/driver/push-subscribe', async (req, res) => {
+  try {
+    const { driverId, subscription } = req.body;
+    if (!driverId || !subscription) return res.status(400).json({ error: 'بيانات ناقصة' });
+    await db.saveDriverPushSubscription(driverId, subscription);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/customer/push-subscribe', async (req, res) => {
+  try {
+    const { phone, subscription } = req.body;
+    if (!phone || !subscription) return res.status(400).json({ error: 'بيانات ناقصة' });
+    await db.saveCustomerPushSubscription(phone, subscription);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -627,6 +703,7 @@ app.post('/api/accept', async (req, res) => {
       },
       etaMin,
     });
+    pushToCustomer(ride.customer.phone, { title: '🎉 وافق سائق على رحلتك', body: `${driver.name} بالطريق إليك (${etaMin} دقيقة تقريباً)`, url: '/index.html' });
     broadcast('driver', 'ride:taken', { rideId });
 
     res.json({
@@ -684,6 +761,7 @@ app.post('/api/offer', async (req, res) => {
         photo: dRec ? dRec.photo_self : null,
       },
     });
+    pushToCustomer(ride.customer.phone, { title: '💬 وصلك عرض سعر', body: `${driver.name} عرض ${p.toLocaleString()} د.ع لطلبك`, url: '/index.html' });
 
     // بلّغ باقي السواقين إنه الطلب مأخوذ مؤقتاً
     broadcast('driver', 'ride:taken', { rideId });
@@ -766,6 +844,7 @@ app.post('/api/arrived', async (req, res) => {
     ride.status = 'arrived';
     await db.updateRideStatus(ride.id, 'arrived');
     sendTo(ride.customerSocketId, 'ride:arrived', {});
+    pushToCustomer(ride.customer.phone, { title: '📍 السائق وصل!', body: ride.type === 'delivery' ? 'السواق وصل بطلبك' : 'السائق بانتظارك برة', url: '/index.html' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
@@ -786,6 +865,7 @@ app.post('/api/complete', async (req, res) => {
     if (ride.customer?.phone) await db.maybeGrantAutoReward(ride.customer.phone);
 
     sendTo(ride.customerSocketId, 'ride:done', { fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
+    pushToCustomer(ride.customer.phone, { title: '✅ انتهت الرحلة', body: 'شكراً لاستخدامك جايك 🙏', url: '/index.html' });
     activeRides.delete(ride.id);
     res.json({ ok: true, fare: ride.customerPaid != null ? ride.customerPaid : ride.estFare });
   } catch (e) {
@@ -813,9 +893,11 @@ app.post('/api/cancel', async (req, res) => {
     if (ride.rewardId) await db.releaseRewardByRide(ride.id);
     if (cancelledBy === 'driver_noshow') {
       sendTo(ride.customerSocketId, 'ride:cancelled', { rideId: ride.id, by: 'driver', reason: (reason || '').trim() });
+      pushToCustomer(ride.customer.phone, { title: '❌ ألغى السائق الرحلة', body: (reason || '').trim() || 'السائق وصل ولقاك مو موجود', url: '/index.html' });
     } else if (ride.driverId) {
       const d = onlineDrivers.get(ride.driverId);
       if (d) sendTo(d.socketId, 'ride:cancelled', { rideId: ride.id, by: 'customer' });
+      pushToDriver(ride.driverId, { title: '❌ الزبون ألغى الرحلة', body: 'رحلة كنت موافق عليها انلغت', url: '/driver.html' });
     }
     broadcast('driver', 'ride:taken', { rideId: ride.id });
     activeRides.delete(ride.id);

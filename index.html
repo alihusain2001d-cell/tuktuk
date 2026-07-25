@@ -868,6 +868,35 @@ function showApp() {
   const dhAvatar = document.getElementById('dh-avatar');
   dhAvatar.innerHTML = user.photo ? `<img src="${user.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : user.name.charAt(0);
   checkRewardBanner();
+  setupPushNotifications();
+}
+
+// ============ إشعارات المتصفح (Web Push) ============
+// تبلغك بحالة رحلتك حتى لو التطبيق مقفل بالخلفية أو الشاشة مقفلة
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+let pushSetupDone = false;
+async function setupPushNotifications() {
+  if (pushSetupDone || !user) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
+    if (!vapid.enabled || !vapid.key) return;
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapid.key) });
+    }
+    await fetch('/api/customer/push-subscribe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: user.phone, subscription: sub }) });
+    pushSetupDone = true;
+  } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
 }
 
 async function showBannedScreen(reason) {
