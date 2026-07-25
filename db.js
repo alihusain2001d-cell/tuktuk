@@ -77,6 +77,10 @@ async function init() {
     // ترقية: حظر السائق من استخدام التطبيق
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS banned BOOLEAN NOT NULL DEFAULT false;`);
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS ban_reason TEXT;`);
+    // ترقية: موافقة الأدمن قبل ما السائق يدخل ويستلم طلبات
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT false;`);
+    // السواق القدماء اللي عندهم سجل تفعيل/تجربة من قبل هذا التحديث نعتبرهم موافق عليهم تلقائياً
+    await pool.query(`UPDATE drivers SET approved=true WHERE approved=false AND (sub_ends_at IS NOT NULL OR trial_ends_at IS NOT NULL);`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS customers (
         phone      TEXT PRIMARY KEY,
@@ -238,16 +242,16 @@ async function init() {
 async function upsertDriver(d) {
   if (!HAS_DB) {
     const existing = mem.drivers.get(d.id) || {};
-    // أول تسجيل: نحسب فترة التجربة (يوم واحد)
+    // أول تسجيل: ينتظر موافقة الأدمن — التجربة ما تبدأ إلا بعد الموافقة
     const created = existing.created_at || new Date();
-    const trial = existing.trial_ends_at || new Date(created.getTime() + 24*60*60*1000);
-    mem.drivers.set(d.id, { ...existing, ...d, created_at: created, trial_ends_at: trial,
+    mem.drivers.set(d.id, { ...existing, ...d, created_at: created,
+      trial_ends_at: existing.trial_ends_at || null, approved: existing.approved || false,
       status: existing.status || 'pending' });
     return mem.drivers.get(d.id);
   }
   const res = await pool.query(`
-    INSERT INTO drivers (id, name, phone, car, photo_self, photo_car, photo_id_front, photo_id_back, trial_ends_at, last_lat, last_lng)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW() + INTERVAL '1 day', $9,$10)
+    INSERT INTO drivers (id, name, phone, car, photo_self, photo_car, photo_id_front, photo_id_back, last_lat, last_lng)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name,
       phone = EXCLUDED.phone,
@@ -308,6 +312,7 @@ async function updateDriverLocation(id, lat, lng) {
 function computeAccess(d) {
   if (!d) return { allowed: false, reason: 'not_found' };
   if (d.banned) return { allowed: false, reason: 'banned', banReason: d.ban_reason || null };
+  if (!d.approved) return { allowed: false, reason: 'pending_review' };
 
   const now = Date.now();
   const subEnds = d.sub_ends_at ? new Date(d.sub_ends_at).getTime() : 0;
@@ -336,13 +341,13 @@ async function getDriverAccess(id) {
 async function setDriverSubscription(id, days, amount = 0, note = '') {
   if (!HAS_DB) {
     const d = mem.drivers.get(id);
-    if (d) { d.sub_ends_at = new Date(Date.now() + days*86400000); d.status = 'active'; }
+    if (d) { d.sub_ends_at = new Date(Date.now() + days*86400000); d.status = 'active'; d.approved = true; }
     if (!mem.subs) mem.subs = [];
     mem.subs.push({ id: mem.subs.length+1, driver_id:id, driver_name: d?.name, days, amount: amount||0, note, created_at: new Date() });
     return d;
   }
   const res = await pool.query(`
-    UPDATE drivers SET sub_ends_at = NOW() + ($2 || ' days')::INTERVAL, status='active'
+    UPDATE drivers SET sub_ends_at = NOW() + ($2 || ' days')::INTERVAL, status='active', approved=true
     WHERE id=$1 RETURNING *;
   `, [id, String(days)]);
   const d = res.rows[0];
@@ -431,6 +436,20 @@ async function unbanDriver(id) {
     return d;
   }
   const res = await pool.query('UPDATE drivers SET banned=false, ban_reason=NULL WHERE id=$1 RETURNING *', [id]);
+  return res.rows[0] || null;
+}
+
+// الأدمن يوافق على سائق جديد بعد مراجعة بياناته وصوره — تبدأ فترة التجربة من هذي اللحظة
+async function approveDriver(id, trialDays = 1) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(id);
+    if (d) { d.approved = true; d.trial_ends_at = new Date(Date.now() + trialDays*86400000); d.status = 'active'; }
+    return d;
+  }
+  const res = await pool.query(`
+    UPDATE drivers SET approved=true, trial_ends_at = NOW() + ($2 || ' days')::INTERVAL, status='active'
+    WHERE id=$1 RETURNING *;
+  `, [id, String(trialDays)]);
   return res.rows[0] || null;
 }
 
@@ -1162,7 +1181,7 @@ module.exports = {
   HAS_DB, init,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
-  banDriver, unbanDriver,
+  banDriver, unbanDriver, approveDriver,
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
   updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount,

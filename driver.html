@@ -883,6 +883,10 @@ async function showExpired(acc) {
     document.getElementById('exp-text').textContent = acc.banReason
       ? 'السبب: ' + acc.banReason
       : 'تواصل مع الإدارة لمعرفة السبب.';
+  } else if (acc.reason === 'pending_review') {
+    icon.textContent = '📋';
+    document.getElementById('exp-title').textContent = 'حسابك تحت المراجعة';
+    document.getElementById('exp-text').textContent = 'إدارة جايك تراجع بياناتك وصورك حالياً. بعد ما توافق عليك راح تقدر تستلم طلبات فوراً.';
   } else if (acc.reason === 'expired') {
     icon.textContent = '🔒';
     document.getElementById('exp-title').textContent = 'انتهى تفعيل اشتراكك';

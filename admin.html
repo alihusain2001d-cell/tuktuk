@@ -260,6 +260,9 @@
       <button class="btn ghost" onclick="event.stopPropagation();openContactSettingsModal()">تعديل</button>
     </div>
 
+    <div class="section-title">🆕 سواق جدد بانتظار الموافقة <span class="count" id="pending-approval-count">0</span></div>
+    <div id="pending-approval-list"></div>
+
     <div class="section-title">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span></div>
     <div id="need-activation"></div>
 
@@ -638,6 +641,7 @@ async function loadDrivers() {
     allDrivers = await api('/api/admin/drivers').then(r=>r.json());
     renderDrivers();
     renderNeedActivation();
+    renderPendingApproval();
   } catch(e) { document.getElementById('drivers-list').innerHTML = '<div class="empty">صار خطأ بالتحميل</div>'; }
 }
 
@@ -665,6 +669,7 @@ async function loadComplaints() {
 function accessBadge(a) {
   if (!a) return '<span class="badge expired">؟</span>';
   if (a.reason === 'banned') return '<span class="badge expired">🚫 محظور</span>';
+  if (a.reason === 'pending_review') return '<span class="badge trial">📋 بانتظار الموافقة</span>';
   if (a.reason === 'trial') return `<span class="badge trial">🎁 تجربة ${a.hoursLeft}س</span>`;
   if (a.reason === 'subscribed') return `<span class="badge sub">✅ ${a.daysLeft} يوم</span>`;
   if (a.reason === 'trial_ended') return '<span class="badge expired">⏰ انتهت التجربة</span>';
@@ -693,6 +698,7 @@ function driverCard(d) {
       </div>
     </div>
     <div class="dc-actions">
+      ${a && a.reason === 'pending_review' ? `<button class="btn go" onclick="approveDriverNow('${d.id}')">✅ وافق على السائق</button>` : ''}
       <button class="btn go" onclick="openSubModal('${d.id}')">💳 تفعيل</button>
       ${a && a.allowed ? `<button class="btn danger" onclick="revokeDriver('${d.id}')">⛔ إيقاف</button>` : ''}
       <button class="btn ghost" onclick="callDriver('${d.phone}')">📞</button>
@@ -957,11 +963,19 @@ async function unbanCustomerNow(phone) {
 }
 
 function renderNeedActivation() {
-  const need = allDrivers.filter(d => !d.access?.allowed);
+  const need = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review');
   document.getElementById('need-count').textContent = need.length;
   const box = document.getElementById('need-activation');
   if (!need.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:13px">كل السواق مفعّلين</div></div>'; return; }
   box.innerHTML = need.map(driverCard).join('');
+}
+
+function renderPendingApproval() {
+  const pending = allDrivers.filter(d => d.access?.reason === 'pending_review');
+  document.getElementById('pending-approval-count').textContent = pending.length;
+  const box = document.getElementById('pending-approval-list');
+  if (!pending.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:32px;margin-bottom:8px">📋</div><div style="font-size:13px">ماكو سواق جدد ينتظرون</div></div>'; return; }
+  box.innerHTML = pending.map(driverCard).join('');
 }
 
 // ============ نافذة الاشتراك ============
@@ -1004,6 +1018,17 @@ async function confirmSub() {
     if (!res.ok) return toast(out.error || 'صار خطأ');
     closeSubModal();
     toast(amount ? `تفعّل ${days} يوم — قبضت ${amount.toLocaleString()} د.ع ✅` : `تفعّل ${days} يوم (مجاناً) ✅`);
+    await refreshAll();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+async function approveDriverNow(id) {
+  const d = allDrivers.find(x=>x.id===id);
+  if (!confirm(`توافق على ${d?.name||'السائق'}؟ راح تبدأ فترة تجربته المجانية فوراً.`)) return;
+  try {
+    const res = await api(`/api/admin/driver/${id}/approve`, { method:'POST' });
+    if (!res.ok) return toast('صار خطأ');
+    toast('وافقت على السائق ✅');
     await refreshAll();
   } catch(e) { toast('صار خطأ'); }
 }

@@ -921,6 +921,16 @@ app.post('/api/admin/driver/:id/revoke', checkAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// موافقة الأدمن على سائق جديد بعد مراجعة بياناته وصوره (تبدأ التجربة من هذي اللحظة)
+app.post('/api/admin/driver/:id/approve', checkAdmin, async (req, res) => {
+  try {
+    const trialDays = parseInt(req.body.trialDays, 10) || 1;
+    const d = await db.approveDriver(req.params.id, trialDays);
+    if (!d) return res.status(404).json({ error: 'ماكو سائق' });
+    res.json({ ok: true, driver: d });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // حظر سائق من استخدام التطبيق (مع سبب)
 app.post('/api/admin/driver/:id/ban', checkAdmin, async (req, res) => {
   try {
