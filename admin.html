@@ -1386,20 +1386,31 @@ function openRewardStatement() {
 }
 function closeRewardStatement() { document.getElementById('reward-statement-modal').classList.remove('show'); }
 
+let currentDriverStatement = null;
+
 async function searchRewardStatement() {
   const from = document.getElementById('rs-from').value;
   const to = document.getElementById('rs-to').value;
   const driverId = document.getElementById('rs-driver').value;
   const box = document.getElementById('rs-results');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>نبحث...</div>';
+  currentDriverStatement = null;
   try {
-    const qs = new URLSearchParams({ from, to, driverId }).toString();
-    const data = await api(`/api/admin/reward-statement?${qs}`).then(r=>r.json());
-    renderRewardStatement(data, driverId);
+    if (driverId) {
+      const qs = new URLSearchParams({ from, to }).toString();
+      const data = await api(`/api/admin/driver/${driverId}/statement?${qs}`).then(r=>r.json());
+      currentDriverStatement = data;
+      renderDriverFullStatement(data);
+    } else {
+      const qs = new URLSearchParams({ from, to, driverId: '' }).toString();
+      const data = await api(`/api/admin/reward-statement?${qs}`).then(r=>r.json());
+      renderRewardStatement(data);
+    }
   } catch(e) { box.innerHTML = '<div class="empty">صار خطأ</div>'; }
 }
 
-function renderRewardStatement(data, driverId) {
+// ملخص كل السواق (لما ما نحدد سائق معين)
+function renderRewardStatement(data) {
   const box = document.getElementById('rs-results');
   if (!data.rows || !data.rows.length) { box.innerHTML = '<div class="empty" style="padding:20px">ماكو مكافآت بهذي الفترة</div>'; return; }
 
@@ -1420,35 +1431,127 @@ function renderRewardStatement(data, driverId) {
       <div class="sr-amt" style="color:${r.totalUnpaid>0?'var(--stop)':'var(--go)'}">${r.totalUnpaid.toLocaleString()} د.ع</div>
     </div>`).join('');
 
-  if (driverId && data.trips) {
-    html += `<div class="section-title" style="margin-top:16px">تفاصيل رحلات ${data.rows[0]?.driverName || ''}</div>`;
-    html += data.trips.length ? data.trips.map(t => `
-      <div class="ride-row">
-        <div class="rr-ico">${t.type==='delivery'?'🛒':'🚗'}</div>
-        <div class="rr-body">
-          <h4>${t.customer} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t.at ? new Date(t.at).toLocaleDateString('ar',{month:'short',day:'numeric'}) : '—'}</span></h4>
-          <p>${t.from} ← ${t.to}</p>
-        </div>
-        <div class="rr-side">
-          <div class="fare">${t.payout.toLocaleString()}</div>
-          ${t.settled
-            ? '<div class="st done">مدفوعة ✅</div>'
-            : `<button class="btn go" style="width:auto;padding:5px 10px;font-size:11px" onclick="settleFromStatement(${t.rewardId})">دفعت</button>`}
-        </div>
-      </div>`).join('') : '<div class="empty" style="padding:16px">ماكو رحلات</div>';
-  }
+  box.innerHTML = html;
+}
+
+// كشف حساب كامل لسائق وحد: تفعيلات + مكافآت + سجل مدفوعات
+function renderDriverFullStatement(data) {
+  const box = document.getElementById('rs-results');
+  if (!data.driver) { box.innerHTML = '<div class="empty" style="padding:20px">صار خطأ</div>'; return; }
+  const d = data.driver;
+
+  let html = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <div style="width:44px;height:44px;border-radius:50%;background:var(--dark);color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;overflow:hidden;flex-shrink:0">${(d.name||'؟').charAt(0)}</div>
+      <div><h4 style="font-size:15px">${d.name}</h4><div style="font-size:12px;color:var(--muted);direction:ltr;text-align:right">${d.phone||''} · ${d.car||''}</div></div>
+    </div>
+    <div class="stat-grid" style="margin-bottom:6px">
+      <div class="stat-card"><div class="sc-num">${data.activationsCount}</div><div class="sc-label">مرات التفعيل</div></div>
+      <div class="stat-card"><div class="sc-num">${data.activationsTotal.toLocaleString()}</div><div class="sc-label">دفعه إلنا (د.ع)</div></div>
+      <div class="stat-card"><div class="sc-num">${data.tripsCount}</div><div class="sc-label">رحلة مجانية</div></div>
+      <div class="stat-card warn"><div class="sc-num">${data.totalUnpaid.toLocaleString()}</div><div class="sc-label">مطلوبنا له (د.ع)</div></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:14px">دفعنا له سابقاً: ${data.totalPaid.toLocaleString()} د.ع من إجمالي ${data.totalDue.toLocaleString()} د.ع مستحقات مكافآت</div>
+  `;
+
+  html += `<div style="display:flex;gap:8px;margin-bottom:16px">
+    ${data.totalUnpaid > 0 ? `<button class="btn go" style="flex:1" onclick="payDriverFull('${d.id}')">💰 ادفع المستحق (${data.totalUnpaid.toLocaleString()} د.ع)</button>` : ''}
+    <button class="btn ghost" style="${data.totalUnpaid>0?'width:auto;padding:0 16px':'flex:1'}" onclick="printDriverStatement()">🖨️ طباعة</button>
+  </div>`;
+
+  html += `<div class="section-title">💵 سجل الدفعات <span class="count">${data.payments.length}</span></div>`;
+  html += data.payments.length ? data.payments.map(p => `
+    <div class="sub-row">
+      <div class="sr-ico">✅</div>
+      <div class="sr-body"><h4>${p.amount.toLocaleString()} د.ع</h4><p>${p.trips_count} رحلة · ${new Date(p.at).toLocaleDateString('ar',{year:'numeric',month:'short',day:'numeric'})}</p></div>
+    </div>`).join('') : '<div class="empty" style="padding:14px">ماكو دفعات بهذي الفترة</div>';
+
+  html += `<div class="section-title" style="margin-top:16px">🎁 تفاصيل الرحلات المجانية <span class="count">${data.trips.length}</span></div>`;
+  html += data.trips.length ? data.trips.map(t => `
+    <div class="ride-row">
+      <div class="rr-ico">${t.type==='delivery'?'🛒':'🚗'}</div>
+      <div class="rr-body">
+        <h4>${t.customer} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t.at ? new Date(t.at).toLocaleDateString('ar',{month:'short',day:'numeric'}) : '—'}</span></h4>
+        <p>${t.from} ← ${t.to}</p>
+      </div>
+      <div class="rr-side">
+        <div class="fare">${t.payout.toLocaleString()}</div>
+        ${t.settled ? '<div class="st done">مدفوعة ✅</div>' : '<div class="st searching">بانتظار الدفع</div>'}
+      </div>
+    </div>`).join('') : '<div class="empty" style="padding:16px">ماكو رحلات مجانية بهذي الفترة</div>';
+
+  html += `<div class="section-title" style="margin-top:16px">🧾 سجل التفعيلات <span class="count">${data.activations.length}</span></div>`;
+  html += data.activations.length ? data.activations.map(a => `
+    <div class="sub-row">
+      <div class="sr-ico">💳</div>
+      <div class="sr-body"><h4>${a.days} يوم</h4><p>${new Date(a.created_at).toLocaleDateString('ar',{year:'numeric',month:'short',day:'numeric'})}${a.note?' · '+a.note:''}</p></div>
+      <div class="sr-amt">${(a.amount||0).toLocaleString()} د.ع</div>
+    </div>`).join('') : '<div class="empty" style="padding:14px">ماكو تفعيلات بهذي الفترة</div>';
 
   box.innerHTML = html;
 }
 
-async function settleFromStatement(rewardId) {
-  if (!confirm('تأكد إنك دفعت هذا المبلغ للسائق نقدي؟')) return;
+async function payDriverFull(driverId) {
+  if (!currentDriverStatement) return;
+  if (!confirm(`تأكد إنك دفعت ${currentDriverStatement.totalUnpaid.toLocaleString()} د.ع نقدي للسائق؟`)) return;
   try {
-    await api(`/api/admin/reward-payouts/${rewardId}/settle`, { method:'POST' });
+    const res = await api(`/api/admin/driver/${driverId}/pay-rewards`, { method:'POST' });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'صار خطأ');
     toast('انسجّل الدفع ✅');
     searchRewardStatement();
     loadPayouts();
   } catch(e) { toast('صار خطأ'); }
+}
+
+function printDriverStatement() {
+  const data = currentDriverStatement;
+  if (!data || !data.driver) return;
+  const d = data.driver;
+  const from = document.getElementById('rs-from').value;
+  const to = document.getElementById('rs-to').value;
+  const row = (a,b,c) => `<tr><td>${a}</td><td>${b}</td><td>${c}</td></tr>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>كشف حساب ${d.name}</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1A1A1A}
+      h1{font-size:20px;margin-bottom:2px} h2{font-size:14px;color:#666;font-weight:400;margin-bottom:18px}
+      table{width:100%;border-collapse:collapse;margin-bottom:22px} th,td{border:1px solid #ccc;padding:8px 10px;font-size:13px;text-align:right}
+      th{background:#f4f4f4} .totals{display:flex;gap:14px;margin-bottom:20px}
+      .box{border:1px solid #ccc;border-radius:8px;padding:10px 14px;flex:1;text-align:center}
+      .box b{display:block;font-size:18px} .section{font-size:15px;font-weight:700;margin:18px 0 8px}
+    </style></head><body>
+    <h1>كشف حساب السائق — ${d.name}</h1>
+    <h2>${d.phone||''} · ${d.car||''} · الفترة من ${from} إلى ${to}</h2>
+    <div class="totals">
+      <div class="box"><b>${data.activationsCount}</b>مرات التفعيل</div>
+      <div class="box"><b>${data.activationsTotal.toLocaleString()}</b>دفعه إلنا (د.ع)</div>
+      <div class="box"><b>${data.tripsCount}</b>رحلة مجانية</div>
+      <div class="box"><b>${data.totalUnpaid.toLocaleString()}</b>مطلوبنا له (د.ع)</div>
+    </div>
+    <div class="section">سجل الدفعات</div>
+    <table><tr><th>التاريخ</th><th>عدد الرحلات</th><th>المبلغ</th></tr>
+      ${data.payments.length ? data.payments.map(p => row(new Date(p.at).toLocaleDateString('ar'), p.trips_count, p.amount.toLocaleString()+' د.ع')).join('') : '<tr><td colspan="3">ماكو دفعات</td></tr>'}
+    </table>
+    <div class="section">الرحلات المجانية</div>
+    <table><tr><th>التاريخ</th><th>الزبون</th><th>المبلغ</th><th>الحالة</th></tr>
+      ${data.trips.length ? data.trips.map(t => `<tr><td>${t.at?new Date(t.at).toLocaleDateString('ar'):'—'}</td><td>${t.customer}</td><td>${t.payout.toLocaleString()} د.ع</td><td>${t.settled?'مدفوعة':'غير مدفوعة'}</td></tr>`).join('') : '<tr><td colspan="4">ماكو رحلات</td></tr>'}
+    </table>
+    <div class="section">سجل التفعيلات</div>
+    <table><tr><th>التاريخ</th><th>المدة</th><th>المبلغ</th></tr>
+      ${data.activations.length ? data.activations.map(a => row(new Date(a.created_at).toLocaleDateString('ar'), a.days+' يوم', (a.amount||0).toLocaleString()+' د.ع')).join('') : '<tr><td colspan="3">ماكو تفعيلات</td></tr>'}
+    </table>
+  </body></html>`;
+  // نستخدم iframe مخفي بدل نافذة جديدة حتى ما يوقفها حاجب النوافذ المنبثقة بالمتصفح
+  let iframe = document.getElementById('print-frame');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'print-frame';
+    iframe.style.cssText = 'position:fixed;right:-9999px;bottom:-9999px;width:1px;height:1px;border:0';
+    document.body.appendChild(iframe);
+  }
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 300);
 }
 
 // ============ نافذة قاعدة المكافأة ============

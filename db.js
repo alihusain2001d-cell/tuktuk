@@ -149,6 +149,19 @@ async function init() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_driver ON subscriptions(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_subs_date ON subscriptions(created_at);`);
 
+    // سجل دفعات مستحقات المكافآت للسائق — كل عملية "دفعت" تسجّل هنا كدفعة وحدة (مو كل رحلة براسها)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS driver_payments (
+        id          SERIAL PRIMARY KEY,
+        driver_id   TEXT NOT NULL,
+        amount      INTEGER NOT NULL,
+        trips_count INTEGER NOT NULL DEFAULT 0,
+        note        TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_driver_payments_driver ON driver_payments(driver_id);`);
+
     // المواقع المفضلة للزبون
     await pool.query(`
       CREATE TABLE IF NOT EXISTS saved_places (
@@ -1233,6 +1246,96 @@ async function settleDriverPayout(rewardId) {
   return res.rows[0];
 }
 
+// يدفع للسائق كل المستحقات المعلّقة دفعة وحدة (بدل تسوية كل رحلة براسها) ويسجّلها كعملية دفع وحدة بالسجل
+async function payDriverRewardsInFull(driverId, note) {
+  if (!HAS_DB) {
+    const unpaid = (mem.rewards || []).filter(r => r.driver_id === driverId && r.status === 'used' && !r.payout_settled);
+    if (!unpaid.length) return null;
+    const total = unpaid.reduce((s, r) => s + (r.driver_payout || 0), 0);
+    unpaid.forEach(r => { r.payout_settled = true; });
+    if (!mem.driverPayments) mem.driverPayments = [];
+    const payment = { id: mem.driverPayments.length + 1, driver_id: driverId, amount: total, trips_count: unpaid.length, note: note || null, created_at: new Date() };
+    mem.driverPayments.push(payment);
+    return payment;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const unpaidRes = await client.query(
+      `SELECT id, driver_payout FROM customer_rewards WHERE driver_id=$1 AND status='used' AND payout_settled=false`, [driverId]
+    );
+    if (!unpaidRes.rows.length) { await client.query('ROLLBACK'); return null; }
+    const total = unpaidRes.rows.reduce((s, r) => s + (r.driver_payout || 0), 0);
+    await client.query(`UPDATE customer_rewards SET payout_settled=true WHERE driver_id=$1 AND status='used' AND payout_settled=false`, [driverId]);
+    const insertRes = await client.query(
+      `INSERT INTO driver_payments (driver_id, amount, trips_count, note) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [driverId, total, unpaidRes.rows.length, note || null]
+    );
+    await client.query('COMMIT');
+    return insertRes.rows[0];
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+}
+
+// كشف حساب كامل لسائق وحد: تفعيلاته، رحلاته المجانية، ومدفوعاته — بفترة زمنية محددة
+async function getDriverFullStatement({ driverId, from, to }) {
+  const fromDate = from ? new Date(from) : new Date(0);
+  const toDate = to ? new Date(new Date(to).getTime() + 86400000) : new Date();
+  const driver = await getDriver(driverId);
+
+  if (!HAS_DB) {
+    const activations = (mem.subs || []).filter(s => s.driver_id === driverId && new Date(s.created_at) >= fromDate && new Date(s.created_at) < toDate).slice().reverse();
+    const rewards = (mem.rewards || []).filter(r => r.driver_id === driverId && r.status === 'used' && r.used_at >= fromDate && r.used_at < toDate);
+    const trips = rewards.map(r => {
+      const ride = mem.rides.get(r.ride_id);
+      return {
+        rewardId: r.id, rideId: r.ride_id, at: r.used_at.getTime(), payout: r.driver_payout || 0, settled: !!r.payout_settled,
+        customer: ride?.customer?.name || '—',
+        from: ride ? (ride.type === 'delivery' ? (ride.storeName || ride.store?.label || '—') : (ride.pickup?.label || '—')) : '—',
+        to: ride ? (ride.destination?.label || '—') : '—', type: ride?.type || 'ride',
+      };
+    }).sort((a, b) => b.at - a.at);
+    const payments = (mem.driverPayments || []).filter(p => p.driver_id === driverId && p.created_at >= fromDate && p.created_at < toDate).slice().reverse();
+    return {
+      driver, activations, activationsCount: activations.length,
+      activationsTotal: activations.reduce((s, a) => s + (a.amount || 0), 0),
+      tripsCount: trips.length, totalDue: trips.reduce((s, t) => s + t.payout, 0),
+      totalPaid: trips.filter(t => t.settled).reduce((s, t) => s + t.payout, 0),
+      totalUnpaid: trips.filter(t => !t.settled).reduce((s, t) => s + t.payout, 0),
+      trips, payments: payments.map(p => ({ ...p, at: p.created_at.getTime() })),
+    };
+  }
+
+  const [activationsRes, tripsRes, paymentsRes] = await Promise.all([
+    pool.query(`SELECT * FROM subscriptions WHERE driver_id=$1 AND created_at>=$2 AND created_at<$3 ORDER BY created_at DESC`, [driverId, fromDate, toDate]),
+    pool.query(`
+      SELECT cr.id AS reward_id, cr.ride_id, cr.driver_payout, cr.payout_settled, cr.used_at,
+             r.customer_name, r.pickup_label, r.dest_label, r.store_label, r.store_name, r.type
+      FROM customer_rewards cr LEFT JOIN rides r ON r.id = cr.ride_id
+      WHERE cr.driver_id=$1 AND cr.status='used' AND cr.used_at>=$2 AND cr.used_at<$3
+      ORDER BY cr.used_at DESC;
+    `, [driverId, fromDate, toDate]),
+    pool.query(`SELECT * FROM driver_payments WHERE driver_id=$1 AND created_at>=$2 AND created_at<$3 ORDER BY created_at DESC`, [driverId, fromDate, toDate]),
+  ]);
+
+  const trips = tripsRes.rows.map(r => ({
+    rewardId: r.reward_id, rideId: r.ride_id, at: r.used_at ? new Date(r.used_at).getTime() : null,
+    payout: r.driver_payout || 0, settled: !!r.payout_settled, customer: r.customer_name || '—',
+    from: r.type === 'delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label || '—'),
+    to: r.dest_label || '—', type: r.type,
+  }));
+
+  return {
+    driver, activations: activationsRes.rows, activationsCount: activationsRes.rows.length,
+    activationsTotal: activationsRes.rows.reduce((s, a) => s + (a.amount || 0), 0),
+    tripsCount: trips.length, totalDue: trips.reduce((s, t) => s + t.payout, 0),
+    totalPaid: trips.filter(t => t.settled).reduce((s, t) => s + t.payout, 0),
+    totalUnpaid: trips.filter(t => !t.settled).reduce((s, t) => s + t.payout, 0),
+    trips,
+    payments: paymentsRes.rows.map(p => ({ ...p, at: p.created_at ? new Date(p.created_at).getTime() : null })),
+  };
+}
+
 // ============ تقييم الرحلات ============
 async function rateRide(rideId, rating, note) {
   if (!HAS_DB) {
@@ -1338,6 +1441,7 @@ module.exports = {
   getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout, getRewardStatement,
+  payDriverRewardsInFull, getDriverFullStatement,
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
   getFareSettings, setFareSettings,

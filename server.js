@@ -1226,6 +1226,25 @@ app.get('/api/admin/reward-statement', checkAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// كشف حساب كامل لسائق وحد (تفعيلات + مكافآت + مدفوعات) بفترة زمنية
+app.get('/api/admin/driver/:id/statement', checkAdmin, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const out = await db.getDriverFullStatement({ driverId: req.params.id, from: from || null, to: to || null });
+    if (!out.driver) return res.status(404).json({ error: 'ماكو سائق' });
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// يدفع كل المستحقات المعلّقة للسائق دفعة وحدة ويسجّلها بسجل المدفوعات
+app.post('/api/admin/driver/:id/pay-rewards', checkAdmin, async (req, res) => {
+  try {
+    const payment = await db.payDriverRewardsInFull(req.params.id, (req.body.note || '').trim());
+    if (!payment) return res.status(400).json({ error: 'ماكو مستحقات معلّقة لهذا السائق' });
+    res.json({ ok: true, payment });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/stats', checkAdmin, async (req, res) => {
   try {
     const [s, subRev, pendingRewards, payouts] = await Promise.all([
