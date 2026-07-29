@@ -390,6 +390,12 @@
 
     <div class="reward-banner hidden" id="reward-banner" onclick="openSimple('rewards')">🎉 عندك مكافأة جديدة! اضغط للتفاصيل</div>
 
+    <div id="push-permission-banner" class="hidden" style="background:var(--gold-light);border:1.5px solid var(--brand-dark);border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+      <div style="flex:1;font-size:13px">🔔 فعّل التنبيهات حتى توصلك حالة رحلتك حتى لو التطبيق مقفل</div>
+      <button class="btn go" style="width:auto;padding:8px 14px;font-size:12.5px" onclick="requestPushPermission()">تفعيل</button>
+      <button class="btn ghost" style="width:auto;padding:8px 10px;font-size:12.5px" onclick="dismissPushBanner()">✕</button>
+    </div>
+
     <div class="section-title">خدماتنا</div>
     <div class="order-cards">
       <div class="order-card ride" onclick="startFlow('ride')">
@@ -611,7 +617,7 @@
       </div>
       <div class="actions">
         <button class="btn go" onclick="callDriver()">📞 اتصل</button>
-        <button class="btn ghost" onclick="cancelRide()">إلغاء</button>
+        <button class="btn ghost" id="cancel-ride-btn" onclick="cancelRide()">إلغاء</button>
       </div>
     </div>
   </div>
@@ -883,21 +889,38 @@ function urlBase64ToUint8Array(base64String) {
 let pushSetupDone = false;
 async function setupPushNotifications() {
   if (pushSetupDone || !user) return;
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
   try {
     const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
     if (!vapid.enabled || !vapid.key) return;
+    // المتصفحات تطلب إذن حقيقي من ضغطة المستخدم — طلبه تلقائي بدون ضغطة غالباً ينرفض بصمت
+    if (Notification.permission === 'granted') { await activatePush(vapid.key); }
+    else if (Notification.permission === 'default') { document.getElementById('push-permission-banner').classList.remove('hidden'); }
+  } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
+}
+
+async function activatePush(vapidKey) {
+  try {
     const reg = await navigator.serviceWorker.register('/sw.js');
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
-      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapid.key) });
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey) });
     }
     await fetch('/api/customer/push-subscribe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: user.phone, subscription: sub }) });
     pushSetupDone = true;
   } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
 }
+
+async function requestPushPermission() {
+  document.getElementById('push-permission-banner').classList.add('hidden');
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+    const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
+    if (vapid.enabled && vapid.key) await activatePush(vapid.key);
+  } catch (e) { console.error('تعذّر طلب إذن الإشعارات:', e); }
+}
+function dismissPushBanner() { document.getElementById('push-permission-banner').classList.add('hidden'); }
 
 async function showBannedScreen(reason) {
   document.getElementById('ban-reason-text').textContent = reason ? 'السبب: ' + reason : 'تواصل مع الإدارة لمعرفة السبب.';
@@ -1569,9 +1592,24 @@ function calcFare(km) {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => ws.send(JSON.stringify({ type:'customer:hello', data:{} }));
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type:'customer:hello', data:{ rideId: currentRide || null } }));
+    if (currentRide) resyncRideStatus();
+  };
   ws.onmessage = (e) => { const { type, data } = JSON.parse(e.data); handleWS(type, data); };
   ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+// شبكة أمان: لو انقطع الاتصال وبعدين رجع (شبكة الموبايل أو السيرفر أعاد التشغيل)، نتأكد ما فاتنا تحديث بالرحلة
+async function resyncRideStatus() {
+  if (!currentRide) return;
+  try {
+    const res = await fetch(`/api/ride/${currentRide}/status`);
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s.status === 'arrived') onArrived();
+    else if (s.status === 'started') onTripStarted();
+  } catch (e) {}
 }
 function handleWS(type, data) {
   switch(type) {
@@ -1580,6 +1618,7 @@ function handleWS(type, data) {
     case 'ride:accepted': onDriverAccepted(data); break;
     case 'driver:moved': onDriverMoved(data); break;
     case 'ride:arrived': onArrived(); break;
+    case 'ride:started': onTripStarted(); break;
     case 'ride:done': onDone(data); break;
     case 'ride:cancelled': onDriverCancelled(data); break;
   }
@@ -1718,6 +1757,7 @@ function onDriverAccepted(data) {
   else av.textContent = (d.name||'؟').charAt(0);
   document.getElementById('dv-eta').textContent = data.etaMin;
   document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السائق رايح يجيب طلبك' : 'السائق بالطريق إلك';
+  document.getElementById('cancel-ride-btn').classList.remove('hidden');
   setTimeout(() => {
     if (!mapT) mapT = makeMap('map-t',null); else mapT.invalidateSize();
     if (d.lat && d.lng) { placeDriver(d.lat, d.lng); drawDriverRoute(d.lat, d.lng); }
@@ -1726,7 +1766,14 @@ function onDriverAccepted(data) {
 }
 
 function placeDriver(lat, lng) {
-  const icon = L.divIcon({ className:'', html:'<div style="font-size:30px;transform:translate(-50%,-50%)">🚗</div>', iconSize:[0,0] });
+  const name = document.getElementById('dv-name').textContent || 'السائق';
+  const icon = L.divIcon({
+    className: '', iconSize: [0,0],
+    html: `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%)">
+      <div style="background:#1A1A1A;color:#fff;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:8px;white-space:nowrap;margin-bottom:3px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${name}</div>
+      <div style="font-size:30px;line-height:1">🚗</div>
+    </div>`,
+  });
   if (driverMarker) mapT.removeLayer(driverMarker);
   driverMarker = L.marker([lat,lng],{icon,interactive:false}).addTo(mapT);
 }
@@ -1764,6 +1811,14 @@ function onArrived() {
   document.getElementById('status-strip').classList.add('hidden');
   document.getElementById('arrived-sub').textContent = currentType === 'delivery' ? 'السواق وصل بالطلب' : 'السائق ينتظرك برة';
   toast('السواق وصل! 🚗');
+}
+
+// السائق بدأ الرحلة فعلياً (صعدت وياه) — ما تكدر تلغي بعد هالنقطة
+function onTripStarted() {
+  document.getElementById('cancel-ride-btn').classList.add('hidden');
+  document.getElementById('arrived-box').classList.add('hidden');
+  document.getElementById('status-strip').classList.remove('hidden');
+  document.getElementById('driver-status').textContent = 'بالطريق للوجهة 🚗';
 }
 
 function onDone(data) {
@@ -1865,6 +1920,14 @@ function resetAll() {
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
   if (stMarker && mapT) { mapT.removeLayer(stMarker); stMarker = null; }
+  // نشيل خط ونقاط مسار التخطيط (يبقون على الخريطة لو ما نظفناهم بعد ما تخلص الرحلة)
+  [mapR, mapD].forEach(m => {
+    if (!m) return;
+    if (routeLine) m.removeLayer(routeLine);
+    if (pkMarker) m.removeLayer(pkMarker);
+    if (dsMarker) m.removeLayer(dsMarker);
+  });
+  routeLine = null; pkMarker = null; dsMarker = null;
   resetRideUI(); resetDeliveryUI();
 }
 

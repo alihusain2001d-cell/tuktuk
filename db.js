@@ -801,6 +801,16 @@ async function getAllRides(limit = 100) {
   return res.rows;
 }
 
+// الرحلات النشطة (لسا ما خلصت ولا انلغت) — نستخدمها نرجّعها لذاكرة السيرفر بعد أي إعادة تشغيل
+// (Railway يعيد تشغيل السيرفر مع كل نشر تحديث، وبدون هذا أي رحلة بنص الطريق تضيع من السواق والزبون)
+async function getInProgressRides() {
+  if (!HAS_DB) return [];
+  const res = await pool.query(
+    `SELECT * FROM rides WHERE status IN ('searching','offered','accepted','arrived','started') ORDER BY created_at ASC`
+  );
+  return res.rows;
+}
+
 // كشف حساب السواق
 async function getDriverEarnings(driverId) {
   if (!HAS_DB) {
@@ -1440,7 +1450,7 @@ module.exports = {
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
   updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount, getCustomerNoShowCount,
   banCustomer, unbanCustomer,
-  createRide, updateRideStatus, cancelRideWithReason, getAllRides, getDriverEarnings, getStats,
+  createRide, updateRideStatus, cancelRideWithReason, getAllRides, getInProgressRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,

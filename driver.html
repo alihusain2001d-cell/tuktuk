@@ -502,6 +502,11 @@
     </div>
     <div class="panel" id="panel-waiting">
       <div class="grip"></div>
+      <div id="push-permission-banner" class="hidden" style="background:var(--sky-light);border:1.5px solid var(--sky-dark);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;font-size:13px">🔔 فعّل التنبيهات حتى توصلك الطلبات حتى لو التطبيق مقفل بالخلفية</div>
+        <button class="btn go" style="width:auto;padding:8px 14px;font-size:12.5px" onclick="requestPushPermission()">تفعيل</button>
+        <button class="btn ghost" style="width:auto;padding:8px 10px;font-size:12.5px" onclick="dismissPushBanner()">✕</button>
+      </div>
       <div id="waiting-msg" class="waiting">
         <div class="icon">📡</div>
         <h2>جاهز لاستلام الطلبات</h2>
@@ -1095,7 +1100,21 @@ document.addEventListener('visibilitychange', () => {
   if (!ws || ws.readyState === WebSocket.CLOSED) connectWS();
   else if (ws.readyState === WebSocket.OPEN) goOnline();
   pollPendingRides();
+  requestWakeLock(); // المتصفح يسكّرها تلقائياً وقت الشاشة تنطفي — نطلبها مرة ثانية لما يرجع يفتح التطبيق
 });
+
+// ============ منع قفل الشاشة تلقائياً وقت السائق شغّال ============
+let wakeLock = null;
+async function requestWakeLock() {
+  if (!isOnline || !('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) { /* المتصفح رفض أو الجهاز ما يدعمها — نتجاهل بهدوء */ }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(()=>{}); wakeLock = null; }
+}
 
 function handleWS(type, data) {
   switch(type) {
@@ -1174,6 +1193,7 @@ function startWorking() {
   startLocationUpdates();
   startRidePolling();
   setupPushNotifications();
+  requestWakeLock();
 }
 
 // ============ إشعارات المتصفح (Web Push) ============
@@ -1188,21 +1208,39 @@ function urlBase64ToUint8Array(base64String) {
 let pushSetupDone = false;
 async function setupPushNotifications() {
   if (pushSetupDone) return;
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
   try {
     const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
     if (!vapid.enabled || !vapid.key) return;
+    // المتصفحات تطلب إذن حقيقي من ضغطة المستخدم — طلبه تلقائي بدون ضغطة غالباً ينرفض بصمت
+    if (Notification.permission === 'granted') { await activatePush(vapid.key); }
+    else if (Notification.permission === 'default') { document.getElementById('push-permission-banner').classList.remove('hidden'); }
+    // 'denied' — السائق رفض من قبل، ما نزعجه بيها كل مرة
+  } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
+}
+
+async function activatePush(vapidKey) {
+  try {
     const reg = await navigator.serviceWorker.register('/sw.js');
-    const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
-      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapid.key) });
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidKey) });
     }
     await fetch('/api/driver/push-subscribe', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ driverId, subscription: sub }) });
     pushSetupDone = true;
   } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
 }
+
+async function requestPushPermission() {
+  document.getElementById('push-permission-banner').classList.add('hidden');
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+    const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
+    if (vapid.enabled && vapid.key) await activatePush(vapid.key);
+  } catch (e) { console.error('تعذّر طلب إذن الإشعارات:', e); }
+}
+function dismissPushBanner() { document.getElementById('push-permission-banner').classList.add('hidden'); }
 
 function stopWorking() {
   isOnline = false;
@@ -1211,6 +1249,7 @@ function stopWorking() {
   stopLocationUpdates();
   stopWatchingPosition();
   stopRidePolling();
+  releaseWakeLock();
 }
 
 function setLive(on, text) {
@@ -1434,6 +1473,7 @@ function showActiveRide(out, r) {
 
   const isDel = r.type === 'delivery';
   if (activeRide) activeRide.phase = 'leg1'; // متجه للنقطة الأولى (المحل أو نقطة الزبون)
+  routeFitDone = false; // نعطي المسار الجديد أول تصغير/تكبير مرة وحدة
 
   const arrivedBtn = document.getElementById('ar-arrived-btn');
   arrivedBtn.classList.remove('hidden');
@@ -1483,6 +1523,7 @@ async function fetchRoute(from, to) {
 }
 
 let lastRouteFetch = 0;
+let routeFitDone = false; // نكبّر/نصغّر الخريطة تلقائياً مرة وحدة بس، وبعدها نتابع موقع السائق بدون ما نصفّر تكبيره اليدوي
 
 async function drawRoute() {
   if (!activeRide || !map) return;
@@ -1506,7 +1547,13 @@ async function drawRoute() {
   } else {
     routeLine = L.polyline([[myPos.lat,myPos.lng],[target.lat,target.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
   }
-  map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:16 });
+  // أول مرة نرسم المسار نكبّر عليه بالكامل، وبعدها نتابع موقع السائق بدون ما نغيّر التكبير اللي هو مسويه بإيده
+  if (!routeFitDone) {
+    map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:17 });
+    routeFitDone = true;
+  } else {
+    map.panTo([myPos.lat, myPos.lng], { animate: true });
+  }
 }
 
 async function markArrived() {
@@ -1519,13 +1566,17 @@ async function markArrived() {
 }
 
 // الزبون طلع بالسيارة (أو استلم السائق الطلب بحالة التوصيل) — نبدأ نوجّه للوجهة النهائية
-function startTrip() {
+async function startTrip() {
   if (!activeRide || activeRide.phase !== 'waiting') return;
   activeRide.phase = 'leg2';
   document.getElementById('ar-waiting-actions').classList.add('hidden');
   lastRouteFetch = 0; // نجبر تحديث فوري للمسار الجديد
+  routeFitDone = false; // نعطي المسار الجديد أول تصغير/تكبير مرة وحدة
   drawRoute();
   toast('بالطريق للوجهة 🚗');
+  try {
+    await fetch('/api/start-trip', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) });
+  } catch (e) {}
 }
 
 function callCustomer(){ if(customerPhone) location.href=`tel:${customerPhone}`; else toast('رقم الزبون غير متوفر'); }
@@ -1588,6 +1639,7 @@ function endActive() {
   if (pickupMarker) { map.removeLayer(pickupMarker); pickupMarker=null; }
   if (destMarker) { map.removeLayer(destMarker); destMarker=null; }
   if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
+  routeFitDone = false;
   if (map) map.setView(myPos, 15);
   document.getElementById('panel-active').classList.add('hidden');
   document.getElementById('panel-waiting').classList.remove('hidden');

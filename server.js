@@ -168,7 +168,15 @@ wss.on('connection', (ws) => {
           break;
         }
 
-        case 'customer:hello': { ws._role = 'customer'; break; }
+        case 'customer:hello': {
+          ws._role = 'customer';
+          // لو الزبون عنده رحلة نشطة ورجع اتصل (انقطاع شبكة أو إعادة تشغيل السيرفر)، نربطها بالسوكت الجديد حتى توصله التحديثات
+          if (data && data.rideId) {
+            const ride = activeRides.get(data.rideId);
+            if (ride) ride.customerSocketId = socketId;
+          }
+          break;
+        }
 
         // نبضة حياة — تأكيد إنه الاتصال شغّال فعلاً (يفيد بكشف انقطاع صامت بسبب شبكة الموبايل)
         case 'ping': { ws.send(JSON.stringify({ type: 'pong' })); break; }
@@ -878,6 +886,18 @@ app.post('/api/arrived', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
+// السائق يبلغ إنه الزبون طلع وياه وبدأت الرحلة فعلياً — من هاللحظة الزبون ما يكدر يلغي
+app.post('/api/start-trip', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.body.rideId);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    ride.status = 'started';
+    await db.updateRideStatus(ride.id, 'started');
+    sendTo(ride.customerSocketId, 'ride:started', {});
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
 app.post('/api/complete', async (req, res) => {
   try {
     const ride = activeRides.get(req.body.rideId);
@@ -917,6 +937,9 @@ app.post('/api/cancel', async (req, res) => {
       if (!driverId || ride.driverId !== driverId) return res.status(403).json({ error: 'غير مصرح' });
       if (ride.status !== 'arrived') return res.status(409).json({ error: 'لازم توصل أول قبل الإلغاء' });
       cancelledBy = 'driver_noshow';
+    } else if (ride.status === 'started') {
+      // الزبون صعد وياه السائق وبدأت الرحلة — ما يكدر يلغي هسه
+      return res.status(409).json({ error: 'الرحلة بدأت، ما تكدر تلغي هسه' });
     }
 
     ride.status = 'cancelled';
@@ -1330,11 +1353,39 @@ app.post('/api/ride/:id/rate', async (req, res) => {
   }
 });
 
+// عند كل إعادة تشغيل (نشر تحديث جديد مثلاً)، ذاكرة السيرفر تصفر — أي رحلة بنص الطريق تضيع من السواق والزبون
+// نرجّعها من القاعدة حتى ما تنقطع فجأة. رقم اتصال الزبون (socketId) القديم مات، فلازم تطبيقه يعيد الاتصال يلحظ آخر حالة
+async function reloadActiveRides() {
+  if (!db.HAS_DB) return;
+  try {
+    const rows = await db.getInProgressRides();
+    for (const r of rows) {
+      activeRides.set(r.id, {
+        id: r.id, type: r.type,
+        customer: { name: r.customer_name || 'زبون', phone: r.customer_phone || '' },
+        pickup: { lat: r.pickup_lat, lng: r.pickup_lng, label: r.pickup_label || '' },
+        destination: r.dest_lat != null ? { lat: r.dest_lat, lng: r.dest_lng, label: r.dest_label || '' } : null,
+        store: r.store_lat != null ? { lat: r.store_lat, lng: r.store_lng, label: r.store_label || '' } : null,
+        storeName: r.store_name || '', itemDesc: r.item_desc || '',
+        estKm: r.est_km || 0, estFare: r.est_fare || 0,
+        customerPaid: r.customer_paid != null ? r.customer_paid : r.est_fare,
+        rewardId: r.reward_id || null,
+        offerPrice: r.offer_price || null, offerNote: r.offer_note || '',
+        status: r.status, driverId: r.driver_id || null,
+        customerSocketId: null,
+        createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+      });
+    }
+    if (rows.length) console.log(`🔄 استرجعنا ${rows.length} رحلة كانت بنص الطريق بعد إعادة التشغيل`);
+  } catch (e) { console.error('خطأ باسترجاع الرحلات النشطة:', e.message); }
+}
+
 // ============================================================
 const PORT = process.env.PORT || 3000;
 
 (async () => {
   await db.init();
+  await reloadActiveRides();
   server.listen(PORT, () => {
     console.log(`🚗 جايك يشتغل على المنفذ ${PORT}`);
     console.log(db.HAS_DB ? '   التخزين: PostgreSQL (دائم)' : '   التخزين: الذاكرة (مؤقت)');
