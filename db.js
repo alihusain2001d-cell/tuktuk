@@ -1146,6 +1146,83 @@ async function getDriverPayouts() {
   return res.rows;
 }
 
+// كشف مستحقات المكافآت — ملخص لكل سائق (أو سائق وحد محدد) بفترة زمنية، حتى ما تصير هوسة لما يصير هواي سواق
+async function getRewardStatement({ from, to, driverId } = {}) {
+  const fromDate = from ? new Date(from) : new Date(0);
+  const toDate = to ? new Date(new Date(to).getTime() + 86400000) : new Date(); // نضيف يوم حتى "إلى" يشمل يومها كامل
+
+  if (!HAS_DB) {
+    const rewards = (mem.rewards || []).filter(r =>
+      r.status === 'used' && r.used_at >= fromDate && r.used_at < toDate &&
+      (!driverId || r.driver_id === driverId)
+    );
+    const byDriver = new Map();
+    for (const r of rewards) {
+      const key = r.driver_id;
+      const d = mem.drivers.get(key);
+      if (!byDriver.has(key)) byDriver.set(key, { driverId: key, driverName: d ? d.name : 'سائق محذوف', tripsCount: 0, totalDue: 0, totalPaid: 0, totalUnpaid: 0 });
+      const row = byDriver.get(key);
+      row.tripsCount++; row.totalDue += r.driver_payout || 0;
+      if (r.payout_settled) row.totalPaid += r.driver_payout || 0; else row.totalUnpaid += r.driver_payout || 0;
+    }
+    const rows = [...byDriver.values()].sort((a,b) => b.totalUnpaid - a.totalUnpaid);
+    let trips = null;
+    if (driverId) {
+      trips = rewards.map(r => {
+        const ride = mem.rides.get(r.ride_id);
+        return {
+          rewardId: r.id, rideId: r.ride_id, at: r.used_at.getTime(), payout: r.driver_payout || 0, settled: !!r.payout_settled,
+          customer: ride?.customer?.name || '—',
+          from: ride ? (ride.type==='delivery' ? (ride.storeName||ride.store?.label||'—') : (ride.pickup?.label||'—')) : '—',
+          to: ride ? (ride.destination?.label || '—') : '—', type: ride?.type || 'ride',
+        };
+      }).sort((a,b) => b.at - a.at);
+    }
+    return { rows, trips };
+  }
+
+  const params = [fromDate, toDate];
+  let driverClause = '';
+  if (driverId) { params.push(driverId); driverClause = `AND cr.driver_id = $${params.length}`; }
+
+  const summaryRes = await pool.query(`
+    SELECT d.id AS driver_id, d.name AS driver_name,
+           COUNT(cr.id)::int AS trips_count,
+           COALESCE(SUM(cr.driver_payout),0)::int AS total_due,
+           COALESCE(SUM(cr.driver_payout) FILTER (WHERE cr.payout_settled), 0)::int AS total_paid,
+           COALESCE(SUM(cr.driver_payout) FILTER (WHERE NOT cr.payout_settled), 0)::int AS total_unpaid
+    FROM customer_rewards cr
+    JOIN drivers d ON d.id = cr.driver_id
+    WHERE cr.status = 'used' AND cr.used_at >= $1 AND cr.used_at < $2 ${driverClause}
+    GROUP BY d.id, d.name
+    ORDER BY total_unpaid DESC, d.name;
+  `, params);
+
+  const rows = summaryRes.rows.map(r => ({
+    driverId: r.driver_id, driverName: r.driver_name, tripsCount: r.trips_count,
+    totalDue: r.total_due, totalPaid: r.total_paid, totalUnpaid: r.total_unpaid,
+  }));
+
+  let trips = null;
+  if (driverId) {
+    const tripsRes = await pool.query(`
+      SELECT cr.id AS reward_id, cr.ride_id, cr.driver_payout, cr.payout_settled, cr.used_at,
+             r.customer_name, r.pickup_label, r.dest_label, r.store_label, r.store_name, r.type
+      FROM customer_rewards cr
+      LEFT JOIN rides r ON r.id = cr.ride_id
+      WHERE cr.status = 'used' AND cr.driver_id = $1 AND cr.used_at >= $2 AND cr.used_at < $3
+      ORDER BY cr.used_at DESC;
+    `, [driverId, fromDate, toDate]);
+    trips = tripsRes.rows.map(r => ({
+      rewardId: r.reward_id, rideId: r.ride_id, at: r.used_at ? new Date(r.used_at).getTime() : null,
+      payout: r.driver_payout || 0, settled: !!r.payout_settled, customer: r.customer_name || '—',
+      from: r.type === 'delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label || '—'),
+      to: r.dest_label || '—', type: r.type,
+    }));
+  }
+  return { rows, trips };
+}
+
 async function settleDriverPayout(rewardId) {
   if (!HAS_DB) {
     const r = (mem.rewards || []).find(x => x.id === rewardId);
@@ -1260,7 +1337,7 @@ module.exports = {
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,
   getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
-  markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout,
+  markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout, getRewardStatement,
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
   getFareSettings, setFareSettings,

@@ -1218,6 +1218,14 @@ app.post('/api/admin/reward-payouts/:id/settle', checkAdmin, async (req, res) =>
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// كشف مستحقات المكافآت — تصفية بتاريخ من/إلى وسائق محدد (أو كل السواق)
+app.get('/api/admin/reward-statement', checkAdmin, async (req, res) => {
+  try {
+    const { from, to, driverId } = req.query;
+    res.json(await db.getRewardStatement({ from: from || null, to: to || null, driverId: driverId || null }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/stats', checkAdmin, async (req, res) => {
   try {
     const [s, subRev, pendingRewards, payouts] = await Promise.all([

@@ -269,7 +269,9 @@
     <div class="section-title">🎉 وصلوا للمكافأة <span class="count" id="rewards-count">0</span></div>
     <div id="rewards-alert"></div>
 
-    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span></div>
+    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span>
+      <button class="btn ghost" style="width:auto;padding:6px 12px;font-size:12px;margin-right:auto" onclick="openRewardStatement()">📋 كشف تفصيلي</button>
+    </div>
     <div id="payouts-list"></div>
 
     <div class="section-title">🧾 آخر التفعيلات <span class="count" id="subs-count">0</span></div>
@@ -522,6 +524,32 @@
   <div class="modal detail-modal" style="max-width:420px">
     <button class="modal-x" onclick="closeCustomerDetail()">✕</button>
     <div class="detail-modal-body" id="cd-content"></div>
+  </div>
+</div>
+
+<!-- نافذة كشف مستحقات المكافآت -->
+<div class="modal-bg" id="reward-statement-modal">
+  <div class="modal detail-modal" style="max-width:520px">
+    <button class="modal-x" onclick="closeRewardStatement()">✕</button>
+    <div class="detail-modal-body">
+      <h3 style="font-size:17px;margin-bottom:14px">📋 كشف مستحقات المكافآت</h3>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div style="flex:1">
+          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+          <input type="date" id="rs-from" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+          <input type="date" id="rs-to" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
+        </div>
+      </div>
+      <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">السائق</label>
+      <select id="rs-driver" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:12px">
+        <option value="">كل السواق</option>
+      </select>
+      <button class="btn go full" onclick="searchRewardStatement()" style="margin-bottom:16px">🔍 بحث</button>
+      <div id="rs-results"></div>
+    </div>
   </div>
 </div>
 
@@ -1340,6 +1368,85 @@ async function settlePayout(id) {
   try {
     await api(`/api/admin/reward-payouts/${id}/settle`, { method:'POST' });
     toast('انسجّل الدفع ✅');
+    loadPayouts();
+  } catch(e) { toast('صار خطأ'); }
+}
+
+// ============ كشف مستحقات المكافآت (تفصيلي بفلترة تاريخ وسائق) ============
+function openRewardStatement() {
+  const sel = document.getElementById('rs-driver');
+  sel.innerHTML = '<option value="">كل السواق</option>' + allDrivers.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+  const to = new Date();
+  const from = new Date(to.getTime() - 30*86400000);
+  document.getElementById('rs-to').value = to.toISOString().slice(0,10);
+  document.getElementById('rs-from').value = from.toISOString().slice(0,10);
+  document.getElementById('rs-results').innerHTML = '';
+  document.getElementById('reward-statement-modal').classList.add('show');
+  searchRewardStatement();
+}
+function closeRewardStatement() { document.getElementById('reward-statement-modal').classList.remove('show'); }
+
+async function searchRewardStatement() {
+  const from = document.getElementById('rs-from').value;
+  const to = document.getElementById('rs-to').value;
+  const driverId = document.getElementById('rs-driver').value;
+  const box = document.getElementById('rs-results');
+  box.innerHTML = '<div class="loading"><div class="spinner"></div>نبحث...</div>';
+  try {
+    const qs = new URLSearchParams({ from, to, driverId }).toString();
+    const data = await api(`/api/admin/reward-statement?${qs}`).then(r=>r.json());
+    renderRewardStatement(data, driverId);
+  } catch(e) { box.innerHTML = '<div class="empty">صار خطأ</div>'; }
+}
+
+function renderRewardStatement(data, driverId) {
+  const box = document.getElementById('rs-results');
+  if (!data.rows || !data.rows.length) { box.innerHTML = '<div class="empty" style="padding:20px">ماكو مكافآت بهذي الفترة</div>'; return; }
+
+  const totalDue = data.rows.reduce((s,r)=>s+r.totalDue,0);
+  const totalUnpaid = data.rows.reduce((s,r)=>s+r.totalUnpaid,0);
+  let html = `<div class="stat-grid" style="margin-bottom:14px">
+    <div class="stat-card"><div class="sc-num">${totalDue.toLocaleString()}</div><div class="sc-label">إجمالي المستحقات (د.ع)</div></div>
+    <div class="stat-card warn"><div class="sc-num">${totalUnpaid.toLocaleString()}</div><div class="sc-label">لسا ما دفعناه (د.ع)</div></div>
+  </div>`;
+
+  html += data.rows.map(r => `
+    <div class="sub-row">
+      <div class="sr-ico">🚗</div>
+      <div class="sr-body">
+        <h4>${r.driverName}</h4>
+        <p>${r.tripsCount} رحلة مجانية · دفعنا ${r.totalPaid.toLocaleString()} د.ع</p>
+      </div>
+      <div class="sr-amt" style="color:${r.totalUnpaid>0?'var(--stop)':'var(--go)'}">${r.totalUnpaid.toLocaleString()} د.ع</div>
+    </div>`).join('');
+
+  if (driverId && data.trips) {
+    html += `<div class="section-title" style="margin-top:16px">تفاصيل رحلات ${data.rows[0]?.driverName || ''}</div>`;
+    html += data.trips.length ? data.trips.map(t => `
+      <div class="ride-row">
+        <div class="rr-ico">${t.type==='delivery'?'🛒':'🚗'}</div>
+        <div class="rr-body">
+          <h4>${t.customer} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t.at ? new Date(t.at).toLocaleDateString('ar',{month:'short',day:'numeric'}) : '—'}</span></h4>
+          <p>${t.from} ← ${t.to}</p>
+        </div>
+        <div class="rr-side">
+          <div class="fare">${t.payout.toLocaleString()}</div>
+          ${t.settled
+            ? '<div class="st done">مدفوعة ✅</div>'
+            : `<button class="btn go" style="width:auto;padding:5px 10px;font-size:11px" onclick="settleFromStatement(${t.rewardId})">دفعت</button>`}
+        </div>
+      </div>`).join('') : '<div class="empty" style="padding:16px">ماكو رحلات</div>';
+  }
+
+  box.innerHTML = html;
+}
+
+async function settleFromStatement(rewardId) {
+  if (!confirm('تأكد إنك دفعت هذا المبلغ للسائق نقدي؟')) return;
+  try {
+    await api(`/api/admin/reward-payouts/${rewardId}/settle`, { method:'POST' });
+    toast('انسجّل الدفع ✅');
+    searchRewardStatement();
     loadPayouts();
   } catch(e) { toast('صار خطأ'); }
 }
