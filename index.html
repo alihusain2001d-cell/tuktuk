@@ -1420,9 +1420,9 @@ function onSearchInput() {
 
 async function doSearch(q) {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=8&accept-language=ar&viewbox=44.15,32.85,44.42,32.70&bounded=0`;
-    const res = await fetch(url, { headers: { 'Accept-Language': 'ar' } });
-    renderResults(await res.json());
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+    const out = await res.json();
+    renderResults(Array.isArray(out) ? out : null);
   } catch (e) {
     document.getElementById('search-results').innerHTML = '<div class="sr-hint">صار خطأ بالبحث. جرّب تحدد على الخريطة بدلاً منها.</div>';
   }
@@ -1433,11 +1433,11 @@ function renderResults(results) {
   if (!results || results.length === 0) { box.innerHTML = '<div class="sr-hint">ما لگينا نتائج.<br>جرّب اسم ثاني، أو حدد على الخريطة مباشرة.</div>'; return; }
   box.innerHTML = '';
   results.forEach(r => {
-    const parts = r.display_name.split(',');
+    if (r.lat == null || r.lng == null) return;
     const div = document.createElement('div');
     div.className = 'sr-item';
-    div.innerHTML = `<div class="sr-icon">📍</div><div class="sr-text"><div class="name">${parts[0]}</div><div class="addr">${parts.slice(1,4).join('،')}</div></div>`;
-    div.onclick = () => selectPlace({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), label: parts[0] });
+    div.innerHTML = `<div class="sr-icon">📍</div><div class="sr-text"><div class="name">${r.name}</div><div class="addr">${r.address||''}</div></div>`;
+    div.onclick = () => selectPlace({ lat: r.lat, lng: r.lng, label: r.name });
     box.appendChild(div);
   });
 }

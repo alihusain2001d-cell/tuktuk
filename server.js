@@ -33,6 +33,9 @@ if (PUSH_ENABLED) {
   console.log('⚠️ إشعارات المتصفح غير مفعّلة — أضف VAPID_PUBLIC_KEY و VAPID_PRIVATE_KEY بملف .env');
 }
 
+// ============ البحث عن المواقع (LocationIQ لو مفتاحه موجود، وإلا نرجع تلقائياً لـ OpenStreetMap المجاني) ============
+const LOCATIONIQ_API_KEY = process.env.LOCATIONIQ_API_KEY || '';
+
 // المسارات
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
 app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
@@ -549,6 +552,32 @@ app.delete('/api/customer/:phone/places/:id', async (req, res) => {
   } catch (e) {
     console.error('خطأ بحذف الموقع:', e.message);
     res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+// البحث عن موقع بالاسم — Google Places لو مفعّل، وإلا OpenStreetMap تلقائياً بدون ما ينكسر البحث
+app.get('/api/geocode', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+
+    // LocationIQ متوافق بنفس شكل رد Nominatim تماماً — نفس الرابط بس مع مفتاح ودومين مختلف
+    const url = LOCATIONIQ_API_KEY
+      ? `https://us1.locationiq.com/v1/search?key=${LOCATIONIQ_API_KEY}&format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=8&accept-language=ar&viewbox=44.15,32.85,44.42,32.70&bounded=0`
+      : `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=8&accept-language=ar&viewbox=44.15,32.85,44.42,32.70&bounded=0`;
+    const gRes = await fetch(url, { headers: { 'Accept-Language': 'ar', 'User-Agent': 'JayakApp/1.0' } });
+    const out = await gRes.json();
+    if (!gRes.ok || !Array.isArray(out)) {
+      console.error('فشل البحث عن المواقع:', out?.error || gRes.status);
+      return res.json([]);
+    }
+    res.json(out.map(r => {
+      const parts = (r.display_name || '').split(',');
+      return { name: parts[0] || q, address: parts.slice(1, 4).join('،'), lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+    }));
+  } catch (e) {
+    console.error('خطأ بالبحث عن المواقع:', e.message);
+    res.status(500).json({ error: 'صار خطأ بالبحث' });
   }
 });
 
