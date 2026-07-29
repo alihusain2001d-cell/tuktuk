@@ -1371,7 +1371,7 @@ async function getComplaints(limit = 50, driverId = null) {
     let list = [...mem.rides.values()].filter(r => r.ratingNote);
     if (driverId) list = list.filter(r => r.driverId === driverId);
     return list.slice(-limit).reverse().map(r => ({
-      ride_id: r.id, driver_id: r.driverId, driver_name: null, customer_name: r.customer.name,
+      ride_id: r.id, driver_id: r.driverId, driver_name: null, customer_name: r.customer.name, customer_phone: r.customer.phone || null,
       rating: r.rating, rating_note: r.ratingNote, done_at: r.done_at || new Date(),
       type: r.type, pickup_label: r.pickup?.label || null, dest_label: r.destination?.label || null,
       store_label: r.store?.label || null, store_name: r.storeName || null, est_fare: r.estFare || 0,
@@ -1381,7 +1381,7 @@ async function getComplaints(limit = 50, driverId = null) {
   let where = `rides.rating_note IS NOT NULL AND rides.rating_note != ''`;
   if (driverId) { params.push(driverId); where += ` AND rides.driver_id = $${params.length}`; }
   const res = await pool.query(`
-    SELECT rides.id AS ride_id, rides.driver_id, rides.customer_name, rides.rating, rides.rating_note, rides.done_at,
+    SELECT rides.id AS ride_id, rides.driver_id, rides.customer_name, rides.customer_phone, rides.rating, rides.rating_note, rides.done_at,
            rides.type, rides.pickup_label, rides.dest_label, rides.store_label, rides.store_name, rides.est_fare,
            drivers.name AS driver_name
     FROM rides LEFT JOIN drivers ON drivers.id = rides.driver_id

@@ -842,6 +842,7 @@ function complaintRowHTML(c, opts = {}) {
     <div class="rr-ico">💬</div>
     <div class="rr-body">
       <h4>${nameLabel} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
+      ${c.customer_phone ? `<p style="color:var(--muted);font-size:11px;direction:ltr;text-align:right">${c.customer_phone}</p>` : ''}
       <p>${from} ← ${to}</p>
       <p style="color:var(--stop);font-size:11.5px;margin-top:2px">${c.rating?'⭐'.repeat(c.rating)+' ':''}${c.rating_note||''}</p>
     </div>
@@ -1578,7 +1579,7 @@ function printDriverComplaints() {
     const from = isDel ? (c.store_name || c.store_label || '—') : (c.pickup_label || '—');
     const to = c.dest_label || '—';
     const t = c.done_at ? new Date(c.done_at).toLocaleString('ar', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-    return `<tr><td>${t}</td><td>${c.customer_name||'زبون'}</td><td>${from} ← ${to}</td><td>${(c.est_fare||0).toLocaleString()} د.ع</td><td>${c.rating?'⭐'.repeat(c.rating):'—'}</td><td>${c.rating_note||''}</td></tr>`;
+    return `<tr><td>${t}</td><td>${c.customer_name||'زبون'}</td><td style="direction:ltr">${c.customer_phone||'—'}</td><td>${from} ← ${to}</td><td>${(c.est_fare||0).toLocaleString()} د.ع</td><td>${c.rating?'⭐'.repeat(c.rating):'—'}</td><td>${c.rating_note||''}</td></tr>`;
   }).join('');
   const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ملاحظات السائق ${d.name}</title>
     <style>
@@ -1589,7 +1590,7 @@ function printDriverComplaints() {
     </style></head><body>
     <h1>ملاحظات وشكاوى الزبائن — ${d.name}</h1>
     <h2>${d.phone||''} · ${d.car||''} · ${ddData.complaints.length} ملاحظة</h2>
-    <table><tr><th>التاريخ</th><th>الزبون</th><th>المسار</th><th>الأجرة</th><th>التقييم</th><th>الملاحظة</th></tr>
+    <table><tr><th>التاريخ</th><th>الزبون</th><th>الرقم</th><th>المسار</th><th>الأجرة</th><th>التقييم</th><th>الملاحظة</th></tr>
       ${rows}
     </table>
   </body></html>`;
