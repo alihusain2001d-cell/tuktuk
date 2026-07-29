@@ -1,4 +1,7 @@
 // خدمة الإشعارات بالخلفية — تشتغل حتى لو التطبيق مقفل أو التبويب مسكر
+// وجودها مع ملف manifest.json هو اللي يخلي "إضافة للشاشة الرئيسية" تشتغل متل تطبيق حقيقي
+self.addEventListener('fetch', () => {}); // مرّرها للشبكة عادي، ماكو تخزين مؤقت حالياً
+
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}

@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>جايك - السائق</title>
+<meta name="theme-color" content="#FFC800">
+<link rel="icon" href="/logo.png">
+<link rel="manifest" href="/manifest-driver.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="جايك سائق">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
@@ -1654,6 +1661,7 @@ function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContex
 // ============ التشغيل ============
 connectWS();
 loadContactSettings();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (driver) {
   // مسجّل من قبل — نتأكد من حالته
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
