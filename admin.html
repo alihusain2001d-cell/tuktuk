@@ -680,17 +680,7 @@ async function loadComplaints() {
     document.getElementById('complaints-count').textContent = list.length;
     const box = document.getElementById('complaints-list');
     if (!list.length) { box.innerHTML = '<div class="empty" style="padding:22px"><div style="font-size:28px;margin-bottom:6px">😊</div><div style="font-size:12.5px">ماكو ملاحظات حالياً</div></div>'; return; }
-    box.innerHTML = list.map(c => {
-      const stars = c.rating ? '⭐'.repeat(c.rating) : '';
-      const t = c.done_at ? new Date(c.done_at).toLocaleDateString('ar',{month:'short',day:'numeric'}) : '';
-      return `<div class="sub-row">
-        <div class="sr-ico">💬</div>
-        <div class="sr-body">
-          <h4>${c.driver_name || 'سائق'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${c.customer_name || 'زبون'} · ${t}</span></h4>
-          <p>${stars} ${c.rating_note || ''}</p>
-        </div>
-      </div>`;
-    }).join('');
+    box.innerHTML = list.map(c => complaintRowHTML(c, {showDriverName:true})).join('');
   } catch(e) { /* هادئ */ }
 }
 
@@ -839,6 +829,26 @@ function rideRowHTML(r, opts = {}) {
   </div>`;
 }
 
+// صف ملاحظة/شكوى — يبيّن الرحلة المرتبطة (المسار والأجرة) والزبون والتاريخ الكامل، حتى تكون التفاصيل واضحة
+function complaintRowHTML(c, opts = {}) {
+  const isDel = c.type === 'delivery';
+  const from = isDel ? (c.store_name || c.store_label || '—') : (c.pickup_label || '—');
+  const to = c.dest_label || '—';
+  const t = c.done_at ? new Date(c.done_at).toLocaleString('ar', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  const nameLabel = opts.showDriverName
+    ? `${c.driver_name || 'سائق محذوف'} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${c.customer_name||'زبون'}</span>`
+    : (c.customer_name || 'زبون');
+  return `<div class="ride-row">
+    <div class="rr-ico">💬</div>
+    <div class="rr-body">
+      <h4>${nameLabel} <span style="font-weight:400;color:var(--muted);font-size:10.5px">· ${t}</span></h4>
+      <p>${from} ← ${to}</p>
+      <p style="color:var(--stop);font-size:11.5px;margin-top:2px">${c.rating?'⭐'.repeat(c.rating)+' ':''}${c.rating_note||''}</p>
+    </div>
+    <div class="rr-side"><div class="fare">${(c.est_fare||0).toLocaleString()}</div></div>
+  </div>`;
+}
+
 let ddData = null, ddDateFilter = 'all';
 
 async function openDriverDetail(id) {
@@ -885,8 +895,10 @@ function renderDriverDetailModal() {
       <div class="stat-card"><div class="sc-num">${d.rides.filter(r=>r.status==='done').length}</div><div class="sc-label">رحلات منجزة</div></div>
     </div>
     ${d.complaints.length ? `
-      <div class="section-title">😕 الملاحظات عليه <span class="count">${d.complaints.length}</span></div>
-      ${d.complaints.map(c => `<div class="sub-row"><div class="sr-ico">💬</div><div class="sr-body"><h4>${c.customer_name||'زبون'}</h4><p>${c.rating?'⭐'.repeat(c.rating)+' ':''}${c.rating_note}</p></div></div>`).join('')}
+      <div class="section-title">😕 الملاحظات عليه <span class="count">${d.complaints.length}</span>
+        <button class="btn ghost" style="width:auto;padding:6px 12px;font-size:12px;margin-right:auto" onclick="printDriverComplaints()">🖨️ طباعة</button>
+      </div>
+      ${d.complaints.map(c=>complaintRowHTML(c)).join('')}
     ` : ''}
     <div class="section-title">📋 آخر الرحلات <span class="count">${filteredRides.length}</span></div>
     ${dateFilterChipsHTML('dd', ddDateFilter)}
@@ -1541,7 +1553,11 @@ function printDriverStatement() {
       ${data.activations.length ? data.activations.map(a => row(new Date(a.created_at).toLocaleDateString('ar'), a.days+' يوم', (a.amount||0).toLocaleString()+' د.ع')).join('') : '<tr><td colspan="3">ماكو تفعيلات</td></tr>'}
     </table>
   </body></html>`;
-  // نستخدم iframe مخفي بدل نافذة جديدة حتى ما يوقفها حاجب النوافذ المنبثقة بالمتصفح
+  printHTML(html);
+}
+
+// يطبع أي مستند HTML عبر iframe مخفي — بدل نافذة جديدة حتى ما يوقفه حاجب النوافذ المنبثقة بالمتصفح
+function printHTML(html) {
   let iframe = document.getElementById('print-frame');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -1552,6 +1568,32 @@ function printDriverStatement() {
   const doc = iframe.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
   setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); }, 300);
+}
+
+function printDriverComplaints() {
+  if (!ddData || !ddData.complaints || !ddData.complaints.length) return;
+  const d = ddData.driver;
+  const rows = ddData.complaints.map(c => {
+    const isDel = c.type === 'delivery';
+    const from = isDel ? (c.store_name || c.store_label || '—') : (c.pickup_label || '—');
+    const to = c.dest_label || '—';
+    const t = c.done_at ? new Date(c.done_at).toLocaleString('ar', {year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+    return `<tr><td>${t}</td><td>${c.customer_name||'زبون'}</td><td>${from} ← ${to}</td><td>${(c.est_fare||0).toLocaleString()} د.ع</td><td>${c.rating?'⭐'.repeat(c.rating):'—'}</td><td>${c.rating_note||''}</td></tr>`;
+  }).join('');
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>ملاحظات السائق ${d.name}</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif;padding:24px;color:#1A1A1A}
+      h1{font-size:20px;margin-bottom:2px} h2{font-size:14px;color:#666;font-weight:400;margin-bottom:18px}
+      table{width:100%;border-collapse:collapse} th,td{border:1px solid #ccc;padding:8px 10px;font-size:12.5px;text-align:right}
+      th{background:#f4f4f4}
+    </style></head><body>
+    <h1>ملاحظات وشكاوى الزبائن — ${d.name}</h1>
+    <h2>${d.phone||''} · ${d.car||''} · ${ddData.complaints.length} ملاحظة</h2>
+    <table><tr><th>التاريخ</th><th>الزبون</th><th>المسار</th><th>الأجرة</th><th>التقييم</th><th>الملاحظة</th></tr>
+      ${rows}
+    </table>
+  </body></html>`;
+  printHTML(html);
 }
 
 // ============ نافذة قاعدة المكافأة ============
