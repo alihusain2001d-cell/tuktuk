@@ -41,7 +41,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
 app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(path.join(__dirname), { dotfiles: 'allow' })); // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
 
 // ============================================================
 //  الحالة اللحظية (بالذاكرة — طبيعي، هاي مؤقتة)

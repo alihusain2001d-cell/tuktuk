@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.jayak.app",
+    "sha256_cert_fingerprints": ["9E:2E:B6:06:F9:8D:21:92:4D:21:4E:F7:28:5D:7A:D2:0E:50:F8:79:A8:EC:3E:46:6C:0E:25:E2:A2:67:9A:D5"]
+  }
+}]
