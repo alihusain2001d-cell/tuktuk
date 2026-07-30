@@ -589,6 +589,34 @@ app.get('/api/geocode', async (req, res) => {
   }
 });
 
+// خارطة صغيرة ثابتة لعرض مسار رحلة منتهية بسجل الرحلات — بروكسي حتى مفتاح LocationIQ يضل مخفي
+app.get('/api/static-map', async (req, res) => {
+  try {
+    if (!LOCATIONIQ_API_KEY) return res.status(404).end();
+    const from = (req.query.from || '').split(',').map(Number);
+    const to = (req.query.to || '').split(',').map(Number);
+    if (from.length !== 2 || to.length !== 2 || from.some(Number.isNaN) || to.some(Number.isNaN)) {
+      return res.status(400).end();
+    }
+    const [fLat, fLng] = from, [tLat, tLng] = to;
+    const distKm = haversine(fLat, fLng, tLat, tLng);
+    const zoom = distKm < 1 ? 15 : distKm < 2 ? 14 : distKm < 5 ? 13 : distKm < 10 ? 12 : distKm < 20 ? 11 : 10;
+    const centerLat = (fLat + tLat) / 2, centerLng = (fLng + tLng) / 2;
+    const url = `https://maps.locationiq.com/v3/staticmap?key=${LOCATIONIQ_API_KEY}&center=${centerLat},${centerLng}&zoom=${zoom}&size=300x150&format=jpg` +
+      `&markers=icon:small-green-cutout|${fLat},${fLng}&markers=icon:small-red-cutout|${tLat},${tLng}` +
+      `&path=weight:4|color:0x1652F0|${fLat},${fLng}|${tLat},${tLng}`;
+    const imgRes = await fetch(url);
+    if (!imgRes.ok) return res.status(502).end();
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch (e) {
+    console.error('خطأ بخارطة الرحلة المصغّرة:', e.message);
+    res.status(500).end();
+  }
+});
+
 // ============================================================
 //  API — الحجز
 // ============================================================

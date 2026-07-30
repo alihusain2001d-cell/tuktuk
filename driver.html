@@ -287,6 +287,9 @@
 </style>
 </head>
 <body>
+<div id="app-splash" style="position:fixed;inset:0;z-index:99999;background:#FFC800;display:flex;align-items:center;justify-content:center">
+  <img src="/icon-192.png" alt="جايك" style="width:96px;height:96px;border-radius:22px;box-shadow:0 8px 24px rgba(0,0,0,.2)">
+</div>
 <div id="app">
 
   <!-- ========== شاشة البداية: دخول أو حساب جديد ========== -->
@@ -1669,6 +1672,7 @@ if (driver) {
 } else {
   gotoStep('welcome');
 }
+document.getElementById('app-splash')?.remove(); // الشاشة الأولى صارت جاهزة، نشيل شعار التحميل
 </script>
 </body>
 </html>

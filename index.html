@@ -250,6 +250,18 @@
   .trip-item .ti-fare .f { font-size:15px; font-weight:700; color:var(--ink); }
   .trip-item .ti-fare .k { font-size:10.5px; color:var(--muted); }
 
+  .trip-card-map { background:#fff; border:1.5px solid var(--line); border-radius:14px; margin-bottom:10px; overflow:hidden; }
+  .trip-card-map .ti-map { width:100%; height:110px; object-fit:cover; display:block; background:var(--gold-light); }
+  .trip-card-map .ti-row { display:flex; align-items:center; gap:12px; padding:13px 15px; }
+  .trip-card-map .ti-icon { width:42px; height:42px; border-radius:12px; background:var(--gold-light); display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
+  .trip-card-map .ti-body { flex:1; overflow:hidden; }
+  .trip-card-map .ti-body .route { font-size:14px; font-weight:600; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trip-card-map .ti-body .driver { font-size:11px; color:var(--muted); margin-top:2px; }
+  .trip-card-map .ti-body .date { font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .trip-card-map .ti-fare { text-align:left; flex-shrink:0; }
+  .trip-card-map .ti-fare .f { font-size:15px; font-weight:700; color:var(--ink); }
+  .trip-card-map .ti-fare .k { font-size:10.5px; color:var(--muted); }
+
   .reward-card { background:linear-gradient(135deg,var(--brand),var(--brand-dark)); border-radius:18px; padding:26px; text-align:center; color:var(--ink); margin-bottom:16px; }
   .reward-card .rc-title { font-size:20px; font-weight:700; margin-bottom:6px; }
   .reward-card .rc-sub { font-size:13px; opacity:.75; }
@@ -287,6 +299,9 @@
 </style>
 </head>
 <body>
+<div id="app-splash" style="position:fixed;inset:0;z-index:99999;background:#FFC800;display:flex;align-items:center;justify-content:center">
+  <img src="/icon-192.png" alt="جايك" style="width:96px;height:96px;border-radius:22px;box-shadow:0 8px 24px rgba(0,0,0,.2)">
+</div>
 <div id="app">
 
   <!-- ============ تسجيل الدخول ============ -->
@@ -1028,19 +1043,28 @@ function renderTrips() {
     body.innerHTML = bar + `<div class="sp-empty"><div class="ico">🕐</div><h3>سجل رحلاتك</h3><p>${msg}</p></div>`;
     return;
   }
-  body.innerHTML = bar + filtered.map(t => `
-    <div class="trip-item">
-      <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
-      <div class="ti-body">
-        <div class="route">${t.from} ← ${t.to}</div>
-        <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
-      </div>
-      <div class="ti-fare">
-        <div class="f">${t.fare.toLocaleString()} د.ع</div>
-        ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
+  body.innerHTML = bar + filtered.map(t => {
+    const from = t.type === 'delivery' ? t.store : t.pickup;
+    const to = t.type === 'delivery' ? t.pickup : t.destination;
+    const mapUrl = (from && to) ? `/api/static-map?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}` : null;
+    return `
+    <div class="trip-card-map">
+      ${mapUrl ? `<img class="ti-map" src="${mapUrl}" loading="lazy" alt="">` : ''}
+      <div class="ti-row">
+        <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
+        <div class="ti-body">
+          <div class="route">${t.from} ← ${t.to}</div>
+          ${t.driverName ? `<div class="driver">🚗 ${t.driverName}</div>` : ''}
+          <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
+        </div>
+        <div class="ti-fare">
+          <div class="f">${t.fare.toLocaleString()} د.ع</div>
+          ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
+        </div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function loadTrips() {
@@ -1968,6 +1992,7 @@ if (user) {
 } else {
   authStep('welcome');
 }
+document.getElementById('app-splash')?.remove(); // الشاشة الأولى صارت جاهزة، نشيل شعار التحميل
 </script>
 </body>
 </html>

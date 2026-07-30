@@ -643,18 +643,29 @@ async function getCustomerTrips(phone, limit = 30) {
     return [...mem.rides.values()]
       .filter(r => cleanPhone(r.customer?.phone) === clean && r.status === 'done')
       .slice(-limit).reverse()
-      .map(t => ({
-        rideId: t.id, type: t.type,
-        from: t.type === 'delivery' ? (t.storeName || t.store?.label || '—') : (t.pickup.label || '—'),
-        to: t.destination?.label || '—',
-        fare: t.estFare || 0, km: Math.round((t.estKm || 0) * 10) / 10,
-        at: t.done_at ? t.done_at.getTime() : Date.now(),
-      }));
+      .map(t => {
+        const d = t.driverId ? mem.drivers.get(t.driverId) : null;
+        return {
+          rideId: t.id, type: t.type,
+          from: t.type === 'delivery' ? (t.storeName || t.store?.label || '—') : (t.pickup.label || '—'),
+          to: t.destination?.label || '—',
+          fare: t.estFare || 0, km: Math.round((t.estKm || 0) * 10) / 10,
+          at: t.done_at ? t.done_at.getTime() : Date.now(),
+          driverName: d ? d.name : null,
+          pickup: t.pickup ? { lat: t.pickup.lat, lng: t.pickup.lng } : null,
+          destination: t.destination ? { lat: t.destination.lat, lng: t.destination.lng } : null,
+          store: t.store ? { lat: t.store.lat, lng: t.store.lng } : null,
+        };
+      });
   }
   const res = await pool.query(`
-    SELECT id, type, pickup_label, dest_label, store_label, store_name, est_km, est_fare, done_at
-    FROM rides WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1 AND status='done'
-    ORDER BY done_at DESC LIMIT $2;
+    SELECT rides.id, rides.type, rides.pickup_label, rides.dest_label, rides.store_label, rides.store_name,
+           rides.est_km, rides.est_fare, rides.done_at,
+           rides.pickup_lat, rides.pickup_lng, rides.dest_lat, rides.dest_lng, rides.store_lat, rides.store_lng,
+           drivers.name AS driver_name
+    FROM rides LEFT JOIN drivers ON drivers.id = rides.driver_id
+    WHERE regexp_replace(rides.customer_phone, '\\D', '', 'g') = $1 AND rides.status='done'
+    ORDER BY rides.done_at DESC LIMIT $2;
   `, [clean, limit]);
   return res.rows.map(r => ({
     rideId: r.id, type: r.type,
@@ -662,6 +673,10 @@ async function getCustomerTrips(phone, limit = 30) {
     to: r.dest_label || '—',
     fare: r.est_fare || 0, km: Math.round((r.est_km || 0) * 10) / 10,
     at: r.done_at ? new Date(r.done_at).getTime() : Date.now(),
+    driverName: r.driver_name || null,
+    pickup: r.pickup_lat != null ? { lat: r.pickup_lat, lng: r.pickup_lng } : null,
+    destination: r.dest_lat != null ? { lat: r.dest_lat, lng: r.dest_lng } : null,
+    store: r.store_lat != null ? { lat: r.store_lat, lng: r.store_lng } : null,
   }));
 }
 
