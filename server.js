@@ -1368,6 +1368,51 @@ app.get('/api/ride/:id', (req, res) => {
   res.json(ride);
 });
 
+// الرحلة النشطة الحالية للسائق — تفيد لما يسكّر التطبيق ويرجع يفتحه ورحلته لسا مستمرة
+app.get('/api/driver/:id/active-ride', (req, res) => {
+  for (const ride of activeRides.values()) {
+    if (ride.driverId === req.params.id && ['accepted', 'arrived', 'started'].includes(ride.status)) {
+      return res.json({
+        rideId: ride.id, status: ride.status, type: ride.type,
+        pickup: ride.pickup, destination: ride.destination, store: ride.store,
+        storeName: ride.storeName, itemDesc: ride.itemDesc,
+        estFare: ride.estFare, customer: ride.customer,
+      });
+    }
+  }
+  res.json(null);
+});
+
+// الرحلة النشطة الحالية للزبون — نفس الفكرة، وتحدّث socketId الزبون بالسوكت الجديد
+app.get('/api/customer/:phone/active-ride', async (req, res) => {
+  try {
+    const clean = req.params.phone.replace(/\D/g, '');
+    for (const ride of activeRides.values()) {
+      if (ride.customer?.phone && ride.customer.phone.replace(/\D/g, '') === clean &&
+          ['searching', 'offered', 'accepted', 'arrived', 'started'].includes(ride.status)) {
+        if (req.query.socketId) ride.customerSocketId = req.query.socketId;
+        let driver = null;
+        if (ride.driverId) {
+          const dRec = await db.getDriver(ride.driverId);
+          const online = onlineDrivers.get(ride.driverId);
+          driver = dRec ? {
+            name: dRec.name, phone: dRec.phone, car: dRec.car, photo: dRec.photo_self,
+            lat: online?.lat, lng: online?.lng,
+          } : null;
+        }
+        return res.json({
+          rideId: ride.id, status: ride.status, type: ride.type,
+          pickup: ride.pickup, destination: ride.destination, store: ride.store,
+          storeName: ride.storeName, itemDesc: ride.itemDesc,
+          estFare: ride.estFare, offerPrice: ride.offerPrice, offerNote: ride.offerNote,
+          driver,
+        });
+      }
+    }
+    res.json(null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // تقييم الزبون للرحلة بعد ما تخلص
 app.post('/api/ride/:id/rate', async (req, res) => {
   try {

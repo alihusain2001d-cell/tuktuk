@@ -970,8 +970,9 @@ function showMainApp(acc) {
     banner.classList.add('active');
     banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
   }
-  setTimeout(() => {
+  setTimeout(async () => {
     if (!map) initMap(); else map.invalidateSize();
+    await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
     startWorking(); // السائق دائماً شغّال
   }, 80);
 }
@@ -1053,7 +1054,7 @@ function initMap() {
   map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
   L.control.zoom({ position:'topright' }).addTo(map);
-  const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🚗</div>', iconSize:[0,0] });
+  const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🛺</div>', iconSize:[0,0] });
   meMarker = L.marker(myPos, { icon, interactive:false }).addTo(map);
 
   // الضغط على الخريطة يكبّرها
@@ -1470,6 +1471,36 @@ async function acceptRide(id) {
     pendingRides.clear();
     showActiveRide(out, r);
   } catch(e) { toast('صار خطأ'); }
+}
+
+// السائق سكّر التطبيق أو الجهاز انطفت شاشته وياه رحلة نشطة — نرجّعها بمجرد ما يفتح التطبيق من جديد
+async function resumeActiveRide() {
+  try {
+    const res = await fetch(`/api/driver/${driverId}/active-ride`);
+    const ride = await res.json();
+    if (!ride) return false;
+    activeRide = {
+      rideId: ride.rideId, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+      store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc, customer: ride.customer,
+    };
+    customerPhone = (ride.customer && ride.customer.phone) || '';
+    pendingRides.clear();
+    showActiveRide({ customer: ride.customer, estFare: ride.estFare }, ride);
+    // showActiveRide تفترض بداية رحلة جديدة (مرحلة leg1) — نطابقها هسه مع الحالة الفعلية المسترجعة
+    if (ride.status === 'arrived') {
+      activeRide.phase = 'waiting';
+      document.getElementById('ar-arrived-btn').classList.add('hidden');
+      document.getElementById('ar-waiting-actions').classList.remove('hidden');
+    } else if (ride.status === 'started') {
+      activeRide.phase = 'leg2';
+      document.getElementById('ar-arrived-btn').classList.add('hidden');
+      document.getElementById('ar-waiting-actions').classList.add('hidden');
+    }
+    routeFitDone = false;
+    lastRouteFetch = 0; // showActiveRide رسمت مسار المرحلة الأولى، نجبر تحديث فوري للمرحلة الصحيحة
+    drawRoute();
+    return true;
+  } catch (e) { return false; }
 }
 
 function showActiveRide(out, r) {

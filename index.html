@@ -897,6 +897,7 @@ function showApp() {
   dhAvatar.innerHTML = user.photo ? `<img src="${user.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover">` : user.name.charAt(0);
   checkRewardBanner();
   setupPushNotifications();
+  resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها
 }
 
 // ============ إشعارات المتصفح (Web Push) ============
@@ -1774,7 +1775,38 @@ function goSearching(type, notified) {
   setTimeout(() => { if (!mapS) mapS = makeMap('map-s',null); else mapS.invalidateSize(); }, 60);
 }
 
+// الزبون سكّر التطبيق أو انقفلت الشاشة وياه رحلة نشطة — نرجّعها بمجرد ما يفتحه من جديد
+async function resumeActiveRide() {
+  if (!user) return false;
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/active-ride?socketId=${encodeURIComponent(socketId||'')}`);
+    const ride = await res.json();
+    if (!ride) return false;
+    currentRide = ride.rideId;
+    currentType = ride.type;
+    pickup = ride.pickup;
+    destination = ride.destination;
+    store = ride.store || null;
+    deliveryInfo = { storeName: ride.storeName || '', itemDesc: ride.itemDesc || '' };
+    document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
+    ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer','flow-rate'].forEach(id => document.getElementById(id).classList.remove('active'));
+
+    if (ride.status === 'searching') {
+      goSearching(ride.type, 0);
+    } else if (ride.status === 'offered') {
+      if (ride.driver) onOfferReceived({ rideId: ride.rideId, price: ride.offerPrice, note: ride.offerNote, etaMin: 0, driver: ride.driver });
+      else goSearching(ride.type, 0);
+    } else if (['accepted', 'arrived', 'started'].includes(ride.status)) {
+      onDriverAccepted({ driver: ride.driver || {}, etaMin: 0 });
+      if (ride.status === 'arrived') onArrived();
+      else if (ride.status === 'started') onTripStarted();
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
 function onDriverAccepted(data) {
+  driverHeadingToDestination = false; // رحلة جديدة (أو استرجاع رحلة) — نبدأ من مرحلة التوجه لنقطة الالتقاء
   document.getElementById('flow-searching').classList.remove('active');
   document.getElementById('flow-offer').classList.remove('active');
   document.getElementById('flow-driver').classList.add('active');
@@ -1802,7 +1834,7 @@ function placeDriver(lat, lng) {
     className: '', iconSize: [0,0],
     html: `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%)">
       <div style="background:#1A1A1A;color:#fff;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:8px;white-space:nowrap;margin-bottom:3px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${name}</div>
-      <div style="font-size:30px;line-height:1">🚗</div>
+      <div style="font-size:30px;line-height:1">🛺</div>
     </div>`,
   });
   if (driverMarker) mapT.removeLayer(driverMarker);
@@ -1813,9 +1845,12 @@ function onDriverMoved(data) { if (mapT) { placeDriver(data.lat, data.lng); draw
 
 let lastDriverRouteFetch = 0;
 
+let driverHeadingToDestination = false; // تصير true بعد ما يبدأ السائق الرحلة (الزبون طلع/استلم الطلب)
+
 async function drawDriverRoute(dlat, dlng) {
-  // الرحلة: السائق يجي لنقطة الانطلاق | التوصيل: السائق يجي لموقع الزبون
-  const target = currentType === 'ride' ? pickup : destination;
+  // قبل ما يبدأ: يجي لنقطة الانطلاق (أو المحل بالتوصيل). بعد ما يبدأ: يروح للوجهة (أو للزبون بالتوصيل)
+  const isDel = currentType === 'delivery';
+  const target = driverHeadingToDestination ? (isDel ? pickup : destination) : (isDel ? store : pickup);
   if (!target || !mapT) return;
 
   const tIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">🟢</div>`, iconSize:[0,0] });
@@ -1850,6 +1885,8 @@ function onTripStarted() {
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
   document.getElementById('driver-status').textContent = 'بالطريق للوجهة 🚗';
+  driverHeadingToDestination = true;
+  lastDriverRouteFetch = 0; // نجبر تحديث فوري لمسار الوجهة الجديدة
 }
 
 function onDone(data) {
@@ -1947,6 +1984,7 @@ function resetAll() {
   currentRide = null; driverPhone=''; currentOffer = null;
   pickup = null; destination = null; store = null;
   deliveryInfo = { storeName:'', itemDesc:'' };
+  driverHeadingToDestination = false;
   ['flow-searching','flow-driver','flow-ride','flow-delivery','flow-offer','flow-rate'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('arrived-box').classList.add('hidden');
   document.getElementById('status-strip').classList.remove('hidden');
