@@ -156,7 +156,7 @@ wss.on('connection', (ws) => {
           const d = onlineDrivers.get(ws._driverId);
           if (d) { d.lat = data.lat; d.lng = data.lng; }
           for (const ride of activeRides.values()) {
-            if (ride.driverId === ws._driverId && ['accepted','arriving'].includes(ride.status)) {
+            if (ride.driverId === ws._driverId && ['accepted','arrived','started'].includes(ride.status)) {
               sendTo(ride.customerSocketId, 'driver:moved', { lat: data.lat, lng: data.lng });
             }
           }
@@ -823,7 +823,7 @@ app.post('/api/offer', async (req, res) => {
       etaMin,
       driver: {
         name: driver.name, phone: driver.phone, car: driver.car,
-        photo: dRec ? dRec.photo_self : null,
+        photo: dRec ? dRec.photo_self : null, lat: driver.lat, lng: driver.lng,
       },
     });
     pushToCustomer(ride.customer.phone, { title: '💬 وصلك عرض سعر', body: `${driver.name} عرض ${p.toLocaleString()} د.ع لطلبك`, url: '/index.html' });

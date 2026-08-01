@@ -1074,18 +1074,22 @@ function toggleMapFull(full) {
   const wv = document.getElementById('work-view');
   wv.classList.toggle('map-full', full);
   if (full) updateMapMini();
-  // نعيد حساب حجم الخريطة بعد الحركة
-  setTimeout(() => {
-    if (!map) return;
-    map.invalidateSize();
-    // لو أكو مسار، نركّز عليه
-    if (routeLine) map.fitBounds(routeLine.getBounds(), { padding: full ? [60,60] : [50,50], maxZoom:16 });
-  }, 320);
+  // نعيد حساب حجم الخريطة بعد الحركة (بس ما نغيّر تكبير الملاحة القريب اللي السائق متابعه)
+  setTimeout(() => { if (map) map.invalidateSize(); }, 320);
 }
 
 // بطاقة المعلومات الصغيرة بوضع الخريطة الكاملة
 function updateMapMini() {
   const mini = document.getElementById('map-mini');
+  if (!activeRide && offeredRide) {
+    // بانتظار رد الزبون على عرض السعر — نبين هذا حتى لو الخريطة مكبّرة، حتى ما يضيع السائق التتبع
+    document.getElementById('mm-icon').textContent = '⏳';
+    document.getElementById('mm-title').textContent = 'بانتظار رد الزبون';
+    document.getElementById('mm-sub').textContent = 'أرسلت عرضك، ننتظر الموافقة...';
+    document.getElementById('mm-fare').textContent = offeredRide.price ? offeredRide.price.toLocaleString() + ' د.ع' : '';
+    mini.classList.add('show');
+    return;
+  }
   if (!activeRide) { mini.classList.remove('show'); return; }
   const isDel = activeRide.type === 'delivery';
   document.getElementById('mm-icon').textContent = isDel ? '🛒' : '🚗';
@@ -1540,10 +1544,15 @@ function showActiveRide(out, r) {
   }
   document.getElementById('ar-route').innerHTML = html + (isDel && r.itemDesc ? `<div class="item-box" style="margin-top:8px;margin-bottom:0">📦 <b>الطلب:</b> ${r.itemDesc}</div>` : '');
 
-  const pIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">${isDel?'🏪':'🟢'}</div>`, iconSize:[0,0] });
+  // بالتوصيل: المحل نقطة أولى (🏪) وعنوان الزبون نقطة وصول (🔴) — بالرحلة العادية: الانطلاق (🟢) والوجهة (🔴)
+  const pIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">${isDel?'🔴':'🟢'}</div>`, iconSize:[0,0] });
   if (pickupMarker) map.removeLayer(pickupMarker);
   pickupMarker = L.marker([r.pickup.lat, r.pickup.lng], { icon:pIcon, interactive:false }).addTo(map);
-  if (r.destination) {
+  if (isDel && r.store) {
+    const sIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🏪</div>', iconSize:[0,0] });
+    if (destMarker) map.removeLayer(destMarker);
+    destMarker = L.marker([r.store.lat, r.store.lng], { icon:sIcon, interactive:false }).addTo(map);
+  } else if (r.destination) {
     const dIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🔴</div>', iconSize:[0,0] });
     if (destMarker) map.removeLayer(destMarker);
     destMarker = L.marker([r.destination.lat, r.destination.lng], { icon:dIcon, interactive:false }).addTo(map);
