@@ -717,12 +717,6 @@ let ws, socketId = null, currentRide = null, driverPhone = '', currentType = 'ri
 let mapR, mapD, mapS, mapT;
 let driverMarker, routeLine, pkMarker, dsMarker, stMarker;
 
-// خريطة داكنة لشاشة تتبع السائق (متل خرائط الملاحة) — نرجع تلقائياً لخرائط OpenStreetMap لو المفتاح مو موجود
-let mapTileConfig = { enabled: false, tileKey: null };
-async function loadMapConfig() {
-  try { mapTileConfig = await fetch('/api/map-config').then(r => r.json()); } catch (e) {}
-}
-
 // نقاط
 let pickup = null, destination = null, store = null;
 let searchMode = null, searchFlow = null;
@@ -1415,13 +1409,9 @@ function exitFlow() {
 }
 
 // ============ الخرائط ============
-function makeMap(elId, flow, dark) {
+function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
-  if (dark && mapTileConfig.enabled && mapTileConfig.tileKey) {
-    L.tileLayer(`https://{s}-tiles.locationiq.com/v3/dark/r/{z}/{x}/{y}.png?key=${mapTileConfig.tileKey}`, { maxZoom:19, subdomains:'abc' }).addTo(m);
-  } else {
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(m);
-  }
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(m);
   L.control.zoom({ position:'topright' }).addTo(m);
   // الضغط على الخريطة يحدد النقطة مباشرة
   m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
@@ -1832,7 +1822,7 @@ function onDriverAccepted(data) {
   document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السائق رايح يجيب طلبك' : 'السائق بالطريق إلك';
   document.getElementById('cancel-ride-btn').classList.remove('hidden');
   setTimeout(() => {
-    if (!mapT) mapT = makeMap('map-t',null,true); else mapT.invalidateSize();
+    if (!mapT) mapT = makeMap('map-t',null); else mapT.invalidateSize();
     if (d.lat && d.lng) { placeDriver(d.lat, d.lng); drawDriverRoute(d.lat, d.lng); }
   }, 60);
   toast(`${d.name} قبل طلبك! 🎉`);
@@ -2032,7 +2022,6 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 // ============ التشغيل ============
 connectWS();
 loadFareSettings();
-loadMapConfig();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (user) {
   // مسجّل من قبل — ادخل مباشرة

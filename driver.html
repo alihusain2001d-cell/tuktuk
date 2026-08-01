@@ -599,19 +599,8 @@ async function loadContactSettings() {
   try { contactSettings = await fetch('/api/contact-settings').then(r => r.json()); } catch (e) {}
 }
 
-// خريطة داكنة أوضح للسائق وهو يسوق (متل خرائط الملاحة) — نرجع تلقائياً لخرائط OpenStreetMap لو المفتاح مو موجود
-let mapTileConfig = { enabled: false, tileKey: null };
-async function loadMapConfig() {
-  try { mapTileConfig = await fetch('/api/map-config').then(r => r.json()); } catch (e) {}
-}
 function addTileLayer(m) {
-  if (mapTileConfig.enabled && mapTileConfig.tileKey) {
-    L.tileLayer(`https://{s}-tiles.locationiq.com/v3/dark/r/{z}/{x}/{y}.png?key=${mapTileConfig.tileKey}`, {
-      maxZoom: 19, subdomains: 'abc',
-    }).addTo(m);
-  } else {
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
-  }
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
 }
 
 let map, meMarker, pickupMarker, destMarker, routeLine;
@@ -986,7 +975,6 @@ function showMainApp(acc) {
     banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
   }
   setTimeout(async () => {
-    await mapConfigPromise;
     if (!map) initMap(); else map.invalidateSize();
     await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
     startWorking(); // السائق دائماً شغّال
@@ -1712,7 +1700,6 @@ function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContex
 // ============ التشغيل ============
 connectWS();
 loadContactSettings();
-const mapConfigPromise = loadMapConfig();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (driver) {
   // مسجّل من قبل — نتأكد من حالته
