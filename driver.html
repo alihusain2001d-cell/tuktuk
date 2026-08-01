@@ -599,6 +599,21 @@ async function loadContactSettings() {
   try { contactSettings = await fetch('/api/contact-settings').then(r => r.json()); } catch (e) {}
 }
 
+// خريطة داكنة أوضح للسائق وهو يسوق (متل خرائط الملاحة) — نرجع تلقائياً لخرائط OpenStreetMap لو المفتاح مو موجود
+let mapTileConfig = { enabled: false, tileKey: null };
+async function loadMapConfig() {
+  try { mapTileConfig = await fetch('/api/map-config').then(r => r.json()); } catch (e) {}
+}
+function addTileLayer(m) {
+  if (mapTileConfig.enabled && mapTileConfig.tileKey) {
+    L.tileLayer(`https://{s}-tiles.locationiq.com/v3/dark/r/{z}/{x}/{y}.png?key=${mapTileConfig.tileKey}`, {
+      maxZoom: 19, subdomains: 'abc',
+    }).addTo(m);
+  } else {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+  }
+}
+
 let map, meMarker, pickupMarker, destMarker, routeLine;
 let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
 let driver = JSON.parse(localStorage.getItem('jayak_driver') || 'null');
@@ -971,6 +986,7 @@ function showMainApp(acc) {
     banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
   }
   setTimeout(async () => {
+    await mapConfigPromise;
     if (!map) initMap(); else map.invalidateSize();
     await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
     startWorking(); // السائق دائماً شغّال
@@ -1052,7 +1068,7 @@ let mapFull = false;
 
 function initMap() {
   map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+  addTileLayer(map);
   L.control.zoom({ position:'topright' }).addTo(map);
   const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🛺</div>', iconSize:[0,0] });
   meMarker = L.marker(myPos, { icon, interactive:false }).addTo(map);
@@ -1588,9 +1604,10 @@ async function drawRoute() {
   } else {
     routeLine = L.polyline([[myPos.lat,myPos.lng],[target.lat,target.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
   }
-  // أول مرة نرسم المسار نكبّر عليه بالكامل، وبعدها نتابع موقع السائق بدون ما نغيّر التكبير اللي هو مسويه بإيده
+  // متل خرائط الملاحة: نضل مقرّبين على موقع السائق (مو نكبّر لنشوف المسار كله)، ونتابع بدون ما نغيّر تكبيره اليدوي
+  const NAV_ZOOM = 17;
   if (!routeFitDone) {
-    map.fitBounds(routeLine.getBounds(), { padding: mapFull ? [70,70] : [50,50], maxZoom:17 });
+    map.setView([myPos.lat, myPos.lng], NAV_ZOOM);
     routeFitDone = true;
   } else {
     map.panTo([myPos.lat, myPos.lng], { animate: true });
@@ -1695,6 +1712,7 @@ function beep(){ try{ const c=new (window.AudioContext||window.webkitAudioContex
 // ============ التشغيل ============
 connectWS();
 loadContactSettings();
+const mapConfigPromise = loadMapConfig();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (driver) {
   // مسجّل من قبل — نتأكد من حالته

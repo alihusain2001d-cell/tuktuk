@@ -563,6 +563,9 @@ app.delete('/api/customer/:phone/places/:id', async (req, res) => {
   }
 });
 
+// مفتاح خرائط LocationIQ للاستخدام المباشر بالمتصفح (بلاطات الخريطة) — مفتاح عام مقصود يكون ظاهر، مثل مفاتيح Google Maps JS
+app.get('/api/map-config', (req, res) => res.json({ tileKey: LOCATIONIQ_API_KEY, enabled: !!LOCATIONIQ_API_KEY }));
+
 // البحث عن موقع بالاسم — Google Places لو مفعّل، وإلا OpenStreetMap تلقائياً بدون ما ينكسر البحث
 app.get('/api/geocode', async (req, res) => {
   try {
