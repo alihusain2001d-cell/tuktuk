@@ -67,6 +67,9 @@
 
   .section-title { font-size:15px; font-weight:700; margin:20px 0 12px; display:flex; align-items:center; gap:8px; }
   .section-title .count { background:var(--sky-light); color:var(--ink); font-size:11px; padding:2px 9px; border-radius:12px; }
+  .section-title.home-link { cursor:pointer; background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:14px 16px; margin:12px 0 0; }
+  .section-title.home-link:active { background:var(--sky-pale); }
+  .home-link-arrow { margin-right:auto; color:var(--muted); font-size:18px; }
 
   /* ===== بطاقة السائق (مضغوطة) ===== */
   .driver-card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:10px; }
@@ -263,19 +266,13 @@
     <div class="section-title">🆕 سواق جدد بانتظار الموافقة <span class="count" id="pending-approval-count">0</span></div>
     <div id="pending-approval-list"></div>
 
-    <div class="section-title">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span></div>
-    <div id="need-activation"></div>
+    <div class="section-title home-link" onclick="openListDetail('need')">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span><span class="home-link-arrow">‹</span></div>
 
-    <div class="section-title">🎉 وصلوا للمكافأة <span class="count" id="rewards-count">0</span></div>
-    <div id="rewards-alert"></div>
+    <div class="section-title home-link" onclick="openListDetail('rewards')">🎉 وصلوا للمكافأة <span class="count" id="rewards-count">0</span><span class="home-link-arrow">‹</span></div>
 
-    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span>
-      <button class="btn ghost" style="width:auto;padding:6px 12px;font-size:12px;margin-right:auto" onclick="openRewardStatement()">📋 كشف تفصيلي</button>
-    </div>
-    <div id="payouts-list"></div>
+    <div class="section-title home-link" onclick="openRewardStatement()">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span><span class="home-link-arrow">‹</span></div>
 
-    <div class="section-title">🧾 آخر التفعيلات <span class="count" id="subs-count">0</span></div>
-    <div id="subs-list"></div>
+    <div class="section-title home-link" onclick="openListDetail('subs')">🧾 آخر التفعيلات <span class="count" id="subs-count">0</span><span class="home-link-arrow">‹</span></div>
   </div>
 
   <!-- ===== السواق ===== -->
@@ -553,6 +550,30 @@
   </div>
 </div>
 
+<!-- نافذة قوائم الصفحة الرئيسية (محتاجين تفعيل / وصلوا للمكافأة / آخر التفعيلات) -->
+<div class="modal-bg" id="list-detail-modal">
+  <div class="modal detail-modal" style="max-width:480px">
+    <button class="modal-x" onclick="closeListDetail()">✕</button>
+    <div class="detail-modal-body">
+      <h3 id="ld-title" style="font-size:17px;margin-bottom:14px">—</h3>
+      <input type="text" id="ld-search" placeholder="بحث بالاسم أو رقم الموبايل..." oninput="filterListDetail()"
+        style="width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div style="flex:1">
+          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+          <input type="date" id="ld-from" onchange="filterListDetail()" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+          <input type="date" id="ld-to" onchange="filterListDetail()" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
+        </div>
+      </div>
+      <div id="ld-count" style="font-size:11.5px;color:var(--muted);margin-bottom:8px"></div>
+      <div id="ld-results"></div>
+    </div>
+  </div>
+</div>
+
 <!-- نافذة المستمسكات -->
 <div class="modal-bg" id="docs-modal">
   <div class="modal">
@@ -639,28 +660,24 @@ async function loadStats() {
 }
 
 // سجل التفعيلات
+let allSubs = [];
 async function loadSubs() {
   try {
     const data = await api('/api/admin/subscriptions').then(r=>r.json());
-    const list = data.list || [];
-    document.getElementById('subs-count').textContent = list.length;
-    const box = document.getElementById('subs-list');
-    if (!list.length) {
-      box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:30px;margin-bottom:6px">🧾</div><div style="font-size:12.5px">لسه ماكو تفعيلات</div></div>';
-      return;
-    }
-    box.innerHTML = list.slice(0, 20).map(s => {
-      const t = new Date(s.created_at).toLocaleString('ar', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-      return `<div class="sub-row">
-        <div class="sr-ico">💳</div>
-        <div class="sr-body">
-          <h4>${s.driver_name || '—'}</h4>
-          <p>${s.days} يوم · ${t}${s.note ? ' · '+s.note : ''}</p>
-        </div>
-        <div class="sr-amt ${s.amount ? '' : 'free'}">${s.amount ? s.amount.toLocaleString()+' د.ع' : 'مجاناً'}</div>
-      </div>`;
-    }).join('');
+    allSubs = data.list || [];
+    document.getElementById('subs-count').textContent = allSubs.length;
   } catch(e) { /* هادئ */ }
+}
+function subRowHTML(s) {
+  const t = new Date(s.created_at).toLocaleString('ar', {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return `<div class="sub-row">
+    <div class="sr-ico">💳</div>
+    <div class="sr-body">
+      <h4>${s.driver_name || '—'}</h4>
+      <p>${s.days} يوم · ${t}${s.note ? ' · '+s.note : ''}</p>
+    </div>
+    <div class="sr-amt ${s.amount ? '' : 'free'}">${s.amount ? s.amount.toLocaleString()+' د.ع' : 'مجاناً'}</div>
+  </div>`;
 }
 
 // ============ السواق ============
@@ -1007,9 +1024,6 @@ async function unbanCustomerNow(phone) {
 function renderNeedActivation() {
   const need = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review');
   document.getElementById('need-count').textContent = need.length;
-  const box = document.getElementById('need-activation');
-  if (!need.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:32px;margin-bottom:8px">✅</div><div style="font-size:13px">كل السواق مفعّلين</div></div>'; return; }
-  box.innerHTML = need.map(driverCard).join('');
 }
 
 function renderPendingApproval() {
@@ -1264,16 +1278,15 @@ async function renderRewardRuleSub() {
 function renderRewardsAlert() {
   const auto = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto');
   document.getElementById('rewards-count').textContent = auto.length;
-  const box = document.getElementById('rewards-alert');
-  if (!auto.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:30px;margin-bottom:6px">🎉</div><div style="font-size:12.5px">ماكو زبائن وصلوا للمكافأة حالياً</div></div>'; return; }
-  box.innerHTML = auto.map(c => `
-    <div class="sub-row">
-      <div class="sr-ico">🎉</div>
-      <div class="sr-body">
-        <h4>${c.name}</h4>
-        <p>${c.tripsDone} رحلة · ${REWARD_LABEL(c.pendingReward)}</p>
-      </div>
-    </div>`).join('');
+}
+function rewardAlertRowHTML(c) {
+  return `<div class="sub-row">
+    <div class="sr-ico">🎉</div>
+    <div class="sr-body">
+      <h4>${c.name}</h4>
+      <p>${c.tripsDone} رحلة · ${REWARD_LABEL(c.pendingReward)}</p>
+    </div>
+  </div>`;
 }
 
 // ============ إعدادات الأجرة ============
@@ -1361,28 +1374,61 @@ async function loadPayouts() {
   try {
     const list = await api('/api/admin/reward-payouts').then(r=>r.json());
     document.getElementById('payouts-count').textContent = list.length;
-    const box = document.getElementById('payouts-list');
-    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:30px;margin-bottom:6px">✅</div><div style="font-size:12.5px">ماكو مستحقات معلّقة</div></div>'; return; }
-    box.innerHTML = list.map(p => `
-      <div class="sub-row">
-        <div class="sr-ico">💸</div>
-        <div class="sr-body">
-          <h4>${p.driver_name || 'سائق'}</h4>
-          <p>مكافأة زبون · ${new Date(p.used_at).toLocaleDateString('ar',{month:'short',day:'numeric'})}</p>
-        </div>
-        <div class="sr-amt">${(p.driver_payout||0).toLocaleString()} د.ع</div>
-        <button class="btn go" style="margin-right:8px" onclick="settlePayout(${p.id})">دفعت ✅</button>
-      </div>`).join('');
   } catch(e) { /* هادئ */ }
 }
 
-async function settlePayout(id) {
-  if (!confirm('تأكد إنك دفعت هذا المبلغ للسائق نقدي؟')) return;
-  try {
-    await api(`/api/admin/reward-payouts/${id}/settle`, { method:'POST' });
-    toast('انسجّل الدفع ✅');
-    loadPayouts();
-  } catch(e) { toast('صار خطأ'); }
+// ============ نافذة قوائم الصفحة الرئيسية (بحث بالاسم/الرقم + تاريخ من-إلى) ============
+let ldType = null, ldData = [];
+const LD_TITLES = { need: '⚠️ محتاجين تفعيل', rewards: '🎉 وصلوا للمكافأة', subs: '🧾 آخر التفعيلات' };
+
+function openListDetail(type) {
+  ldType = type;
+  document.getElementById('ld-search').value = '';
+  document.getElementById('ld-from').value = '';
+  document.getElementById('ld-to').value = '';
+  document.getElementById('ld-title').textContent = LD_TITLES[type] || '';
+  document.getElementById('list-detail-modal').classList.add('show');
+
+  if (type === 'need') {
+    ldData = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review')
+      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d }));
+  } else if (type === 'rewards') {
+    ldData = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto')
+      .map(c => ({ name: c.name, phone: c.phone, at: c.pendingReward.created_at, raw: c }));
+  } else if (type === 'subs') {
+    ldData = allSubs.map(s => ({ name: s.driver_name, phone: s.driver_phone, at: s.created_at, raw: s }));
+  }
+  filterListDetail();
+}
+function closeListDetail() { document.getElementById('list-detail-modal').classList.remove('show'); }
+
+function filterListDetail() {
+  const q = document.getElementById('ld-search').value.trim().toLowerCase();
+  const fromVal = document.getElementById('ld-from').value;
+  const toVal = document.getElementById('ld-to').value;
+  const from = fromVal ? new Date(fromVal) : null;
+  const to = toVal ? new Date(new Date(toVal).getTime() + 86400000) : null;
+
+  const filtered = ldData.filter(item => {
+    if (q) {
+      const nameMatch = (item.name || '').toLowerCase().includes(q);
+      const phoneMatch = (item.phone || '').includes(q);
+      if (!nameMatch && !phoneMatch) return false;
+    }
+    if ((from || to) && item.at) {
+      const d = new Date(item.at);
+      if (from && d < from) return false;
+      if (to && d >= to) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('ld-count').textContent = `${filtered.length} من ${ldData.length}`;
+  const box = document.getElementById('ld-results');
+  if (!filtered.length) { box.innerHTML = '<div class="empty" style="padding:20px">ماكو نتائج</div>'; return; }
+  if (ldType === 'need') box.innerHTML = filtered.map(x => driverCard(x.raw)).join('');
+  else if (ldType === 'rewards') box.innerHTML = filtered.map(x => rewardAlertRowHTML(x.raw)).join('');
+  else if (ldType === 'subs') box.innerHTML = filtered.map(x => subRowHTML(x.raw)).join('');
 }
 
 // ============ كشف مستحقات المكافآت (تفصيلي بفلترة تاريخ وسائق) ============

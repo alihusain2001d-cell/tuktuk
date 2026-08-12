@@ -422,10 +422,17 @@ async function getSubscriptionRevenue() {
 
 // سجل الاشتراكات المدفوعة
 async function getSubscriptions(limit = 100) {
-  if (!HAS_DB) return (mem.subs || []).slice().reverse().slice(0, limit);
-  const res = await pool.query(
-    `SELECT * FROM subscriptions ORDER BY created_at DESC LIMIT $1`, [limit]
-  );
+  if (!HAS_DB) {
+    return (mem.subs || []).slice().reverse().slice(0, limit).map(s => {
+      const d = mem.drivers.get(s.driver_id);
+      return { ...s, driver_phone: d ? d.phone : null };
+    });
+  }
+  const res = await pool.query(`
+    SELECT subscriptions.*, drivers.phone AS driver_phone
+    FROM subscriptions LEFT JOIN drivers ON drivers.id = subscriptions.driver_id
+    ORDER BY subscriptions.created_at DESC LIMIT $1;
+  `, [limit]);
   return res.rows;
 }
 
@@ -1173,10 +1180,13 @@ async function getPendingAutoRewardsCount() {
 // مستحقات السواق غير المدفوعة من المكافآت
 async function getDriverPayouts() {
   if (!HAS_DB) {
-    return (mem.rewards || []).filter(r => r.status === 'used' && !r.payout_settled).slice().reverse();
+    return (mem.rewards || []).filter(r => r.status === 'used' && !r.payout_settled).slice().reverse().map(r => {
+      const d = mem.drivers.get(r.driver_id);
+      return { ...r, driver_phone: d ? d.phone : null };
+    });
   }
   const res = await pool.query(`
-    SELECT cr.*, d.name AS driver_name FROM customer_rewards cr
+    SELECT cr.*, d.name AS driver_name, d.phone AS driver_phone FROM customer_rewards cr
     LEFT JOIN drivers d ON d.id = cr.driver_id
     WHERE cr.status='used' AND cr.payout_settled=false
     ORDER BY cr.used_at DESC;
