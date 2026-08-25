@@ -123,6 +123,21 @@
   .search-box .clr { position:absolute; left:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:17px; cursor:pointer; padding:4px 8px; display:none; }
   .search-box .clr.show { display:block; }
 
+  /* منتقي السائق بالبحث — بديل القائمة المنسدلة، حتى لما يصير عدد السواق كبير */
+  .picker { position:relative; margin-bottom:12px; }
+  .picker input { width:100%; padding:10px 12px 10px 34px; border:1.5px solid var(--line); border-radius:10px;
+    font-family:inherit; font-size:13px; background:#fff; color:var(--ink); }
+  .picker input:focus { outline:none; border-color:var(--sky); }
+  .picker .picker-clr { position:absolute; left:6px; top:50%; transform:translateY(-50%); background:none; border:none;
+    color:var(--muted); font-size:16px; cursor:pointer; padding:4px 8px; }
+  .picker-list { position:absolute; top:100%; right:0; left:0; z-index:60; background:#fff; border:1.5px solid var(--line);
+    border-radius:10px; margin-top:4px; max-height:230px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.12); display:none; }
+  .picker-list.open { display:block; }
+  .picker-opt { padding:10px 12px; font-size:13px; cursor:pointer; border-bottom:1px solid var(--line); }
+  .picker-opt:last-child { border-bottom:none; }
+  .picker-opt:active { background:var(--sky-pale); }
+  .picker-opt .po-phone { font-size:11px; color:var(--muted); direction:ltr; text-align:right; }
+
   .dc-actions { display:flex; gap:7px; flex-wrap:wrap; }
   .btn { padding:9px 13px; border:none; border-radius:10px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit; transition:transform .08s; }
   .btn:active { transform:scale(.96); }
@@ -310,6 +325,11 @@
 
   <!-- ===== الطلبات ===== -->
   <div class="view" id="view-rides">
+    <div class="search-box">
+      <span class="si">🔍</span>
+      <input type="text" id="ride-search" placeholder="دوّر باسم الزبون أو السائق أو العنوان أو الرقم..." oninput="renderRides()">
+      <button class="clr" id="clr-ride-search" onclick="clearRideSearch()">✕</button>
+    </div>
     <div class="filter-row" id="rides-type-filter">
       <div class="chip active" onclick="filterRides('all', this)">الكل</div>
       <div class="chip" onclick="filterRides('ride', this)">🚗 رحلات</div>
@@ -336,6 +356,11 @@
       <button class="btn ghost" onclick="event.stopPropagation();openRewardSettingsModal()">تعديل</button>
     </div>
     <button class="btn sky full" style="margin-bottom:14px" onclick="openGrantAllModal()">🎁 امنح كل الزبائن مكافأة</button>
+    <div class="search-box">
+      <span class="si">🔍</span>
+      <input type="text" id="customer-search" placeholder="دوّر باسم الزبون أو رقمه..." oninput="renderCustomers()">
+      <button class="clr" id="clr-customer-search" onclick="clearCustomerSearch()">✕</button>
+    </div>
     <div id="customers-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
   </div>
 
@@ -369,7 +394,12 @@
 
   <!-- ===== المكافآت ===== -->
   <div class="view" id="view-rewards">
-    <div class="section-title">🎉 وصلوا للمكافأة</div>
+    <div class="section-title">🎉 وصلوا للمكافأة <span class="count" id="rewards-count-2">0</span></div>
+    <div class="search-box">
+      <span class="si">🔍</span>
+      <input type="text" id="reward-search" placeholder="دوّر باسم الزبون أو رقمه..." oninput="renderRewardsAutoList()">
+      <button class="clr" id="clr-reward-search" onclick="clearRewardSearch()">✕</button>
+    </div>
     <div id="rewards-auto-list" style="margin-bottom:22px"></div>
 
     <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span></div>
@@ -380,9 +410,12 @@
         <input type="date" id="rs-to" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
     </div>
     <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">السائق</label>
-    <select id="rs-driver" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:12px">
-      <option value="">كل السواق</option>
-    </select>
+    <div class="picker" id="rs-driver-picker">
+      <input type="text" id="rs-driver-search" placeholder="كل السواق — اكتب اسم أو رقم للبحث"
+        oninput="renderDriverPicker()" onfocus="renderDriverPicker()">
+      <button class="picker-clr" onclick="pickStatementDriver('')">✕</button>
+      <div class="picker-list" id="rs-driver-list"></div>
+    </div>
     <button class="btn go full" onclick="searchRewardStatement()" style="margin-bottom:16px">🔍 بحث</button>
     <div id="rs-results"></div>
   </div>
@@ -403,6 +436,11 @@
 
   <!-- ===== الملاحظات والشكاوى ===== -->
   <div class="view" id="view-complaints">
+    <div class="search-box">
+      <span class="si">🔍</span>
+      <input type="text" id="complaint-search" placeholder="دوّر باسم السائق أو الزبون أو رقمه..." oninput="renderComplaints()">
+      <button class="clr" id="clr-complaint-search" onclick="clearComplaintSearch()">✕</button>
+    </div>
     <div id="complaints-list"></div>
   </div>
 
@@ -726,7 +764,7 @@ async function refreshAll() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spin');
   await Promise.all([loadStats(), loadDrivers(), loadSubs(), loadCustomers(), loadPayouts(), loadComplaints(), renderFareRuleSub()]);
-  renderRewardsAlert();
+  renderRewardsAutoList();
   document.getElementById('last-update').textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar', {hour:'2-digit',minute:'2-digit'});
   btn.classList.remove('spin');
 }
@@ -785,14 +823,34 @@ async function loadDrivers() {
 }
 
 // ============ الملاحظات والشكاوى ============
+let allComplaints = [];
 async function loadComplaints() {
   try {
-    const list = await api('/api/admin/complaints').then(r=>r.json());
-    document.getElementById('complaints-count').textContent = list.length;
-    const box = document.getElementById('complaints-list');
-    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:22px"><div style="font-size:28px;margin-bottom:6px">😊</div><div style="font-size:12.5px">ماكو ملاحظات حالياً</div></div>'; return; }
-    box.innerHTML = list.map(c => complaintRowHTML(c, {showDriverName:true})).join('');
+    allComplaints = await api('/api/admin/complaints').then(r=>r.json());
+    document.getElementById('complaints-count').textContent = allComplaints.length;
+    renderComplaints();
   } catch(e) { /* هادئ */ }
+}
+
+function renderComplaints() {
+  const box = document.getElementById('complaints-list');
+  const q = (document.getElementById('complaint-search')?.value || '').trim();
+  document.getElementById('clr-complaint-search').classList.toggle('show', !!q);
+
+  const arr = q
+    ? allComplaints.filter(c => matchesQuery(q, [c.driver_name, c.customer_name, c.rating_note, c.pickup_label, c.dest_label, c.store_name], [c.customer_phone]))
+    : allComplaints;
+
+  if (!arr.length) {
+    box.innerHTML = `<div class="empty" style="padding:22px"><div style="font-size:28px;margin-bottom:6px">${q?'🔍':'😊'}</div><div style="font-size:12.5px">${q?'ماكو نتائج للبحث':'ماكو ملاحظات حالياً'}</div></div>`;
+    return;
+  }
+  box.innerHTML = arr.map(c => complaintRowHTML(c, {showDriverName:true})).join('');
+}
+
+function clearComplaintSearch() {
+  document.getElementById('complaint-search').value = '';
+  renderComplaints();
 }
 
 function accessBadge(a) {
@@ -858,6 +916,17 @@ function openDocs(id) {
 }
 function closeDocs(){ document.getElementById('docs-modal').classList.remove('show'); }
 
+/* 🔍 بحث موحّد لكل القوائم: يطابق أي نص (اسم، عنوان، محل…) وأيضاً
+   الأرقام بعد ما ينظّفها من المسافات والرموز، حتى «0770 123» تلگه
+   الرقم المخزون «07701234567». */
+function matchesQuery(q, texts, phones) {
+  if (!q) return true;
+  const qn = q.replace(/\D/g, '');
+  if ((texts || []).some(t => (t || '').includes(q))) return true;
+  if (qn) return (phones || []).some(p => String(p || '').replace(/\D/g, '').includes(qn));
+  return false;
+}
+
 function renderDrivers() {
   const list = document.getElementById('drivers-list');
   let arr = allDrivers;
@@ -870,13 +939,7 @@ function renderDrivers() {
 
   // بحث بالاسم أو الرقم
   const q = (document.getElementById('driver-search')?.value || '').trim();
-  if (q) {
-    const qn = q.replace(/\D/g,'');
-    arr = arr.filter(d =>
-      (d.name || '').includes(q) ||
-      (qn && String(d.phone||'').replace(/\D/g,'').includes(qn))
-    );
-  }
+  if (q) arr = arr.filter(d => matchesQuery(q, [d.name, d.car], [d.phone]));
 
   if (!arr.length) {
     list.innerHTML = `<div class="empty"><div class="ico">🔍</div><div>${q ? 'ماكو نتائج للبحث' : 'ماكو سواق بهذا الفلتر'}</div></div>`;
@@ -1282,7 +1345,21 @@ function renderRides() {
     arr = arr.filter(r => r.created_at && new Date(r.created_at).getTime() >= cutoff);
   }
 
-  if (!arr.length) { list.innerHTML = '<div class="empty"><div class="ico">📋</div><div>ماكو طلبات بهذي الفترة</div></div>'; return; }
+  const q = (document.getElementById('ride-search')?.value || '').trim();
+  document.getElementById('clr-ride-search').classList.toggle('show', !!q);
+  if (q) {
+    arr = arr.filter(r => {
+      const dr = r.driver_id ? allDrivers.find(d => d.id === r.driver_id) : null;
+      return matchesQuery(q,
+        [r.customer_name, dr && dr.name, r.pickup_label, r.dest_label, r.store_name, r.store_label],
+        [r.customer_phone, dr && dr.phone]);
+    });
+  }
+
+  if (!arr.length) {
+    list.innerHTML = `<div class="empty"><div class="ico">${q?'🔍':'📋'}</div><div>${q?'ماكو نتائج للبحث':'ماكو طلبات بهذي الفترة'}</div></div>`;
+    return;
+  }
 
   list.innerHTML = arr.map(r => {
     const isDel = r.type === 'delivery';
@@ -1320,6 +1397,11 @@ function filterRidesDate(f, el) {
   renderRides();
 }
 
+function clearRideSearch() {
+  document.getElementById('ride-search').value = '';
+  renderRides();
+}
+
 // ============ الزبائن ============
 const REWARD_LABEL = (r) => {
   if (!r) return '';
@@ -1332,21 +1414,39 @@ async function loadCustomers() {
   try {
     allCustomers = await api('/api/admin/customers').then(r=>r.json());
     renderRewardRuleSub();
-    const list = document.getElementById('customers-list');
-    if (!allCustomers.length) { list.innerHTML = '<div class="empty"><div class="ico">👥</div><div>ماكو زبائن</div></div>'; return; }
-    list.innerHTML = `<div class="section-title">الزبائن <span class="count">${allCustomers.length}</span></div>` + allCustomers.map(c => `
-      <div class="ride-row">
-        <div class="rr-ico" style="cursor:pointer" onclick="openCustomerDetail('${c.phone}')">👤</div>
-        <div class="rr-body" style="cursor:pointer" onclick="openCustomerDetail('${c.phone}')">
-          <h4>${c.name} ${c.banned ? '<span class="badge expired">🚫 محظور</span>' : ''}</h4>
-          <p style="direction:ltr;text-align:right">${c.phone} · ${c.tripsDone} رحلة${c.pendingReward ? ' · <span style="color:var(--go);font-weight:700">'+REWARD_LABEL(c.pendingReward)+'</span>' : ''}</p>
-        </div>
-        <div class="rr-side" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-          <button class="btn ghost" onclick="callDriver('${c.phone}')">📞</button>
-          <button class="btn sky" onclick="openGrantModal('${c.phone}','${c.name}')">🎁</button>
-        </div>
-      </div>`).join('');
+    renderCustomers();
   } catch(e) { document.getElementById('customers-list').innerHTML = '<div class="empty">صار خطأ</div>'; }
+}
+
+function renderCustomers() {
+  const list = document.getElementById('customers-list');
+  const q = (document.getElementById('customer-search')?.value || '').trim();
+  document.getElementById('clr-customer-search').classList.toggle('show', !!q);
+
+  const arr = q ? allCustomers.filter(c => matchesQuery(q, [c.name], [c.phone])) : allCustomers;
+
+  if (!arr.length) {
+    list.innerHTML = `<div class="empty"><div class="ico">${q?'🔍':'👥'}</div><div>${q?'ماكو نتائج للبحث':'ماكو زبائن'}</div></div>`;
+    return;
+  }
+  const countLbl = q ? `${arr.length} من ${allCustomers.length}` : String(allCustomers.length);
+  list.innerHTML = `<div class="section-title">الزبائن <span class="count">${countLbl}</span></div>` + arr.map(c => `
+    <div class="ride-row">
+      <div class="rr-ico" style="cursor:pointer" onclick="openCustomerDetail('${c.phone}')">👤</div>
+      <div class="rr-body" style="cursor:pointer" onclick="openCustomerDetail('${c.phone}')">
+        <h4>${c.name} ${c.banned ? '<span class="badge expired">🚫 محظور</span>' : ''}</h4>
+        <p style="direction:ltr;text-align:right">${c.phone} · ${c.tripsDone} رحلة${c.pendingReward ? ' · <span style="color:var(--go);font-weight:700">'+REWARD_LABEL(c.pendingReward)+'</span>' : ''}</p>
+      </div>
+      <div class="rr-side" style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <button class="btn ghost" onclick="callDriver('${c.phone}')">📞</button>
+        <button class="btn sky" onclick="openGrantModal('${c.phone}','${c.name}')">🎁</button>
+      </div>
+    </div>`).join('');
+}
+
+function clearCustomerSearch() {
+  document.getElementById('customer-search').value = '';
+  renderCustomers();
 }
 
 async function renderRewardRuleSub() {
@@ -1357,10 +1457,6 @@ async function renderRewardRuleSub() {
   } catch(e) { document.getElementById('reward-rule-sub').textContent = 'اضغط لتحديد القاعدة'; }
 }
 
-function renderRewardsAlert() {
-  const auto = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto');
-  document.getElementById('rewards-count').textContent = auto.length;
-}
 function rewardAlertRowHTML(c) {
   return `<div class="sub-row">
     <div class="sr-ico">🎉</div>
@@ -1372,18 +1468,61 @@ function rewardAlertRowHTML(c) {
 }
 
 // ============ تبويب المكافآت (وصلوا للمكافأة + كشف المستحقات) ============
-function renderRewardsView() {
+function renderRewardsAutoList() {
   const auto = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto');
   document.getElementById('rewards-count').textContent = auto.length;
-  const box = document.getElementById('rewards-auto-list');
-  box.innerHTML = auto.length ? auto.map(rewardAlertRowHTML).join('')
-    : '<div class="empty" style="padding:18px"><div style="font-size:28px;margin-bottom:6px">🎉</div><div style="font-size:12.5px">ماكو زبائن وصلوا للمكافأة حالياً</div></div>';
+  document.getElementById('rewards-count-2').textContent = auto.length;
 
-  const sel = document.getElementById('rs-driver');
-  if (sel && !sel.dataset.filled) {
-    sel.innerHTML = '<option value="">كل السواق</option>' + allDrivers.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
-    sel.dataset.filled = '1';
-  }
+  const q = (document.getElementById('reward-search')?.value || '').trim();
+  document.getElementById('clr-reward-search').classList.toggle('show', !!q);
+  const arr = q ? auto.filter(c => matchesQuery(q, [c.name], [c.phone])) : auto;
+
+  document.getElementById('rewards-auto-list').innerHTML = arr.length
+    ? arr.map(rewardAlertRowHTML).join('')
+    : `<div class="empty" style="padding:18px"><div style="font-size:28px;margin-bottom:6px">${q?'🔍':'🎉'}</div><div style="font-size:12.5px">${q?'ماكو نتائج للبحث':'ماكو زبائن وصلوا للمكافأة حالياً'}</div></div>`;
+}
+
+function clearRewardSearch() {
+  document.getElementById('reward-search').value = '';
+  renderRewardsAutoList();
+}
+
+/* 🔎 منتقي السائق بالبحث بدل القائمة المنسدلة.
+   نخزن الـ id بمتغيّر ونعرض الاسم بالمربّع — ما نحط الاسم داخل onclick
+   لأن أي علامة اقتباس أو رمز بالاسم راح يكسر الكود. */
+let rsDriverId = '';
+
+function renderDriverPicker() {
+  const q = (document.getElementById('rs-driver-search').value || '').trim();
+  const sel = allDrivers.find(d => d.id === rsDriverId);
+  // إذا المكتوب هو نفس اسم السائق المختار، اعرض الكل (يعني فتح القائمة بدون ما يغيّر البحث)
+  const typing = !(sel && q === sel.name);
+  const arr = (typing && q) ? allDrivers.filter(d => matchesQuery(q, [d.name, d.car], [d.phone])) : allDrivers;
+
+  document.getElementById('rs-driver-list').innerHTML =
+    '<div class="picker-opt" onclick="pickStatementDriver(\'\')"><b>كل السواق</b></div>' +
+    (arr.length
+      ? arr.map(d => `<div class="picker-opt" onclick="pickStatementDriver('${d.id}')">${d.name}<div class="po-phone">${d.phone||''}</div></div>`).join('')
+      : '<div class="picker-opt" style="color:var(--muted)">ماكو نتائج</div>');
+  document.getElementById('rs-driver-list').classList.add('open');
+}
+
+function pickStatementDriver(id) {
+  rsDriverId = id;
+  const d = allDrivers.find(x => x.id === id);
+  document.getElementById('rs-driver-search').value = d ? d.name : '';
+  document.getElementById('rs-driver-list').classList.remove('open');
+  searchRewardStatement();
+}
+
+// أي ضغطة برّا المنتقي تسكّر القائمة، حتى ما تبقى مفتوحة فوق باقي الصفحة
+document.addEventListener('click', function(e) {
+  const p = document.getElementById('rs-driver-picker');
+  if (p && !p.contains(e.target)) document.getElementById('rs-driver-list').classList.remove('open');
+});
+
+function renderRewardsView() {
+  renderRewardsAutoList();
   if (!document.getElementById('rs-to').value) {
     const to = new Date(), from = new Date(to.getTime() - 30*86400000);
     document.getElementById('rs-to').value = to.toISOString().slice(0,10);
@@ -1486,7 +1625,7 @@ let currentDriverStatement = null;
 async function searchRewardStatement() {
   const from = document.getElementById('rs-from').value;
   const to = document.getElementById('rs-to').value;
-  const driverId = document.getElementById('rs-driver').value;
+  const driverId = rsDriverId;
   const box = document.getElementById('rs-results');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>نبحث...</div>';
   currentDriverStatement = null;
