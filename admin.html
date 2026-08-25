@@ -34,10 +34,25 @@
   .refresh-btn.spin { animation:spin 1s linear infinite; }
   @keyframes spin { to{transform:rotate(360deg)} }
 
-  /* ===== التبويبات ===== */
-  .tabs { display:flex; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:66px; z-index:850; overflow-x:auto; }
-  .tab { flex:1; min-width:88px; padding:13px 8px; text-align:center; font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; border-bottom:2.5px solid transparent; white-space:nowrap; }
-  .tab.active { color:var(--ink); border-bottom-color:var(--sky); }
+  /* ===== القائمة الجانبية ===== */
+  .menu-btn { background:var(--sky-light); border:none; border-radius:11px; width:38px; height:38px; font-size:17px; cursor:pointer; color:var(--ink); flex-shrink:0; }
+  .sidebar-backdrop { position:fixed; inset:0; background:rgba(26,26,26,.45); z-index:1990; opacity:0; pointer-events:none; transition:opacity .22s; }
+  .sidebar-backdrop.open { opacity:1; pointer-events:auto; }
+  .sidebar { position:fixed; top:0; bottom:0; right:0; width:78%; max-width:290px; background:#fff; z-index:2000;
+    box-shadow:-10px 0 30px rgba(0,0,0,.15); transform:translateX(100%); transition:transform .25s ease;
+    display:flex; flex-direction:column; overflow-y:auto; }
+  .sidebar.open { transform:translateX(0); }
+  .sidebar-head { padding:22px 18px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid var(--line); flex-shrink:0; }
+  .sidebar-head img { width:38px; height:38px; border-radius:11px; object-fit:cover; flex-shrink:0; }
+  .sidebar-head h2 { font-size:15.5px; }
+  .sidebar-head p { font-size:11px; color:var(--muted); }
+  .sidebar nav { padding:8px 0; }
+  .nav-item { display:flex; align-items:center; gap:12px; padding:13px 18px; font-size:13.5px; font-weight:600; color:var(--ink); cursor:pointer; border-right:3px solid transparent; }
+  .nav-item.active { background:var(--sky-pale); border-right-color:var(--sky); }
+  .nav-item .ni-ico { font-size:16px; width:20px; text-align:center; flex-shrink:0; }
+  .nav-item .ni-badge { margin-inline-start:auto; background:var(--sky-light); color:var(--ink); font-size:11px; font-weight:700; padding:2px 9px; border-radius:12px; }
+  .nav-item .ni-badge:empty, .nav-item .ni-badge[data-zero="1"] { display:none; }
+  .nav-divider { height:1px; background:var(--line); margin:8px 0; }
 
   .view { display:none; padding:18px; }
   .view.active { display:block; }
@@ -67,17 +82,7 @@
 
   .section-title { font-size:15px; font-weight:700; margin:20px 0 12px; display:flex; align-items:center; gap:8px; }
   .section-title .count { background:var(--sky-light); color:var(--ink); font-size:11px; padding:2px 9px; border-radius:12px; }
-  .section-title.home-link { cursor:pointer; background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:14px 16px; margin:12px 0 0; }
-  .section-title.home-link:active { background:var(--sky-pale); }
-  .home-link-arrow { margin-right:auto; color:var(--muted); font-size:18px; }
   .group-lbl { font-size:12px; font-weight:700; color:var(--muted); margin:4px 2px 8px; }
-  .home-alert { border-radius:16px; padding:15px 16px; margin-bottom:16px; background:#FFF8EC; border:1.5px solid #FFE3B0; cursor:pointer; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  .home-alert:active { background:#FFF3DD; }
-  .home-alert-num { font-size:19px; font-weight:700; color:#B26A00; }
-  .home-alert-lbl { font-size:13px; font-weight:600; color:#B26A00; }
-  .home-alert-arrow { margin-right:auto; color:#B26A00; font-size:18px; }
-  .home-alert.ok { background:#F2FBF6; border-color:#C8EBD6; cursor:default; }
-  .home-alert.ok .home-alert-lbl { color:var(--go); font-size:13px; }
 
   /* ===== بطاقة السائق (مضغوطة) ===== */
   .driver-card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:10px; }
@@ -214,6 +219,7 @@
   </div>
 
   <header>
+    <button class="menu-btn" onclick="openSidebar()">☰</button>
     <img class="h-logo" src="/logo.png" alt="جايك">
     <div class="h-title">
       <h1>لوحة التحكم</h1>
@@ -222,18 +228,31 @@
     <button class="refresh-btn" id="refresh-btn" onclick="refreshAll()">⟳</button>
   </header>
 
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('home')">📊 عام</div>
-    <div class="tab" onclick="switchTab('drivers')">🚗 السواق</div>
-    <div class="tab" onclick="switchTab('map')">🗺️ الخريطة</div>
-    <div class="tab" onclick="switchTab('rides')">📋 الطلبات</div>
-    <div class="tab" onclick="switchTab('customers')">👥 الزبائن</div>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeSidebar()"></div>
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <img src="/logo.png" alt="جايك">
+      <div><h2>جايك</h2><p>لوحة التحكم</p></div>
+    </div>
+    <nav>
+      <div class="nav-item active" data-tab="home" onclick="switchTab('home')"><span class="ni-ico">📊</span><span>عام</span></div>
+      <div class="nav-item" data-tab="drivers" onclick="switchTab('drivers')"><span class="ni-ico">🚗</span><span>السواق</span></div>
+      <div class="nav-item" data-tab="map" onclick="switchTab('map')"><span class="ni-ico">🗺️</span><span>الخريطة</span></div>
+      <div class="nav-item" data-tab="rides" onclick="switchTab('rides')"><span class="ni-ico">📋</span><span>الطلبات</span></div>
+      <div class="nav-item" data-tab="customers" onclick="switchTab('customers')"><span class="ni-ico">👥</span><span>الزبائن</span></div>
+      <div class="nav-divider"></div>
+      <div class="nav-item" data-tab="pending" onclick="switchTab('pending')"><span class="ni-ico">🆕</span><span>سواق جدد بانتظار الموافقة</span><span class="ni-badge" id="pending-approval-count">0</span></div>
+      <div class="nav-item" data-tab="need" onclick="switchTab('need')"><span class="ni-ico">⚠️</span><span>محتاجين تفعيل</span><span class="ni-badge" id="need-count">0</span></div>
+      <div class="nav-item" data-tab="rewards" onclick="switchTab('rewards')"><span class="ni-ico">🎁</span><span>المكافآت</span><span class="ni-badge" id="rewards-count">0</span></div>
+      <div class="nav-item" data-tab="subs" onclick="switchTab('subs')"><span class="ni-ico">🧾</span><span>آخر التفعيلات</span><span class="ni-badge" id="subs-count">0</span></div>
+      <div class="nav-item" data-tab="complaints" onclick="switchTab('complaints')"><span class="ni-ico">😕</span><span>الملاحظات والشكاوى</span><span class="ni-badge" id="complaints-count">0</span></div>
+      <div class="nav-divider"></div>
+      <div class="nav-item" data-tab="settings" onclick="switchTab('settings')"><span class="ni-ico">⚙️</span><span>الإعدادات</span></div>
+    </nav>
   </div>
 
   <!-- ===== عام ===== -->
   <div class="view active" id="view-home">
-    <div id="home-alert-box"></div>
-
     <div class="stat-hero">
       <div class="sh-label">💰 أرباحك من الاشتراكات</div>
       <div class="sh-num" id="s-my-revenue">—</div>
@@ -260,41 +279,10 @@
       <div class="sc-num" id="s-driver-revenue" style="font-size:18px">—</div>
       <div class="sc-label">إجمالي ما كسبه السواق من الطلبات (مو ربحك)</div>
     </div>
-
-    <div class="sub-row" style="cursor:pointer" onclick="openFareSettingsModal()">
-      <div class="sr-ico">💰</div>
-      <div class="sr-body">
-        <h4>إعدادات الأجرة</h4>
-        <p id="fare-rule-sub">نحمّل...</p>
-      </div>
-      <button class="btn ghost" onclick="event.stopPropagation();openFareSettingsModal()">تعديل</button>
-    </div>
-
-    <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
-      <div class="sr-ico">📞</div>
-      <div class="sr-body">
-        <h4>روابط التواصل والدعم</h4>
-        <p>واتساب، فيسبوك، انستقرام، تلكرام — تظهر بصفحة الدعم بتطبيق الزبون</p>
-      </div>
-      <button class="btn ghost" onclick="event.stopPropagation();openContactSettingsModal()">تعديل</button>
-    </div>
-
-    <div class="section-title home-link" onclick="openListDetail('pending')">🆕 سواق جدد بانتظار الموافقة <span class="count" id="pending-approval-count">0</span><span class="home-link-arrow">‹</span></div>
-
-    <div class="section-title home-link" onclick="openListDetail('need')">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span><span class="home-link-arrow">‹</span></div>
-
-    <div class="section-title home-link" onclick="openListDetail('rewards')">🎉 وصلوا للمكافأة <span class="count" id="rewards-count">0</span><span class="home-link-arrow">‹</span></div>
-
-    <div class="section-title home-link" onclick="openRewardStatement()">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span><span class="home-link-arrow">‹</span></div>
-
-    <div class="section-title home-link" onclick="openListDetail('subs')">🧾 آخر التفعيلات <span class="count" id="subs-count">0</span><span class="home-link-arrow">‹</span></div>
   </div>
 
   <!-- ===== السواق ===== -->
   <div class="view" id="view-drivers">
-    <div class="section-title">😕 آخر الملاحظات والشكاوى <span class="count" id="complaints-count">0</span></div>
-    <div id="complaints-list" style="margin-bottom:18px"></div>
-
     <div class="search-box">
       <span class="si">🔍</span>
       <input type="text" id="driver-search" placeholder="دوّر باسم السائق أو رقمه..." oninput="onSearch()">
@@ -349,6 +337,94 @@
     </div>
     <button class="btn sky full" style="margin-bottom:14px" onclick="openGrantAllModal()">🎁 امنح كل الزبائن مكافأة</button>
     <div id="customers-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
+  </div>
+
+  <!-- ===== سواق جدد بانتظار الموافقة ===== -->
+  <div class="view" id="view-pending">
+    <input type="text" id="pv-search" placeholder="بحث بالاسم أو رقم الموبايل..." oninput="renderListView('pending')"
+      style="width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:8px">
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+        <input type="date" id="pv-from" onchange="renderListView('pending')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+        <input type="date" id="pv-to" onchange="renderListView('pending')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+    </div>
+    <div id="pv-count" style="font-size:11.5px;color:var(--muted);margin-bottom:8px"></div>
+    <div id="pv-results"></div>
+  </div>
+
+  <!-- ===== محتاجين تفعيل ===== -->
+  <div class="view" id="view-need">
+    <input type="text" id="nv-search" placeholder="بحث بالاسم أو رقم الموبايل..." oninput="renderListView('need')"
+      style="width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:8px">
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+        <input type="date" id="nv-from" onchange="renderListView('need')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+        <input type="date" id="nv-to" onchange="renderListView('need')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+    </div>
+    <div id="nv-count" style="font-size:11.5px;color:var(--muted);margin-bottom:8px"></div>
+    <div id="nv-results"></div>
+  </div>
+
+  <!-- ===== المكافآت ===== -->
+  <div class="view" id="view-rewards">
+    <div class="section-title">🎉 وصلوا للمكافأة</div>
+    <div id="rewards-auto-list" style="margin-bottom:22px"></div>
+
+    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+        <input type="date" id="rs-from" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+        <input type="date" id="rs-to" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+    </div>
+    <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">السائق</label>
+    <select id="rs-driver" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:12px">
+      <option value="">كل السواق</option>
+    </select>
+    <button class="btn go full" onclick="searchRewardStatement()" style="margin-bottom:16px">🔍 بحث</button>
+    <div id="rs-results"></div>
+  </div>
+
+  <!-- ===== آخر التفعيلات ===== -->
+  <div class="view" id="view-subs">
+    <input type="text" id="sv-search" placeholder="بحث بالاسم أو رقم الموبايل..." oninput="renderListView('subs')"
+      style="width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:8px">
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
+        <input type="date" id="sv-from" onchange="renderListView('subs')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+      <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
+        <input type="date" id="sv-to" onchange="renderListView('subs')" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
+    </div>
+    <div id="sv-count" style="font-size:11.5px;color:var(--muted);margin-bottom:8px"></div>
+    <div id="sv-results"></div>
+  </div>
+
+  <!-- ===== الملاحظات والشكاوى ===== -->
+  <div class="view" id="view-complaints">
+    <div id="complaints-list"></div>
+  </div>
+
+  <!-- ===== الإعدادات ===== -->
+  <div class="view" id="view-settings">
+    <div class="sub-row" style="cursor:pointer" onclick="openFareSettingsModal()">
+      <div class="sr-ico">💰</div>
+      <div class="sr-body">
+        <h4>إعدادات الأجرة</h4>
+        <p id="fare-rule-sub">نحمّل...</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openFareSettingsModal()">تعديل</button>
+    </div>
+
+    <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
+      <div class="sr-ico">📞</div>
+      <div class="sr-body">
+        <h4>روابط التواصل والدعم</h4>
+        <p>واتساب، فيسبوك، انستقرام، تلكرام — تظهر بصفحة الدعم بتطبيق الزبون</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openContactSettingsModal()">تعديل</button>
+    </div>
   </div>
 
 </div>
@@ -539,56 +615,6 @@
   </div>
 </div>
 
-<!-- نافذة كشف مستحقات المكافآت -->
-<div class="modal-bg" id="reward-statement-modal">
-  <div class="modal detail-modal" style="max-width:520px">
-    <button class="modal-x" onclick="closeRewardStatement()">✕</button>
-    <div class="detail-modal-body">
-      <h3 style="font-size:17px;margin-bottom:14px">📋 كشف مستحقات المكافآت</h3>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <div style="flex:1">
-          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
-          <input type="date" id="rs-from" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
-        </div>
-        <div style="flex:1">
-          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
-          <input type="date" id="rs-to" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
-        </div>
-      </div>
-      <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">السائق</label>
-      <select id="rs-driver" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:12px">
-        <option value="">كل السواق</option>
-      </select>
-      <button class="btn go full" onclick="searchRewardStatement()" style="margin-bottom:16px">🔍 بحث</button>
-      <div id="rs-results"></div>
-    </div>
-  </div>
-</div>
-
-<!-- نافذة قوائم الصفحة الرئيسية (محتاجين تفعيل / وصلوا للمكافأة / آخر التفعيلات) -->
-<div class="modal-bg" id="list-detail-modal">
-  <div class="modal detail-modal" style="max-width:480px">
-    <button class="modal-x" onclick="closeListDetail()">✕</button>
-    <div class="detail-modal-body">
-      <h3 id="ld-title" style="font-size:17px;margin-bottom:14px">—</h3>
-      <input type="text" id="ld-search" placeholder="بحث بالاسم أو رقم الموبايل..." oninput="filterListDetail()"
-        style="width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px;margin-bottom:8px">
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <div style="flex:1">
-          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
-          <input type="date" id="ld-from" onchange="filterListDetail()" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
-        </div>
-        <div style="flex:1">
-          <label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">إلى تاريخ</label>
-          <input type="date" id="ld-to" onchange="filterListDetail()" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px">
-        </div>
-      </div>
-      <div id="ld-count" style="font-size:11.5px;color:var(--muted);margin-bottom:8px"></div>
-      <div id="ld-results"></div>
-    </div>
-  </div>
-</div>
-
 <!-- نافذة المستمسكات -->
 <div class="modal-bg" id="docs-modal">
   <div class="modal">
@@ -633,18 +659,66 @@ const api = (p, opt={}) => fetch(p, { ...opt, headers: { 'Content-Type':'applica
 
 // ============ التبويبات ============
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => {
-    const names = ['home','drivers','map','rides','customers'];
-    t.classList.toggle('active', names[i]===name);
-  });
+  document.querySelectorAll('.nav-item').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('view-'+name).classList.add('active');
+  closeSidebar();
 
   if (name === 'map') { initLiveMap(); startLiveUpdates(); }
   else stopLiveUpdates();
 
   if (name === 'rides') loadRides();
   if (name === 'customers') loadCustomers();
+  if (name === 'rewards') renderRewardsView();
+}
+
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-backdrop').classList.add('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('open');
+}
+
+// ============ قوائم البحث (سواق جدد / محتاجين تفعيل / آخر التفعيلات) ============
+const LISTVIEWS = {
+  pending: { prefix:'pv', render: driverCard, getData: () =>
+    allDrivers.filter(d => d.access?.reason === 'pending_review')
+      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d })) },
+  need: { prefix:'nv', render: driverCard, getData: () =>
+    allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review')
+      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d })) },
+  subs: { prefix:'sv', render: subRowHTML, getData: () =>
+    allSubs.map(s => ({ name: s.driver_name, phone: s.driver_phone, at: s.created_at, raw: s })) },
+};
+
+function renderListView(key) {
+  const cfg = LISTVIEWS[key];
+  const data = cfg.getData();
+  const q = (document.getElementById(cfg.prefix+'-search').value || '').trim().toLowerCase();
+  const fromVal = document.getElementById(cfg.prefix+'-from').value;
+  const toVal = document.getElementById(cfg.prefix+'-to').value;
+  const from = fromVal ? new Date(fromVal) : null;
+  const to = toVal ? new Date(new Date(toVal).getTime() + 86400000) : null;
+
+  const filtered = data.filter(item => {
+    if (q) {
+      const nameMatch = (item.name || '').toLowerCase().includes(q);
+      const phoneMatch = (item.phone || '').includes(q);
+      if (!nameMatch && !phoneMatch) return false;
+    }
+    if ((from || to) && item.at) {
+      const d = new Date(item.at);
+      if (from && d < from) return false;
+      if (to && d >= to) return false;
+    }
+    return true;
+  });
+
+  document.getElementById(cfg.prefix+'-count').textContent = `${filtered.length} من ${data.length}`;
+  const box = document.getElementById(cfg.prefix+'-results');
+  box.innerHTML = filtered.length ? filtered.map(x => cfg.render(x.raw)).join('') : '<div class="empty" style="padding:20px">ماكو نتائج</div>';
 }
 
 // ============ تحديث الكل ============
@@ -681,6 +755,7 @@ async function loadSubs() {
     const data = await api('/api/admin/subscriptions').then(r=>r.json());
     allSubs = data.list || [];
     document.getElementById('subs-count').textContent = allSubs.length;
+    renderListView('subs');
   } catch(e) { /* هادئ */ }
 }
 function subRowHTML(s) {
@@ -700,8 +775,12 @@ async function loadDrivers() {
   try {
     allDrivers = await api('/api/admin/drivers').then(r=>r.json());
     renderDrivers();
-    renderNeedActivation();
-    renderPendingApproval();
+    document.getElementById('need-count').textContent =
+      allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review').length;
+    document.getElementById('pending-approval-count').textContent =
+      allDrivers.filter(d => d.access?.reason === 'pending_review').length;
+    renderListView('need');
+    renderListView('pending');
   } catch(e) { document.getElementById('drivers-list').innerHTML = '<div class="empty">صار خطأ بالتحميل</div>'; }
 }
 
@@ -1036,23 +1115,6 @@ async function unbanCustomerNow(phone) {
   } catch(e) { toast('صار خطأ'); }
 }
 
-function renderNeedActivation() {
-  const need = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review');
-  document.getElementById('need-count').textContent = need.length;
-}
-
-function renderPendingApproval() {
-  const pending = allDrivers.filter(d => d.access?.reason === 'pending_review');
-  document.getElementById('pending-approval-count').textContent = pending.length;
-  const box = document.getElementById('home-alert-box');
-  box.innerHTML = pending.length
-    ? `<div class="home-alert" onclick="openListDetail('pending')">
-         <div class="home-alert-num">🆕 ${pending.length}</div>
-         <div class="home-alert-lbl">سائق جديد بانتظار موافقتك</div>
-         <div class="home-alert-arrow">‹</div>
-       </div>`
-    : `<div class="home-alert ok"><div class="home-alert-lbl">✅ ماكو سواق جدد ينتظرون الموافقة حالياً</div></div>`;
-}
 
 // ============ نافذة الاشتراك ============
 function openSubModal(id) {
@@ -1309,6 +1371,27 @@ function rewardAlertRowHTML(c) {
   </div>`;
 }
 
+// ============ تبويب المكافآت (وصلوا للمكافأة + كشف المستحقات) ============
+function renderRewardsView() {
+  const auto = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto');
+  document.getElementById('rewards-count').textContent = auto.length;
+  const box = document.getElementById('rewards-auto-list');
+  box.innerHTML = auto.length ? auto.map(rewardAlertRowHTML).join('')
+    : '<div class="empty" style="padding:18px"><div style="font-size:28px;margin-bottom:6px">🎉</div><div style="font-size:12.5px">ماكو زبائن وصلوا للمكافأة حالياً</div></div>';
+
+  const sel = document.getElementById('rs-driver');
+  if (sel && !sel.dataset.filled) {
+    sel.innerHTML = '<option value="">كل السواق</option>' + allDrivers.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+    sel.dataset.filled = '1';
+  }
+  if (!document.getElementById('rs-to').value) {
+    const to = new Date(), from = new Date(to.getTime() - 30*86400000);
+    document.getElementById('rs-to').value = to.toISOString().slice(0,10);
+    document.getElementById('rs-from').value = from.toISOString().slice(0,10);
+  }
+  searchRewardStatement();
+}
+
 // ============ إعدادات الأجرة ============
 let fsMode = 'per_km';
 function pickFareMode(mode, el) {
@@ -1397,77 +1480,7 @@ async function loadPayouts() {
   } catch(e) { /* هادئ */ }
 }
 
-// ============ نافذة قوائم الصفحة الرئيسية (بحث بالاسم/الرقم + تاريخ من-إلى) ============
-let ldType = null, ldData = [];
-const LD_TITLES = { pending: '🆕 سواق جدد بانتظار الموافقة', need: '⚠️ محتاجين تفعيل', rewards: '🎉 وصلوا للمكافأة', subs: '🧾 آخر التفعيلات' };
-
-function openListDetail(type) {
-  ldType = type;
-  document.getElementById('ld-search').value = '';
-  document.getElementById('ld-from').value = '';
-  document.getElementById('ld-to').value = '';
-  document.getElementById('ld-title').textContent = LD_TITLES[type] || '';
-  document.getElementById('list-detail-modal').classList.add('show');
-
-  if (type === 'pending') {
-    ldData = allDrivers.filter(d => d.access?.reason === 'pending_review')
-      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d }));
-  } else if (type === 'need') {
-    ldData = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review')
-      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d }));
-  } else if (type === 'rewards') {
-    ldData = allCustomers.filter(c => c.pendingReward && c.pendingReward.source === 'auto')
-      .map(c => ({ name: c.name, phone: c.phone, at: c.pendingReward.created_at, raw: c }));
-  } else if (type === 'subs') {
-    ldData = allSubs.map(s => ({ name: s.driver_name, phone: s.driver_phone, at: s.created_at, raw: s }));
-  }
-  filterListDetail();
-}
-function closeListDetail() { document.getElementById('list-detail-modal').classList.remove('show'); }
-
-function filterListDetail() {
-  const q = document.getElementById('ld-search').value.trim().toLowerCase();
-  const fromVal = document.getElementById('ld-from').value;
-  const toVal = document.getElementById('ld-to').value;
-  const from = fromVal ? new Date(fromVal) : null;
-  const to = toVal ? new Date(new Date(toVal).getTime() + 86400000) : null;
-
-  const filtered = ldData.filter(item => {
-    if (q) {
-      const nameMatch = (item.name || '').toLowerCase().includes(q);
-      const phoneMatch = (item.phone || '').includes(q);
-      if (!nameMatch && !phoneMatch) return false;
-    }
-    if ((from || to) && item.at) {
-      const d = new Date(item.at);
-      if (from && d < from) return false;
-      if (to && d >= to) return false;
-    }
-    return true;
-  });
-
-  document.getElementById('ld-count').textContent = `${filtered.length} من ${ldData.length}`;
-  const box = document.getElementById('ld-results');
-  if (!filtered.length) { box.innerHTML = '<div class="empty" style="padding:20px">ماكو نتائج</div>'; return; }
-  if (ldType === 'need' || ldType === 'pending') box.innerHTML = filtered.map(x => driverCard(x.raw)).join('');
-  else if (ldType === 'rewards') box.innerHTML = filtered.map(x => rewardAlertRowHTML(x.raw)).join('');
-  else if (ldType === 'subs') box.innerHTML = filtered.map(x => subRowHTML(x.raw)).join('');
-}
-
 // ============ كشف مستحقات المكافآت (تفصيلي بفلترة تاريخ وسائق) ============
-function openRewardStatement() {
-  const sel = document.getElementById('rs-driver');
-  sel.innerHTML = '<option value="">كل السواق</option>' + allDrivers.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
-  const to = new Date();
-  const from = new Date(to.getTime() - 30*86400000);
-  document.getElementById('rs-to').value = to.toISOString().slice(0,10);
-  document.getElementById('rs-from').value = from.toISOString().slice(0,10);
-  document.getElementById('rs-results').innerHTML = '';
-  document.getElementById('reward-statement-modal').classList.add('show');
-  searchRewardStatement();
-}
-function closeRewardStatement() { document.getElementById('reward-statement-modal').classList.remove('show'); }
-
 let currentDriverStatement = null;
 
 async function searchRewardStatement() {
