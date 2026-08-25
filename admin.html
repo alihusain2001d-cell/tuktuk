@@ -70,6 +70,14 @@
   .section-title.home-link { cursor:pointer; background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:14px 16px; margin:12px 0 0; }
   .section-title.home-link:active { background:var(--sky-pale); }
   .home-link-arrow { margin-right:auto; color:var(--muted); font-size:18px; }
+  .group-lbl { font-size:12px; font-weight:700; color:var(--muted); margin:4px 2px 8px; }
+  .home-alert { border-radius:16px; padding:15px 16px; margin-bottom:16px; background:#FFF8EC; border:1.5px solid #FFE3B0; cursor:pointer; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .home-alert:active { background:#FFF3DD; }
+  .home-alert-num { font-size:19px; font-weight:700; color:#B26A00; }
+  .home-alert-lbl { font-size:13px; font-weight:600; color:#B26A00; }
+  .home-alert-arrow { margin-right:auto; color:#B26A00; font-size:18px; }
+  .home-alert.ok { background:#F2FBF6; border-color:#C8EBD6; cursor:default; }
+  .home-alert.ok .home-alert-lbl { color:var(--go); font-size:13px; }
 
   /* ===== بطاقة السائق (مضغوطة) ===== */
   .driver-card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:10px; }
@@ -224,6 +232,8 @@
 
   <!-- ===== عام ===== -->
   <div class="view active" id="view-home">
+    <div id="home-alert-box"></div>
+
     <div class="stat-hero">
       <div class="sh-label">💰 أرباحك من الاشتراكات</div>
       <div class="sh-num" id="s-my-revenue">—</div>
@@ -232,10 +242,16 @@
         <span>هذا الشهر: <b id="s-rev-month">—</b></span>
       </div>
     </div>
-    <div class="stat-grid">
+
+    <div class="group-lbl">🔴 الوضع الحالي</div>
+    <div class="stat-grid" style="margin-bottom:14px">
       <div class="stat-card live"><div class="sc-num" id="s-online">—</div><div class="sc-label">سائق متصل الآن</div></div>
-      <div class="stat-card"><div class="sc-num" id="s-drivers">—</div><div class="sc-label">إجمالي السواق</div></div>
       <div class="stat-card warn"><div class="sc-num" id="s-active-rides">—</div><div class="sc-label">طلبات نشطة</div></div>
+    </div>
+
+    <div class="group-lbl">📊 إجمالي</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="sc-num" id="s-drivers">—</div><div class="sc-label">إجمالي السواق</div></div>
       <div class="stat-card"><div class="sc-num" id="s-rides">—</div><div class="sc-label">إجمالي الطلبات</div></div>
       <div class="stat-card"><div class="sc-num" id="s-done">—</div><div class="sc-label">طلبات منجزة</div></div>
       <div class="stat-card"><div class="sc-num" id="s-customers">—</div><div class="sc-label">زبائن مسجلين</div></div>
@@ -263,8 +279,7 @@
       <button class="btn ghost" onclick="event.stopPropagation();openContactSettingsModal()">تعديل</button>
     </div>
 
-    <div class="section-title">🆕 سواق جدد بانتظار الموافقة <span class="count" id="pending-approval-count">0</span></div>
-    <div id="pending-approval-list"></div>
+    <div class="section-title home-link" onclick="openListDetail('pending')">🆕 سواق جدد بانتظار الموافقة <span class="count" id="pending-approval-count">0</span><span class="home-link-arrow">‹</span></div>
 
     <div class="section-title home-link" onclick="openListDetail('need')">⚠️ محتاجين تفعيل <span class="count" id="need-count">0</span><span class="home-link-arrow">‹</span></div>
 
@@ -1029,9 +1044,14 @@ function renderNeedActivation() {
 function renderPendingApproval() {
   const pending = allDrivers.filter(d => d.access?.reason === 'pending_review');
   document.getElementById('pending-approval-count').textContent = pending.length;
-  const box = document.getElementById('pending-approval-list');
-  if (!pending.length) { box.innerHTML = '<div class="empty" style="padding:26px"><div style="font-size:32px;margin-bottom:8px">📋</div><div style="font-size:13px">ماكو سواق جدد ينتظرون</div></div>'; return; }
-  box.innerHTML = pending.map(driverCard).join('');
+  const box = document.getElementById('home-alert-box');
+  box.innerHTML = pending.length
+    ? `<div class="home-alert" onclick="openListDetail('pending')">
+         <div class="home-alert-num">🆕 ${pending.length}</div>
+         <div class="home-alert-lbl">سائق جديد بانتظار موافقتك</div>
+         <div class="home-alert-arrow">‹</div>
+       </div>`
+    : `<div class="home-alert ok"><div class="home-alert-lbl">✅ ماكو سواق جدد ينتظرون الموافقة حالياً</div></div>`;
 }
 
 // ============ نافذة الاشتراك ============
@@ -1379,7 +1399,7 @@ async function loadPayouts() {
 
 // ============ نافذة قوائم الصفحة الرئيسية (بحث بالاسم/الرقم + تاريخ من-إلى) ============
 let ldType = null, ldData = [];
-const LD_TITLES = { need: '⚠️ محتاجين تفعيل', rewards: '🎉 وصلوا للمكافأة', subs: '🧾 آخر التفعيلات' };
+const LD_TITLES = { pending: '🆕 سواق جدد بانتظار الموافقة', need: '⚠️ محتاجين تفعيل', rewards: '🎉 وصلوا للمكافأة', subs: '🧾 آخر التفعيلات' };
 
 function openListDetail(type) {
   ldType = type;
@@ -1389,7 +1409,10 @@ function openListDetail(type) {
   document.getElementById('ld-title').textContent = LD_TITLES[type] || '';
   document.getElementById('list-detail-modal').classList.add('show');
 
-  if (type === 'need') {
+  if (type === 'pending') {
+    ldData = allDrivers.filter(d => d.access?.reason === 'pending_review')
+      .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d }));
+  } else if (type === 'need') {
     ldData = allDrivers.filter(d => !d.access?.allowed && d.access?.reason !== 'pending_review')
       .map(d => ({ name: d.name, phone: d.phone, at: d.created_at, raw: d }));
   } else if (type === 'rewards') {
@@ -1426,7 +1449,7 @@ function filterListDetail() {
   document.getElementById('ld-count').textContent = `${filtered.length} من ${ldData.length}`;
   const box = document.getElementById('ld-results');
   if (!filtered.length) { box.innerHTML = '<div class="empty" style="padding:20px">ماكو نتائج</div>'; return; }
-  if (ldType === 'need') box.innerHTML = filtered.map(x => driverCard(x.raw)).join('');
+  if (ldType === 'need' || ldType === 'pending') box.innerHTML = filtered.map(x => driverCard(x.raw)).join('');
   else if (ldType === 'rewards') box.innerHTML = filtered.map(x => rewardAlertRowHTML(x.raw)).join('');
   else if (ldType === 'subs') box.innerHTML = filtered.map(x => subRowHTML(x.raw)).join('');
 }
