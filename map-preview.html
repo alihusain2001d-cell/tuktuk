@@ -31,7 +31,7 @@
 <div id="app">
   <header>
     <h1>🗺️ أي شكل تريد؟</h1>
-    <p>جرّب الاثنين وقلّي الرقم</p>
+    <p>ستة أشكال — اضغط الأرقام وقلّي أي واحد</p>
   </header>
   <div class="styles" id="styles"></div>
   <div id="map"></div>
@@ -71,17 +71,30 @@ function forceArabic(m) {
 }
 
 let current = null;
+
+function vector(url) {
+  return () => {
+    const gl = L.maplibreGL({ style: url });
+    gl.on('add', () => {
+      const m = gl.getMaplibreMap();
+      m.on('styledata', () => forceArabic(m));
+      if (m.isStyleLoaded && m.isStyleLoaded()) forceArabic(m);
+    });
+    return gl;
+  };
+}
+
+const OFM = 'https://tiles.openfreemap.org/styles/';
+const VT  = 'https://tiles.versatiles.org/assets/styles/';
+
 const STYLES = [
-  { id:'osm',  name:'١ — الحالي (OpenStreetMap)', build(){
+  { n:'١', name:'١ — الحالي (OpenStreetMap)', build(){
       return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }); } },
-  { id:'vec',  name:'٢ — الجديد (نفس شكل Baly)', build(){
-      const gl = L.maplibreGL({ style:'https://tiles.openfreemap.org/styles/liberty' });
-      gl.on('add', () => {
-        const m = gl.getMaplibreMap();
-        m.on('styledata', () => forceArabic(m));
-        if (m.isStyleLoaded && m.isStyleLoaded()) forceArabic(m);
-      });
-      return gl; } },
+  { n:'٢', name:'٢ — Liberty', build: vector(OFM + 'liberty') },
+  { n:'٣', name:'٣ — Bright (حدائق خضر واضحة)', build: vector(OFM + 'bright') },
+  { n:'٤', name:'٤ — Positron (فاتح وهادئ)', build: vector(OFM + 'positron') },
+  { n:'٥', name:'٥ — Colorful', build: vector(VT + 'colorful/style.json') },
+  { n:'٦', name:'٦ — Neutrino (بسيط جداً)', build: vector(VT + 'neutrino/style.json') },
 ];
 
 function pick(i) {
@@ -93,8 +106,9 @@ function pick(i) {
 }
 
 document.getElementById('styles').innerHTML = STYLES.map((s,i) =>
-  `<button class="sbtn" onclick="pick(${i})">${'١٢'[i]} ${s.id==='osm'?'الحالي':'الجديد'}</button>`).join('');
-pick(1);   // نبدي بالجديد
+  `<button class="sbtn" onclick="pick(${i})">${s.n}</button>`).join('');
+
+pick(2);   // نبدي بالأقرب لـBaly
 </script>
 </body>
 </html>
