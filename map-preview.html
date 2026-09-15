@@ -25,6 +25,11 @@
     font-size:13.5px; font-weight:700; text-align:center; margin-bottom:9px; }
   .hint { font-size:11.5px; color:var(--muted); line-height:1.6; text-align:center; }
   .nav-arrow { transform-origin:50% 50%; }
+  .locate { position:absolute; bottom:16px; left:16px; z-index:600; width:46px; height:46px;
+    background:#fff; border:none; border-radius:50%; box-shadow:0 3px 12px rgba(0,0,0,.2);
+    font-size:21px; cursor:pointer; }
+  .maprap { position:relative; flex:1; min-height:0; display:flex; }
+  .maprap #map { flex:1; }
 </style>
 </head>
 <body>
@@ -34,7 +39,10 @@
     <p>اضغط الأرقام فوق وقلّي أي واحد يعجبك</p>
   </header>
   <div class="styles" id="styles"></div>
-  <div id="map"></div>
+  <div class="maprap">
+    <div id="map"></div>
+    <button class="locate" onclick="goToMe()" title="موقعي">◎</button>
+  </div>
   <div class="panel">
     <div class="name" id="sname">—</div>
     <div class="hint">كبّر وصغّر وتنقّل بالخريطة — شوف الأسماء والشوارع والحدائق</div>
@@ -58,12 +66,33 @@ const MUSAYYIB = [32.7789, 44.2892];
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 16);
 L.control.zoom({ position:'topright' }).addTo(map);
 
-// سهم السائق حتى تشوف الشكل كامل
-L.marker(MUSAYYIB, { interactive:false, icon: L.divIcon({ className:'', iconSize:[0,0],
-  html:`<div class="nav-arrow" style="transform:translate(-50%,-50%) rotate(35deg)">
-    <svg width="42" height="42" viewBox="0 0 46 46">
-      <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
-      <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/></svg></div>` }) }).addTo(map);
+/* موقعك الحقيقي — أحسن ما تحكم على الخريطة وإنت تشوف شوارعك اللي تعرفها */
+let me = null, myLatLng = null;
+function drawMe(lat, lng) {
+  myLatLng = [lat, lng];
+  const icon = L.divIcon({ className:'', iconSize:[0,0],
+    html:`<div class="nav-arrow" style="transform:translate(-50%,-50%)">
+      <svg width="42" height="42" viewBox="0 0 46 46">
+        <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
+        <circle cx="23" cy="23" r="7" fill="#fff"/></svg></div>` });
+  if (me) me.setLatLng(myLatLng).setIcon(icon);
+  else me = L.marker(myLatLng, { interactive:false, icon }).addTo(map);
+}
+function goToMe() {
+  if (myLatLng) return map.setView(myLatLng, Math.max(map.getZoom(), 16), { animate:true });
+  map.setView(MUSAYYIB, 16);
+}
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(
+    (p) => {
+      const first = !myLatLng;
+      drawMe(p.coords.latitude, p.coords.longitude);
+      if (first) map.setView(myLatLng, 16);      // أول مرة بس — بعدين ما نزعجه وهو يتنقل
+    },
+    () => {},
+    { enableHighAccuracy:true, maximumAge:5000, timeout:10000 }
+  );
+}
 
 /* نجبر الأسماء تطلع بالعربي بس.
    نمط liberty يعرض الاسمين سوا (Al Misiab + المصيب)، وإحنا نريد العربي لحاله. */

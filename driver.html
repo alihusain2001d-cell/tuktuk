@@ -178,6 +178,16 @@
   }
   .work-view.map-full .map-expand { display:none; }
 
+  /* رجّعني على موقعي — لو حرّك السائق الخريطة ما كان يقدر يرجع إلا ينتظر المتابعة التلقائية */
+  .map-locate {
+    position:absolute; top:62px; right:12px; z-index:400;
+    background:#fff; border:none; border-radius:12px; width:42px; height:42px;
+    font-size:20px; cursor:pointer; box-shadow:0 3px 12px rgba(0,0,0,.15);
+    display:flex; align-items:center; justify-content:center; color:var(--ink);
+  }
+  .map-locate:active { transform:scale(.93); }
+  .work-view.map-full .map-locate { top:12px; }
+
   .panel {
     background:#fff; border-radius:22px 22px 0 0; box-shadow:0 -6px 24px rgba(14,42,61,.1);
     padding:18px 18px calc(18px + env(safe-area-inset-bottom)); z-index:600;
@@ -631,6 +641,7 @@
 
     <div class="map-hint" id="map-hint">👆 اضغط الخريطة حتى تكبّرها</div>
     <button class="map-expand" onclick="toggleMapFull(true)" title="كبّر الخريطة">⛶</button>
+    <button class="map-locate" onclick="centerOnMe()" title="رجّعني على موقعي">◎</button>
     <button class="map-exit" onclick="toggleMapFull(false)">✕ رجوع</button>
 
     <div class="map-mini" id="map-mini">
@@ -1526,6 +1537,14 @@ function initMap() {
 
   // نخفي التلميح بعد ٦ ثواني
   setTimeout(() => { const h = document.getElementById('map-hint'); if (h) h.style.opacity = '0'; }, 6000);
+}
+
+/* يرجّع الخريطة على موقع السائق، ويخلي المتابعة التلقائية تكمل من جديد.
+   بدونه لو السائق سحب الخريطة يبقى ضايع لحد ما ترجع لحالها. */
+function centerOnMe() {
+  if (!map) return;
+  map.setView([myPos.lat, myPos.lng], Math.max(map.getZoom(), 17), { animate: true });
+  routeFitDone = true;   // المتابعة تكمل من هنا بدل ما تصفّر تكبيره
 }
 
 // تكبير/تصغير الخريطة
