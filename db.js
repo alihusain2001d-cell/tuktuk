@@ -43,7 +43,17 @@ async function init() {
     console.log('⚠️  ماكو DATABASE_URL — نشتغل بالذاكرة (البيانات تنمسح عند إعادة النشر)');
     return false;
   }
-  // تأكد من الاتصال أول
+  // تأكد من الاتصال أول — مع إعادة محاولة.
+  // شبكة Railway الداخلية (.railway.internal) تاخذ كام ثانية حتى تجهز بعد ما يقوم
+  // السيرفر، فلو نحاول نتصل فوراً تفشل ويدخل بدورة إعادة تشغيل.
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try { await pool.query('SELECT 1'); break; }
+    catch (e) {
+      if (attempt === 5) break; // نخلي المحاولة الأخيرة تطلع بالـ try جاي حتى تطبع الخطأ الواضح
+      console.log(`⏳ القاعدة بعدها مو جاهزة (محاولة ${attempt}/5) — نعيد بعد ${attempt * 2} ثانية...`);
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
   try {
     const test = await pool.query('SELECT 1 AS ok');
     const host = (process.env.DATABASE_URL.match(/@([^:/]+)/) || [])[1] || '؟';
