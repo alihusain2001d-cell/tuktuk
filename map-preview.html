@@ -45,6 +45,15 @@
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script>
+/* ⚙️ إضافة النص من اليمين لليسار — بدونها العربي يطلع مقلوب ومفكك
+   ("بيسملا" بدل "المسيب"). لازم تنحمّل قبل ما تنبني الخريطة. */
+if (window.maplibregl && maplibregl.getRTLTextPluginStatus &&
+    maplibregl.getRTLTextPluginStatus() === 'unavailable') {
+  maplibregl.setRTLTextPlugin(
+    'https://cdn.jsdelivr.net/npm/@mapbox/mapbox-gl-rtl-text@0.2.3/mapbox-gl-rtl-text.min.js',
+    null, true);
+}
+
 const MUSAYYIB = [32.7789, 44.2892];
 const map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 16);
 L.control.zoom({ position:'topright' }).addTo(map);
