@@ -1474,6 +1474,20 @@ async function getComplaints(limit = 50, driverId = null) {
 }
 
 // ============ إعدادات الأجرة ============
+// يحدّث أجرة رحلة بعد ما تخلص — للرحلات اللي ما كان إلها سعر ثابت من البداية
+// (بدون وجهة، أو الزبون غيّر الوجهة ومشوا أبعد)
+async function setRideFare(rideId, km, fare, customerPaid) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(rideId);
+    if (r) { r.estKm = km; r.estFare = fare; r.customerPaid = customerPaid; }
+    return;
+  }
+  await pool.query(
+    'UPDATE rides SET est_km=$2, est_fare=$3, customer_paid=$4 WHERE id=$1',
+    [rideId, km, fare, customerPaid]
+  );
+}
+
 async function getFareSettings() {
   if (!HAS_DB) {
     return mem.fareSettings || (mem.fareSettings = { mode: 'per_km', base: 1000, per_km: 500, minimum: 1500, fixed_price: 2000 });
@@ -1532,7 +1546,7 @@ module.exports = {
   payDriverRewardsInFull, getDriverFullStatement,
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
-  getFareSettings, setFareSettings,
+  getFareSettings, setFareSettings, setRideFare,
   saveDriverPushSubscription, clearDriverPushSubscription, getDriversForPush, setDriverAvailability,
   saveCustomerPushSubscription, clearCustomerPushSubscription, getCustomerPushSubscription,
 };

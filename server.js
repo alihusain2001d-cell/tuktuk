@@ -190,6 +190,18 @@ wss.on('connection', (ws) => {
           for (const ride of activeRides.values()) {
             if (ride.driverId === ws._driverId && ['accepted','arrived','started'].includes(ride.status)) {
               sendTo(ride.customerSocketId, 'driver:moved', { lat: data.lat, lng: data.lng });
+
+              /* نقيس الكيلومترات اللي مشاها السائق من ما تبدي الرحلة.
+                 نحتاجها بحالتين: الزبون ما حدّد وجهة أصلاً، أو حدّد وغيّرها بالطريق ومشوا أبعد.
+                 القياس بالسيرفر مو بالموبايل: الموبايل ينقطع وممكن يتلاعب بيه. */
+              if (ride.status === 'started') {
+                if (ride.lastPos) {
+                  const step = haversine(ride.lastPos.lat, ride.lastPos.lng, data.lat, data.lng);
+                  // قفزات الـGPS الكبيرة غلط، والزغيرة جداً تشويش وهو واقف
+                  if (step > 0.005 && step < 0.5) ride.trackedKm = (ride.trackedKm || 0) + step;
+                }
+                ride.lastPos = { lat: data.lat, lng: data.lng };
+              }
             }
           }
           break;
@@ -990,6 +1002,42 @@ app.post('/api/complete', async (req, res) => {
     const ride = activeRides.get(req.body.rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     ride.status = 'done';
+
+    /* التسعير النهائي على الكيلومترات الفعلية:
+         • ماكو وجهة → نحسب الأجرة كلها من المسافة اللي مشاها
+         • أكو وجهة بس مشوا أبعد → نضيف الزايد بس
+         • مشوا أقل → السعر ما يتغير، الزبون اتفق عليه من البداية
+       وبوضع السعر الثابت ما نضيف شي — معنى السعر الثابت إنه ثابت. */
+    const TOLERANCE_KM = 0.5;   // فرق بسيط بسبب الطريق أو دقة الـGPS — ما نحاسب عليه
+    let pricing = null;
+    const drivenKm = Math.round((ride.trackedKm || 0) * 10) / 10;
+
+    if (!ride.offerPrice) {                   // طلبات التوصيل سعرها متفق عليه مسبقاً
+      const f = await db.getFareSettings();
+      const perKm = f.per_km || 0;
+
+      if (!ride.destination) {
+        let fare = f.mode === 'fixed'
+          ? (f.fixed_price || 0)
+          : (f.base || 0) + Math.round(drivenKm * perKm);
+        fare = Math.max(fare, f.minimum || 0);
+        fare = Math.round(fare / 250) * 250;
+        pricing = { reason: 'no_destination', km: drivenKm, base: fare, extraKm: 0, extra: 0, fare };
+      } else if (f.mode !== 'fixed' && drivenKm > (ride.estKm || 0) + TOLERANCE_KM) {
+        const extraKm = Math.round((drivenKm - (ride.estKm || 0)) * 10) / 10;
+        const extra = Math.round((extraKm * perKm) / 250) * 250;
+        const fare = (ride.estFare || 0) + extra;
+        pricing = { reason: 'longer_trip', km: drivenKm, base: ride.estFare || 0, extraKm, extra, fare };
+      }
+
+      if (pricing) {
+        ride.estKm = pricing.km;
+        ride.estFare = pricing.fare;
+        if (!ride.rewardId) ride.customerPaid = pricing.fare;   // المكافأة تبقى مثل ما هي
+        await db.setRideFare(ride.id, ride.estKm, ride.estFare, ride.customerPaid);
+      }
+    }
+
     await db.updateRideStatus(ride.id, 'done');
 
     // لو الرحلة استخدمت مكافأة، سجّل المبلغ المستحق للسائق (الفرق بين الأجرة الحقيقية واللي دفعه الزبون)
@@ -1002,10 +1050,19 @@ app.post('/api/complete', async (req, res) => {
     if (ride.customer?.phone) await db.maybeGrantAutoReward(ride.customer.phone);
 
     const paidByCustomer = ride.customerPaid != null ? ride.customerPaid : ride.estFare;
-    sendTo(ride.customerSocketId, 'ride:done', { fare: paidByCustomer, estFare: ride.estFare });
-    pushToCustomer(ride.customer.phone, { title: '✅ انتهت الرحلة', body: 'شكراً لاستخدامك جايك 🙏', url: '/index.html' });
+    sendTo(ride.customerSocketId, 'ride:done', {
+      fare: paidByCustomer, estFare: ride.estFare, km: ride.estKm, pricing,
+    });
+    pushToCustomer(ride.customer.phone, {
+      title: '✅ انتهت الرحلة',
+      body: pricing
+        ? `الأجرة: ${paidByCustomer.toLocaleString()} د.ع (${pricing.km} كم)`
+        : 'شكراً لاستخدامك جايك',
+      url: '/index.html',
+    });
     activeRides.delete(ride.id);
-    res.json({ ok: true, fare: paidByCustomer, estFare: ride.estFare, rewardPayout });
+    res.json({ ok: true, fare: paidByCustomer, estFare: ride.estFare,
+               km: ride.estKm, pricing, rewardPayout });
   } catch (e) {
     console.error('خطأ بالإنهاء:', e.message);
     res.status(500).json({ error: 'خطأ' });

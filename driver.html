@@ -305,6 +305,14 @@
   .chip { padding:7px 14px; border-radius:20px; font-size:12.5px; font-weight:600; background:#fff; border:1.5px solid var(--line); color:var(--muted); cursor:pointer; white-space:nowrap; flex-shrink:0; }
   .chip.active { background:var(--sky); border-color:var(--sky); color:var(--ink); }
 
+  /* نافذة السعر النهائي */
+  .ff-amount { font-size:38px; font-weight:800; color:var(--go); text-align:center; margin:6px 0 4px; }
+  .ff-row { display:flex; justify-content:space-between; align-items:center; padding:11px 0;
+    border-bottom:1px dashed var(--line); font-size:14px; }
+  .ff-row:last-child { border-bottom:none; }
+  .ff-row b { font-size:15px; }
+  .ff-note { font-size:12px; color:var(--muted); line-height:1.6; text-align:center; margin:12px 0 16px; }
+
   .cancel-modal-bg { position:fixed; inset:0; background:rgba(26,26,26,.6); z-index:2600; display:none; align-items:center; justify-content:center; padding:20px; }
   .cancel-modal-bg.show { display:flex; }
   .cancel-modal { background:#fff; border-radius:20px; padding:22px; width:100%; max-width:360px; }
@@ -735,6 +743,17 @@
         <button class="btn ghost" onclick="declineIncoming()">تجاهل</button>
         <button class="btn go" id="inc-accept-btn" onclick="acceptIncoming()">اقبل الطلب ✅</button>
       </div>
+    </div>
+  </div>
+
+  <div class="cancel-modal-bg" id="final-fare-modal">
+    <div class="cancel-modal">
+      <h3 style="text-align:center">انتهت الرحلة</h3>
+      <div class="ff-amount" id="ff-total">—</div>
+      <div style="font-size:12.5px;color:var(--muted);text-align:center;margin-bottom:14px">تاخذها من الزبون</div>
+      <div id="ff-rows"></div>
+      <div class="ff-note" id="ff-note"></div>
+      <button class="btn go" onclick="closeFinalFare()">تمام</button>
     </div>
   </div>
 
@@ -2393,11 +2412,31 @@ async function confirmNoShowCancel() {
 async function finishRide() {
   if (!activeRide) return;
   const out = await fetch('/api/complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) }).then(r=>r.json());
+  /* الرحلات اللي ما كان إلها سعر من البداية (بلا وجهة، أو الزبون غيّر
+     وجهته ومشوا أبعد) يجي تفصيلها بالرد — نعرضه للسائق حتى يعرف شدي ياخذ. */
+  if (out.pricing) { showFinalFare(out.pricing); endActive(); return; }
+
   let msg = 'انتهى الطلب، عاشت إيدك 🙏';
   if (out.rewardPayout != null) { msg += ` — رحلة مجانية للزبون 🎁 (${(out.estFare||0).toLocaleString()} د.ع) — الإدارة تدفعلك ${out.rewardPayout.toLocaleString()} د.ع`; toast(msg, 6000); }
   else { if (out.fare) msg += ` (+${out.fare.toLocaleString()} د.ع)`; toast(msg); }
   endActive();
 }
+
+/* نافذة السعر النهائي — مو توست يختفي، لأن هذا المبلغ
+   اللي راح ياخذه من الزبون ولازم يقراه براحته. */
+function showFinalFare(p) {
+  const rows = p.reason === 'longer_trip'
+    ? `<div class="ff-row"><span>الأجرة المتفق عليها</span><b>${p.base.toLocaleString()}</b></div>
+       <div class="ff-row"><span>إضافي (${p.extraKm} كم زيادة)</span><b>+${p.extra.toLocaleString()}</b></div>`
+    : `<div class="ff-row"><span>المسافة اللي مشيتها</span><b>${p.km} كم</b></div>`;
+  document.getElementById('ff-rows').innerHTML = rows;
+  document.getElementById('ff-total').textContent = p.fare.toLocaleString() + ' د.ع';
+  document.getElementById('ff-note').textContent = p.reason === 'longer_trip'
+    ? 'الزبون غيّر وجهته ومشيتوا أبعد — نفس المبلغ يطلع عنده بالتطبيق'
+    : 'الزبون ما حدّد وجهة، فالأجرة انحسبت على المسافة — نفس المبلغ يطلع عنده';
+  document.getElementById('final-fare-modal').classList.add('show');
+}
+function closeFinalFare() { document.getElementById('final-fare-modal').classList.remove('show'); }
 
 function endActive() {
   activeRide = null; customerPhone='';

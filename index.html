@@ -293,6 +293,13 @@
 
   /* سهم السائق على خريطة التتبع — لفة ناعمة باتجاه سيره */
   .nav-arrow { transform-origin:50% 50%; transition:transform .4s ease-out; }
+  /* أجرة الرحلة النهائية بشاشة التقييم */
+  .final-fare { background:#FFF9E8; border:1.5px solid #FFE3B0; border-radius:16px;
+    padding:16px; text-align:center; margin-bottom:18px; }
+  .final-fare .ff-lbl { font-size:12.5px; color:var(--muted); font-weight:600; }
+  .final-fare .ff-amt { font-size:32px; font-weight:800; color:#B26A00; margin:4px 0 2px; }
+  .final-fare .ff-detail { font-size:12px; color:var(--muted); line-height:1.6; }
+
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -651,6 +658,12 @@
   <div class="flow-screen" id="flow-rate">
     <div class="flow-head"><h2>قيّم رحلتك</h2></div>
     <div class="offer-review">
+      <!-- يبيّن بس لو الأجرة انحسبت بالنهاية (ما كان إلها سعر متفق عليه) -->
+      <div class="final-fare hidden" id="final-fare">
+        <div class="ff-lbl">أجرة رحلتك</div>
+        <div class="ff-amt" id="ff-amt">—</div>
+        <div class="ff-detail" id="ff-detail"></div>
+      </div>
       <div style="text-align:center;margin-bottom:18px">
         <div style="font-size:44px;margin-bottom:8px">⭐</div>
         <h2 style="margin-bottom:5px">شلون كانت رحلتك؟</h2>
@@ -2001,7 +2014,10 @@ function onTripStarted() {
   lastDriverRouteFetch = 0; // نجبر تحديث فوري لمسار الوجهة الجديدة
 }
 
+let lastPricing = null;
+
 function onDone(data) {
+  lastPricing = (data && data.pricing) || null;
   let fareMsg = '';
   if (data && data.fare != null) {
     if (data.fare > 0) fareMsg = ` — الأجرة ${data.fare.toLocaleString()} د.ع`;
@@ -2029,6 +2045,19 @@ function pickStar(v) {
 }
 
 function openRateScreen() {
+  /* لو الأجرة انحسبت بالنهاية (ما حدّد وجهة، أو غيّرها ومشوا أبعد)
+     نعرضها واضحة هنا — التوست يختفي والزبون راح يدفع هذا المبلغ. */
+  const box = document.getElementById('final-fare');
+  if (lastPricing) {
+    document.getElementById('ff-amt').textContent = lastPricing.fare.toLocaleString() + ' د.ع';
+    document.getElementById('ff-detail').textContent = lastPricing.reason === 'longer_trip'
+      ? `المتفق عليه ${lastPricing.base.toLocaleString()} + ${lastPricing.extra.toLocaleString()} لأن المشوار طال ${lastPricing.extraKm} كم`
+      : `انحسبت على ${lastPricing.km} كم من المسافة اللي قطعتوها`;
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
+  }
+
   selectedRating = 0;
   document.getElementById('rate-note').value = '';
   document.querySelectorAll('#star-row .star').forEach(s => { s.textContent = '☆'; s.classList.remove('sel'); });
