@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>جايك — تجربة شكل الخريطة</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
+  :root { --ink:#1A1A1A; --sky:#FFC800; --sky-dark:#E0AC00; --line:#EDE7DA; --muted:#8A8270; --go:#12A150; }
+  html,body { height:100%; background:#fff; color:var(--ink); overflow:hidden; }
+  #app { height:100vh; display:flex; flex-direction:column; }
+
+  header { background:#fff; padding:12px 16px; box-shadow:0 1px 10px rgba(0,0,0,.08); z-index:500; flex-shrink:0; }
+  header h1 { font-size:16px; margin-bottom:2px; }
+  header p { font-size:11.5px; color:var(--muted); }
+
+  .styles { display:flex; gap:8px; padding:11px 14px; background:#fff; overflow-x:auto; z-index:500;
+    border-bottom:1px solid var(--line); flex-shrink:0; }
+  .style-btn { flex-shrink:0; padding:9px 15px; border:1.5px solid var(--line); border-radius:11px; background:#fff;
+    font-size:13px; font-weight:700; font-family:inherit; color:var(--ink); cursor:pointer; white-space:nowrap; }
+  .style-btn.on { background:var(--sky); border-color:var(--sky-dark); }
+  .style-btn .num { color:var(--muted); font-weight:400; font-size:11px; }
+  .style-btn.on .num { color:#7a5f00; }
+
+  #map { flex:1; min-height:0; background:#DCE9F0; }
+
+  /* سهم الاتجاه — يلف مثل ويز */
+  .nav-arrow { transform-origin:50% 50%; transition:transform .35s ease-out; }
+
+  .panel { background:#fff; padding:13px 16px 16px; box-shadow:0 -2px 14px rgba(0,0,0,.09); z-index:500; flex-shrink:0; }
+  .panel .row { display:flex; align-items:center; gap:11px; margin-bottom:11px; }
+  .panel .row:last-child { margin-bottom:0; }
+  .panel label { font-size:12.5px; font-weight:700; flex-shrink:0; }
+  .panel input[type=range] { flex:1; accent-color:var(--sky-dark); }
+  .deg { font-size:13px; font-weight:800; min-width:44px; text-align:left; font-variant-numeric:tabular-nums; }
+  .hint { font-size:11.5px; color:var(--muted); line-height:1.5; }
+  .spin-btn { background:var(--go); color:#fff; border:none; border-radius:10px; padding:9px 14px;
+    font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer; flex-shrink:0; }
+  .name-box { background:#FFF9E8; border:1.5px solid #FFE3B0; border-radius:11px; padding:10px 13px;
+    font-size:13px; font-weight:700; margin-bottom:11px; text-align:center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🗺️ اختر شكل الخريطة</h1>
+    <p>جرّبهن كلهن بموبايلك، وقلّي رقم الي يعجبك</p>
+  </header>
+
+  <div class="styles" id="styles"></div>
+
+  <div id="map"></div>
+
+  <div class="panel">
+    <div class="name-box" id="style-name">—</div>
+    <div class="row">
+      <label>اتجاه السهم</label>
+      <input type="range" id="heading" min="0" max="359" value="45">
+      <span class="deg" id="deg">45°</span>
+      <button class="spin-btn" id="spin">لفّه</button>
+    </div>
+    <div class="hint">
+      السهم الأزرق = السائق. بالتطبيق راح يلف لحاله حسب اتجاه سياقته (مثل ويز).
+      حرّك المؤشر فوق حتى تشوف شلون يلف.
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const MUSAYYIB = [32.7789, 44.2892];
+
+// الأشكال المعروضة للاختيار
+const STYLES = [
+  { id:'osm', name:'١ — الحالي (OpenStreetMap)',
+    url:'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', max:19 },
+  { id:'voyager', name:'٢ — ملوّن وواضح (الأقرب لويز)',
+    url:'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', max:20, sub:'abcd' },
+  { id:'positron', name:'٣ — فاتح وهادئ',
+    url:'https://{s}.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png', max:20, sub:'abcd' },
+  { id:'dark', name:'٤ — داكن (وضع ليلي)',
+    url:'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', max:20, sub:'abcd' },
+];
+
+const map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 16);
+L.control.zoom({ position:'topright' }).addTo(map);
+
+let layer = null;
+function applyStyle(s) {
+  if (layer) map.removeLayer(layer);
+  const opts = { maxZoom: s.max };
+  if (s.sub) opts.subdomains = s.sub;
+  layer = L.tileLayer(s.url, opts).addTo(map);
+  document.getElementById('style-name').textContent = s.name;
+  document.querySelectorAll('.style-btn').forEach(b => b.classList.toggle('on', b.dataset.id === s.id));
+}
+
+// أزرار الاختيار
+document.getElementById('styles').innerHTML = STYLES.map((s,i) =>
+  `<button class="style-btn" data-id="${s.id}" onclick="pick(${i})">${'١٢٣٤'[i]} <span class="num">${s.id}</span></button>`
+).join('');
+function pick(i){ applyStyle(STYLES[i]); }
+
+// ===== سهم السائق (يلف مثل ويز) =====
+function arrowHTML(deg) {
+  return `<div class="nav-arrow" style="transform:translate(-50%,-50%) rotate(${deg}deg)">
+    <svg width="46" height="46" viewBox="0 0 46 46">
+      <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
+      <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/>
+    </svg></div>`;
+}
+let heading = 45;
+const meMarker = L.marker(MUSAYYIB, {
+  icon: L.divIcon({ className:'', html: arrowHTML(heading), iconSize:[0,0] }), interactive:false
+}).addTo(map);
+
+function setHeading(d) {
+  heading = ((d % 360) + 360) % 360;
+  meMarker.setIcon(L.divIcon({ className:'', html: arrowHTML(heading), iconSize:[0,0] }));
+  document.getElementById('heading').value = heading;
+  document.getElementById('deg').textContent = heading + '°';
+}
+document.getElementById('heading').addEventListener('input', e => setHeading(+e.target.value));
+
+// زر "لفّه" — يوري شلون يلف وهو ماشي
+let spinning = null;
+document.getElementById('spin').addEventListener('click', () => {
+  if (spinning) { clearInterval(spinning); spinning = null; document.getElementById('spin').textContent = 'لفّه'; return; }
+  document.getElementById('spin').textContent = 'وقّف';
+  spinning = setInterval(() => setHeading(heading + 15), 400);
+});
+
+applyStyle(STYLES[1]); // نبدي بالمقترح
+setHeading(45);
+</script>
+</body>
+</html>
