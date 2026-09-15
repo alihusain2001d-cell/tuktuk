@@ -770,11 +770,12 @@ app.get('/api/driver/pending-rides', async (req, res) => {
 // بالكود، لأن المستودع عام على GitHub والبوتات تلقط المفاتيح منه.
 app.get('/api/map-config', (req, res) => {
   res.json({
-    tiles: LOCATIONIQ_API_KEY
-      ? `https://{s}-tiles.locationiq.com/v3/streets/r/{z}/{x}/{y}.png?key=${LOCATIONIQ_API_KEY}`
-      : null,
+    // LocationIQ ترسم الأسماء بالإنكليزي فقط (العربي يحتاج خرائط vector
+    // يعني استبدال Leaflet بالكامل)، والسواق هنا يقرون عربي.
+    // OpenStreetMap تعرض الأسماء المحلية — عربي بالعراق.
+    tiles: null,
     subdomains: 'abc',
-    maxZoom: 20,
+    maxZoom: 19,
   });
 });
 

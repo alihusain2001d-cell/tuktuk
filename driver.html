@@ -614,6 +614,8 @@
       <div class="dr-item" data-tab="owed" onclick="switchTab('owed')"><span class="di-ico">🎁</span><span>مستحقاتي من الإدارة</span><span class="di-val" id="dr-owed-val"></span></div>
       <div class="dr-item" data-tab="trips" onclick="switchTab('trips')"><span class="di-ico">📋</span><span>آخر الطلبات</span></div>
 
+      <div class="dr-item hidden" id="dr-compass" onclick="enableCompassFromMenu()"><span class="di-ico">🧭</span><span>تفعيل البوصلة</span></div>
+
       <div class="dr-sep"></div>
       <div class="dr-label">الدعم الفني</div>
       <div class="dr-item" id="dr-call" onclick="supportCall()"><span class="di-ico">📞</span><span>اتصل بالدعم</span></div>
@@ -1465,26 +1467,52 @@ function onCompassEvent(e) {
   if (deg != null) setMyHeading(deg, 'compass');
 }
 
-async function enableCompass() {
-  if (compassOn) return;
+/* نحفظ جواب السائق — بدونه كنا نسأل كل مرة يفتح بيها التطبيق،
+   وهذا مزعج خصوصاً بالآيفون. لو رفض مرة، ما نرجع نزعجه. */
+const COMPASS_KEY = 'jayak_compass';
+
+async function enableCompass(manual) {
+  if (compassOn) return true;
   try {
     const DOE = window.DeviceOrientationEvent;
-    if (!DOE) return;
-    // الآيفون (iOS 13+) يطلب إذن صريح
+    if (!DOE) return false;
     if (typeof DOE.requestPermission === 'function') {
+      // رفضها قبل؟ ما نسأل من جديد إلا إذا طلبها هو من القائمة
+      if (!manual && localStorage.getItem(COMPASS_KEY) === 'denied') return false;
       const perm = await DOE.requestPermission();
-      if (perm !== 'granted') return;
+      localStorage.setItem(COMPASS_KEY, perm === 'granted' ? 'granted' : 'denied');
+      if (perm !== 'granted') { updateCompassMenu(); return false; }
     }
     window.addEventListener('deviceorientationabsolute', onCompassEvent, true);
     window.addEventListener('deviceorientation', onCompassEvent, true);
     compassOn = true;
-  } catch (e) { /* ما توفرت البوصلة — نكمل بالـGPS عادي */ }
+    localStorage.setItem(COMPASS_KEY, 'granted');
+    updateCompassMenu();
+    return true;
+  } catch (e) { return false; }
 }
 
-// أول ضغطة من السائق على أي مكان = اللحظة الوحيدة اللي نقدر نطلب بيها إذن الآيفون
+// يبيّن خيار البوصلة بالقائمة بس إذا ما هي مفعّلة
+function updateCompassMenu() {
+  const el = document.getElementById('dr-compass');
+  if (el) el.classList.toggle('hidden', compassOn);
+}
+
+async function enableCompassFromMenu() {
+  closeDrawer();
+  const ok = await enableCompass(true);
+  toast(ok ? 'البوصلة اشتغلت ✅ — السهم راح يلف حتى وإنت واقف'
+             : 'ما انسمح للبوصلة — السهم راح يلف بس وإنت تسوق');
+}
+
+/* نحاول نفعّلها بهدوء بس إذا السائق سمح 
+   بالسابق — وإلا يفعّلها هو من القائمة وقت ما يريد. */
 document.addEventListener('click', function once() {
   document.removeEventListener('click', once);
-  enableCompass();
+  const saved = localStorage.getItem(COMPASS_KEY);
+  const needsPrompt = typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+  if (!needsPrompt || saved === 'granted') enableCompass(false);
+  else updateCompassMenu();   // ما سألناه بعد — نخليها خيار بالقائمة
 }, { once: true });
 
 function initMap() {
