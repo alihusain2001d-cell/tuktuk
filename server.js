@@ -50,10 +50,19 @@ let serverReady = false;
 app.get('/health', async (req, res) => {
   if (!serverReady) return res.status(503).json({ ok: false, reason: 'booting' });
   try {
+    // نقيس زمن الاستعلام من جوّا السيرفر — القياس من برّا ينضاف إله بعد المسافة
+    // بين المتصفح والسيرفر، فما يبيّن إذا البطء من القاعدة ولا من الطريق.
+    const t0 = Date.now();
     await db.ping();
+    const dbMs = Date.now() - t0;
+    const url = process.env.DATABASE_URL || '';
     res.json({
       ok: true,
       db: db.HAS_DB ? 'postgres' : 'memory',
+      dbMs,
+      // اسم المضيف نفسه ما ننشره — بس نوع الشبكة يكفي للتشخيص
+      dbNet: url.includes('.railway.internal') ? 'private' : (url ? 'public' : 'none'),
+      region: process.env.RAILWAY_REPLICA_REGION || process.env.RAILWAY_REGION || null,
       activeRides: activeRides.size,
       onlineDrivers: onlineDrivers.size,
       uptimeSec: Math.round(process.uptime()),
