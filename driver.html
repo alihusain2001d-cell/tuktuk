@@ -1252,11 +1252,60 @@ function bearingBetween(a, b) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-function setMyHeading(deg) {
+let lastGpsHeadingAt = 0;   // آخر مرة عرفنا الاتجاه من الحركة
+
+function setMyHeading(deg, source) {
   if (deg == null || isNaN(deg)) return;
-  myHeading = ((deg % 360) + 360) % 360;
+  // وهو يسوق، اتجاه الحركة أصدق من البوصلة (الموبايل ممكن يكون مايل بالجيب).
+  // فلو جتنا قراءة من الـGPS قبل شوي، نتجاهل البوصلة.
+  if (source === 'compass' && Date.now() - lastGpsHeadingAt < 6000) return;
+  if (source === 'gps') lastGpsHeadingAt = Date.now();
+
+  const next = ((deg % 360) + 360) % 360;
+  // البوصلة ترجف شوية — ما نعيد الرسم على فرق بسيط
+  let diff = Math.abs(next - myHeading);
+  if (diff > 180) diff = 360 - diff;
+  if (source === 'compass' && diff < 4) return;
+
+  myHeading = next;
   if (meMarker) meMarker.setIcon(meIcon());
 }
+
+/* ===== البوصلة =====
+   بدونها السهم ما يلف إلا والسائق يتحرك فعلاً — وهو واقف يبقى ثابت.
+   ويز يلف حتى وهو واقف لأنه يقرا بوصلة الموبايل.
+   الآيفون يطلب إذن، والإذن ما ينطلب إلا من ضغطة حقيقية من السائق. */
+let compassOn = false;
+
+function onCompassEvent(e) {
+  // الآيفون يعطي اتجاه الشمال جاهز؛ الأندرويد يعطي alpha بعكس عقارب الساعة
+  let deg = null;
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) deg = e.webkitCompassHeading;
+  else if (e.absolute && typeof e.alpha === 'number' && !isNaN(e.alpha)) deg = 360 - e.alpha;
+  if (deg != null) setMyHeading(deg, 'compass');
+}
+
+async function enableCompass() {
+  if (compassOn) return;
+  try {
+    const DOE = window.DeviceOrientationEvent;
+    if (!DOE) return;
+    // الآيفون (iOS 13+) يطلب إذن صريح
+    if (typeof DOE.requestPermission === 'function') {
+      const perm = await DOE.requestPermission();
+      if (perm !== 'granted') return;
+    }
+    window.addEventListener('deviceorientationabsolute', onCompassEvent, true);
+    window.addEventListener('deviceorientation', onCompassEvent, true);
+    compassOn = true;
+  } catch (e) { /* ما توفرت البوصلة — نكمل بالـGPS عادي */ }
+}
+
+// أول ضغطة من السائق على أي مكان = اللحظة الوحيدة اللي نقدر نطلب بيها إذن الآيفون
+document.addEventListener('click', function once() {
+  document.removeEventListener('click', once);
+  enableCompass();
+}, { once: true });
 
 function initMap() {
   map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
@@ -1398,9 +1447,9 @@ function startWatchingPosition() {
       // اتجاه السياقة: من الـGPS إذا متوفر، وإلا نحسبه من حركته بين نقطتين.
       // نتجاهل الحركة الزغيرة جداً — تشويش الـGPS يخلي السهم يرجف وهو واقف.
       if (pos.coords.heading != null && !isNaN(pos.coords.heading) && pos.coords.speed > 0.5) {
-        setMyHeading(pos.coords.heading);
+        setMyHeading(pos.coords.heading, 'gps');
       } else if (prev && haversine(prev.lat, prev.lng, myPos.lat, myPos.lng) > 0.008) {
-        setMyHeading(bearingBetween(prev, myPos));
+        setMyHeading(bearingBetween(prev, myPos), 'gps');
       }
       if (map && !activeRide) map.setView(myPos, 15);
       if (activeRide) drawRoute();
