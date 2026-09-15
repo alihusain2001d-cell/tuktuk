@@ -1527,7 +1527,7 @@ document.addEventListener('click', function once() {
 }, { once: true });
 
 function initMap() {
-  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
+  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 17);
   addTileLayer(map);
   L.control.zoom({ position:'topright' }).addTo(map);
   meMarker = L.marker(myPos, { icon: meIcon(), interactive:false }).addTo(map);
@@ -1678,7 +1678,7 @@ function startWatchingPosition() {
       } else if (prev && haversine(prev.lat, prev.lng, myPos.lat, myPos.lng) > 0.008) {
         setMyHeading(bearingBetween(prev, myPos), 'gps');
       }
-      if (map && !activeRide) map.setView(myPos, 15);
+      if (map && !activeRide) map.setView(myPos, 17);
       if (activeRide) drawRoute();
       if (first && isOnline) goOnline();
     },
@@ -2348,7 +2348,7 @@ function endActive() {
   if (destMarker) { map.removeLayer(destMarker); destMarker=null; }
   if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
   routeFitDone = false;
-  if (map) map.setView(myPos, 15);
+  if (map) map.setView(myPos, 17);
   document.getElementById('panel-active').classList.add('hidden');
   document.getElementById('panel-waiting').classList.remove('hidden');
   renderRequests();

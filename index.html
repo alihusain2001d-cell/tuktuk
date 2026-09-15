@@ -1379,7 +1379,7 @@ function autoLocateDest(flow) {
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
       destination = { lat, lng, label: 'موقعي الحالي' };
-      m.setView([lat, lng], 16);
+      m.setView([lat, lng], 17);
       updatePlanUI();
       drawPlanMarkers();
     },
@@ -1396,7 +1396,7 @@ function autoLocatePickup(flow) {
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
       pickup = { lat, lng, label: 'موقعي الحالي' };
-      m.setView([lat, lng], 16);
+      m.setView([lat, lng], 17);
       updatePlanUI();
       drawPlanMarkers();
     },
@@ -1446,7 +1446,7 @@ function addTileLayer(m) {
 }
 
 function makeMap(elId, flow) {
-  const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
+  const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 17);
   addTileLayer(m);
   L.control.zoom({ position:'topright' }).addTo(m);
   // الضغط على الخريطة يحدد النقطة مباشرة
@@ -1476,7 +1476,7 @@ function locateMe(which) {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      m.setView([lat, lng], 16);
+      m.setView([lat, lng], 17);
       // زر الموقع يحدد نقطة الانطلاق على موقعي (بالرحلة)
       if (currentType === 'ride') { pickup = { lat, lng, label:'موقعي الحالي' }; updatePlanUI(); drawPlanMarkers(); }
     },
@@ -1538,7 +1538,7 @@ function selectPlace(place) {
   assignPoint(place);
   closeSearch();
   const m = searchFlow === 'r' ? mapR : mapD;
-  m.setView([place.lat, place.lng], 16);
+  m.setView([place.lat, place.lng], 17);
   drawPlanMarkers();
 }
 
@@ -1624,7 +1624,7 @@ function drawPlanMarkers() {
     if (destination) {
       if (dsMarker) m.removeLayer(dsMarker);
       dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m);
-      m.setView([destination.lat, destination.lng], 16);
+      m.setView([destination.lat, destination.lng], 17);
     }
     return;
   }
