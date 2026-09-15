@@ -1413,7 +1413,7 @@ function exitFlow() {
 // ============ الخرائط ============
 function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }).addTo(m);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
   L.control.zoom({ position:'topright' }).addTo(m);
   // الضغط على الخريطة يحدد النقطة مباشرة
   m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
