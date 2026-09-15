@@ -303,6 +303,9 @@
   .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
   .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
 
+  /* سهم السائق — لفة ناعمة بدل ما ينط من زاوية لزاوية */
+  .nav-arrow { transform-origin:50% 50%; transition:transform .4s ease-out; }
+
   /* أزرار فتح خط السير بتطبيق ملاحة خارجي */
   .nav-row { display:flex; gap:9px; margin-bottom:12px; }
   .nav-btn { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:13px 10px;
@@ -733,7 +736,7 @@ async function loadContactSettings() {
 }
 
 function addTileLayer(m) {
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }).addTo(m);
 }
 
 let map, meMarker, pickupMarker, destMarker, routeLine;
@@ -1223,12 +1226,43 @@ function renderTrips(allTrips) {
 // ============ الخريطة والاتصال ============
 let mapFull = false;
 
+/* ===== سهم السائق — يلف باتجاه السياقة مثل ويز =====
+   رمز التكتك القديم كان ثابت على جنب مهما كان اتجاه السائق. */
+let myHeading = 0;
+
+function meIcon() {
+  return L.divIcon({
+    className: '', iconSize: [0,0],
+    html: `<div class="nav-arrow" style="transform:translate(-50%,-50%) rotate(${myHeading}deg)">
+      <svg width="42" height="42" viewBox="0 0 46 46">
+        <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
+        <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/>
+      </svg></div>`,
+  });
+}
+
+/* الزاوية بين نقطتين — نستعملها لما الـGPS ما يعطي heading
+   (أغلب الموبايلات ما تعطيه إلا وهي تتحرك بسرعة كافية) */
+function bearingBetween(a, b) {
+  const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+  const dLon = toRad(b.lng - a.lng);
+  const y = Math.sin(dLon) * Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat))
+          - Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function setMyHeading(deg) {
+  if (deg == null || isNaN(deg)) return;
+  myHeading = ((deg % 360) + 360) % 360;
+  if (meMarker) meMarker.setIcon(meIcon());
+}
+
 function initMap() {
   map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
   addTileLayer(map);
   L.control.zoom({ position:'topright' }).addTo(map);
-  const icon = L.divIcon({ className:'', html:'<div style="font-size:32px;transform:translate(-50%,-50%)">🛺</div>', iconSize:[0,0] });
-  meMarker = L.marker(myPos, { icon, interactive:false }).addTo(map);
+  meMarker = L.marker(myPos, { icon: meIcon(), interactive:false }).addTo(map);
 
   // الضغط على الخريطة يكبّرها
   map.on('click', () => { if (!mapFull) toggleMapFull(true); });
@@ -1358,8 +1392,16 @@ function startWatchingPosition() {
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
       const first = !watchId || (myPos.lat === MUSAYYIB[0] && myPos.lng === MUSAYYIB[1]);
+      const prev = myPos;
       myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       if (meMarker) meMarker.setLatLng(myPos);
+      // اتجاه السياقة: من الـGPS إذا متوفر، وإلا نحسبه من حركته بين نقطتين.
+      // نتجاهل الحركة الزغيرة جداً — تشويش الـGPS يخلي السهم يرجف وهو واقف.
+      if (pos.coords.heading != null && !isNaN(pos.coords.heading) && pos.coords.speed > 0.5) {
+        setMyHeading(pos.coords.heading);
+      } else if (prev && haversine(prev.lat, prev.lng, myPos.lat, myPos.lng) > 0.008) {
+        setMyHeading(bearingBetween(prev, myPos));
+      }
       if (map && !activeRide) map.setView(myPos, 15);
       if (activeRide) drawRoute();
       if (first && isOnline) goOnline();

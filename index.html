@@ -290,6 +290,8 @@
   .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
   .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
 
+  /* سهم السائق على خريطة التتبع — لفة ناعمة باتجاه سيره */
+  .nav-arrow { transform-origin:50% 50%; transition:transform .4s ease-out; }
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -1411,7 +1413,7 @@ function exitFlow() {
 // ============ الخرائط ============
 function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(m);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd' }).addTo(m);
   L.control.zoom({ position:'topright' }).addTo(m);
   // الضغط على الخريطة يحدد النقطة مباشرة
   m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
@@ -1828,13 +1830,37 @@ function onDriverAccepted(data) {
   toast(`${d.name} قبل طلبك! 🎉`);
 }
 
+/* علامة السائق عند الزبون — سهم يلف باتجاه سير السائق.
+   الزبون ما يوصله heading من السيرفر، فنحسبه من حركة السائق بين قراءتين. */
+let driverHeading = 0, lastDriverPos = null;
+
+function driverBearing(a, b) {
+  const toRad = d => d * Math.PI / 180, toDeg = r => r * 180 / Math.PI;
+  const dLon = toRad(b.lng - a.lng);
+  const y = Math.sin(dLon) * Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat))
+          - Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
 function placeDriver(lat, lng) {
   const name = document.getElementById('dv-name').textContent || 'السائق';
+  const here = { lat, lng };
+  // نلفه بس إذا تحرك فعلاً — تشويش الـGPS يخليه يرجف وهو واقف
+  if (lastDriverPos && haversine(lastDriverPos.lat, lastDriverPos.lng, lat, lng) > 0.008) {
+    driverHeading = driverBearing(lastDriverPos, here);
+  }
+  lastDriverPos = here;
+
   const icon = L.divIcon({
     className: '', iconSize: [0,0],
     html: `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%)">
       <div style="background:#1A1A1A;color:#fff;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:8px;white-space:nowrap;margin-bottom:3px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${name}</div>
-      <div style="font-size:30px;line-height:1">🛺</div>
+      <div class="nav-arrow" style="transform:rotate(${driverHeading}deg);line-height:0">
+        <svg width="38" height="38" viewBox="0 0 46 46">
+          <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
+          <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/>
+        </svg></div>
     </div>`,
   });
   if (driverMarker) mapT.removeLayer(driverMarker);
