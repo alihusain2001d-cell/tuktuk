@@ -31,7 +31,7 @@
 <div id="app">
   <header>
     <h1>🗺️ أي شكل تريد؟</h1>
-    <p>ستة أشكال — اضغط الأرقام وقلّي أي واحد</p>
+    <p>اضغط الأرقام فوق وقلّي أي واحد يعجبك</p>
   </header>
   <div class="styles" id="styles"></div>
   <div id="map"></div>
@@ -87,6 +87,11 @@ function vector(url) {
 const OFM = 'https://tiles.openfreemap.org/styles/';
 const VT  = 'https://tiles.versatiles.org/assets/styles/';
 
+/* مفتاح MapTiler يجي من الرابط (?key=...) مو مكتوب بالكود —
+   المستودع عام على GitHub والبوتات تلقط المفاتيح منه. */
+const MT_KEY = new URLSearchParams(location.search).get('key') || '';
+const mt = (style) => `https://api.maptiler.com/maps/${style}/style.json?key=${MT_KEY}&language=ar`;
+
 const STYLES = [
   { n:'١', name:'١ — الحالي (OpenStreetMap)', build(){
       return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }); } },
@@ -96,6 +101,15 @@ const STYLES = [
   { n:'٥', name:'٥ — Colorful', build: vector(VT + 'colorful/style.json') },
   { n:'٦', name:'٦ — Neutrino (بسيط جداً)', build: vector(VT + 'neutrino/style.json') },
 ];
+
+// أنماط MapTiler — تبيّن بس إذا المفتاح بالرابط
+if (MT_KEY) {
+  STYLES.push(
+    { n:'٧', name:'٧ — MapTiler Streets (الأقرب لـBaly)', build: vector(mt('streets-v2')) },
+    { n:'٨', name:'٨ — MapTiler Bright', build: vector(mt('bright-v2')) },
+    { n:'٩', name:'٩ — MapTiler Basic', build: vector(mt('basic-v2')) },
+  );
+}
 
 function pick(i) {
   const s = STYLES[i];
@@ -108,7 +122,7 @@ function pick(i) {
 document.getElementById('styles').innerHTML = STYLES.map((s,i) =>
   `<button class="sbtn" onclick="pick(${i})">${s.n}</button>`).join('');
 
-pick(2);   // نبدي بالأقرب لـBaly
+pick(MT_KEY ? 6 : 2);   // نبدي بالأقرب لـBaly
 </script>
 </body>
 </html>
