@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="جايك">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
   :root {
@@ -710,6 +711,8 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script>
 const MUSAYYIB = [32.7789, 44.2892];
 let user = JSON.parse(localStorage.getItem('jayak_user') || 'null');
@@ -1411,38 +1414,87 @@ function exitFlow() {
 }
 
 // ============ الخرائط ============
-/* ===== بلاطات الخريطة =====
-   نستعمل LocationIQ (أنظف وأوضح للسواق)، ومفتاحه يجي من السيرفر.
-   لو نفدت الباقة أو وقفت الخدمة، نرجع تلقائياً لـOpenStreetMap — المهم
-   السائق ما تبقى عنده شاشة فارغة وهو بنص رحلة. */
+/* ===== خريطة متجهة (vector) بألوان واضحة وأسماء عربية =====
+   البلاطات من OpenFreeMap: مجانية بلا مفتاح وبلا حد استعمال،
+   ونعيد تلوينها وقت التشغيل لأن ألوانها الأصلية بيج/رصاصي. */
+const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 const OSM_TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-let mapCfg = null, mapCfgPromise = null;
 
-/* نرجّع نفس الوعد لكل النداءات — فلو انبنت الخريطة قبل ما توصل
-   الإعدادات، تنتظرها بدل ما تطيح على الخريطة القديمة للأبد. */
-function loadMapConfig() {
-  if (!mapCfgPromise) {
-    mapCfgPromise = fetch('/api/map-config').then(r => r.json())
-      .then(c => { mapCfg = c; return c; })
-      .catch(() => null);
+/* بدون هذي الإضافة العربي ينرسم مقلوب ومفكك ("بيسملا" بدل "المسيب").
+   لازم تنسجّل قبل ما تنبني أي خريطة. */
+if (window.maplibregl && maplibregl.getRTLTextPluginStatus &&
+    maplibregl.getRTLTextPluginStatus() === 'unavailable') {
+  maplibregl.setRTLTextPlugin(
+    'https://cdn.jsdelivr.net/npm/@mapbox/mapbox-gl-rtl-text@0.2.3/mapbox-gl-rtl-text.min.js',
+    null, true);
+}
+
+// النمط يعرض الاسم اللاتيني والمحلي سوا — وإحنا نريد العربي لحاله
+function mapForceArabic(m) {
+  let layers = [];
+  try { layers = m.getStyle().layers || []; } catch (e) { return; }
+  for (const l of layers) {
+    if (!l.layout || !l.layout['text-field']) continue;
+    try {
+      m.setLayoutProperty(l.id, 'text-field',
+        ['coalesce', ['get','name:ar'], ['get','name'], ['get','name:latin']]);
+    } catch (e) {}
   }
-  return mapCfgPromise;
+}
+
+// ألوان واضحة: خلفية بيضاء، حدائق خضراء، شوارع بيضاء
+const MAP_COLORS = {
+  bg:'#F4F6F7', green:'#C2E6BC', greenDark:'#A3D69C',
+  water:'#A8D5EF', road:'#FFFFFF', casing:'#E2E5E8', building:'#EBEDEF',
+};
+
+function mapRecolor(m) {
+  const set = (id, prop, val) => { try { m.setPaintProperty(id, prop, val); } catch (e) {} };
+  let layers = [];
+  try { layers = m.getStyle().layers || []; } catch (e) { return; }
+  for (const l of layers) {
+    const id = l.id;
+    if (l.type === 'background') { set(id, 'background-color', MAP_COLORS.bg); continue; }
+    if (/park|grass|wood|landcover-(grass|wood)/i.test(id) && l.type === 'fill') {
+      set(id, 'fill-color', /wood/i.test(id) ? MAP_COLORS.greenDark : MAP_COLORS.green);
+      set(id, 'fill-opacity', 1);
+      continue;
+    }
+    if (/^water|waterway/i.test(id)) {
+      set(id, l.type === 'fill' ? 'fill-color' : 'line-color', MAP_COLORS.water); continue;
+    }
+    if (/^building/i.test(id)) { set(id, 'fill-color', MAP_COLORS.building); continue; }
+    if (l.type === 'line' && /(road|motorway|trunk|primary|secondary|tertiary|minor|service|track|link)/i.test(id)) {
+      set(id, 'line-color', /casing/i.test(id) ? MAP_COLORS.casing : MAP_COLORS.road); continue;
+    }
+    // مساحات ملونة (مدارس، مستشفيات) تشوّش على الشوارع — نهدّيها
+    if (/^landuse/i.test(id) && l.type === 'fill') set(id, 'fill-opacity', 0.35);
+  }
 }
 
 function addTileLayer(m) {
-  loadMapConfig().then(cfg => {
-    if (!m || !m._container) return;
-    if (!cfg || !cfg.tiles) { L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m); return; }
-    const layer = L.tileLayer(cfg.tiles, {
-      maxZoom: cfg.maxZoom || 20, subdomains: cfg.subdomains || 'abc',
-    }).addTo(m);
-    let fails = 0;
-    layer.on('tileerror', () => {
-      if (++fails < 5 || !m.hasLayer(layer)) return;
-      m.removeLayer(layer);
+  // لو المكتبة ما تحمّلت (شبكة ضعيفة) نرجع للخريطة العادية بدل ما تبقى فارغة
+  if (!window.maplibregl || !L.maplibreGL) {
+    L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
+    return;
+  }
+  let fellBack = false;
+  const gl = L.maplibreGL({ style: VECTOR_STYLE });
+  gl.on('add', () => {
+    const mm = gl.getMaplibreMap();
+    const apply = () => { mapForceArabic(mm); mapRecolor(mm); };
+    mm.on('styledata', apply);
+    if (mm.isStyleLoaded && mm.isStyleLoaded()) apply();
+    // فشل تحميل النمط (الخدمة واقفة؟) — نبدّل بدل ما يقعد السائق قدام شاشة فارغة
+    mm.on('error', () => {
+      if (fellBack) return;
+      if (mm.isStyleLoaded && mm.isStyleLoaded()) return;
+      fellBack = true;
+      try { m.removeLayer(gl); } catch (err) {}
       L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
     });
   });
+  gl.addTo(m);
 }
 
 function makeMap(elId, flow) {
@@ -2082,7 +2134,6 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 // ============ التشغيل ============
 connectWS();
 loadFareSettings();
-loadMapConfig();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (user) {
   // مسجّل من قبل — ادخل مباشرة
