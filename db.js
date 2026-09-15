@@ -349,6 +349,14 @@ async function getDriversForPush() {
   return res.rows.filter(ok);
 }
 
+// فحص سريع لاتصال القاعدة — يستعمله مسار /health حتى Railway ما تنشر نسخة
+// السيرفر مالها شغّال بس القاعدة مقطوعة عنها
+async function ping() {
+  if (!HAS_DB) return true; // وضع الذاكرة: ماكو قاعدة نفحصها
+  await pool.query('SELECT 1');
+  return true;
+}
+
 // زر شغّال/مطفي
 async function setDriverAvailability(driverId, available) {
   if (!HAS_DB) {
@@ -1496,7 +1504,7 @@ async function setContactSettings({ whatsapp, facebook, instagram, telegram }) {
 }
 
 module.exports = {
-  HAS_DB, init,
+  HAS_DB, init, ping,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
   banDriver, unbanDriver, approveDriver,

@@ -41,6 +41,29 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
 app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+// ============================================================
+//  /health — تستعمله Railway حتى تنشر بدون انقطاع:
+//  تنتظر النسخة الجديدة ترد 200 قبل ما تطفي القديمة، فالسواق
+//  ما ينقطع عنهم الاتصال وقت التحديث.
+// ============================================================
+let serverReady = false;
+app.get('/health', async (req, res) => {
+  if (!serverReady) return res.status(503).json({ ok: false, reason: 'booting' });
+  try {
+    await db.ping();
+    res.json({
+      ok: true,
+      db: db.HAS_DB ? 'postgres' : 'memory',
+      activeRides: activeRides.size,
+      onlineDrivers: onlineDrivers.size,
+      uptimeSec: Math.round(process.uptime()),
+    });
+  } catch (e) {
+    // القاعدة مقطوعة: ما ننشر هاي النسخة
+    res.status(503).json({ ok: false, reason: 'db', error: e.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname), { dotfiles: 'allow' })); // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
 
 // ============================================================
@@ -1477,7 +1500,21 @@ const PORT = process.env.PORT || 3000;
   await db.init();
   await reloadActiveRides();
   server.listen(PORT, () => {
+    serverReady = true;
     console.log(`🚗 جايك يشتغل على المنفذ ${PORT}`);
     console.log(db.HAS_DB ? '   التخزين: PostgreSQL (دائم)' : '   التخزين: الذاكرة (مؤقت)');
   });
 })();
+
+// Railway ترسل SIGTERM قبل ما تطفي النسخة القديمة. نوقف استقبال الجديد
+// ونسكّر السوكتات بهدوء حتى التطبيقات تعيد الاتصال بالنسخة الجديدة فوراً
+// بدل ما تنقطع فجأة وتنتظر مهلة.
+function shutdown(signal) {
+  console.log(`⏹️  ${signal} — نطفي السيرفر بهدوء...`);
+  serverReady = false;
+  for (const ws of wss.clients) { try { ws.close(1012, 'server restarting'); } catch (e) {} }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 8000).unref(); // ما ننتظر للأبد
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
