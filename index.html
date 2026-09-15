@@ -1416,21 +1416,32 @@ function exitFlow() {
    لو نفدت الباقة أو وقفت الخدمة، نرجع تلقائياً لـOpenStreetMap — المهم
    السائق ما تبقى عنده شاشة فارغة وهو بنص رحلة. */
 const OSM_TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-let mapCfg = null;
+let mapCfg = null, mapCfgPromise = null;
+
+/* نرجّع نفس الوعد لكل النداءات — فلو انبنت الخريطة قبل ما توصل
+   الإعدادات، تنتظرها بدل ما تطيح على الخريطة القديمة للأبد. */
 function loadMapConfig() {
-  return fetch('/api/map-config').then(r => r.json()).then(c => { mapCfg = c; return c; }).catch(() => null);
+  if (!mapCfgPromise) {
+    mapCfgPromise = fetch('/api/map-config').then(r => r.json())
+      .then(c => { mapCfg = c; return c; })
+      .catch(() => null);
+  }
+  return mapCfgPromise;
 }
 
 function addTileLayer(m) {
-  if (!mapCfg || !mapCfg.tiles) { L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m); return; }
-  const layer = L.tileLayer(mapCfg.tiles, {
-    maxZoom: mapCfg.maxZoom || 20, subdomains: mapCfg.subdomains || 'abc',
-  }).addTo(m);
-  let fails = 0;
-  layer.on('tileerror', () => {
-    if (++fails < 5 || !m.hasLayer(layer)) return;
-    m.removeLayer(layer);
-    L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
+  loadMapConfig().then(cfg => {
+    if (!m || !m._container) return;
+    if (!cfg || !cfg.tiles) { L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m); return; }
+    const layer = L.tileLayer(cfg.tiles, {
+      maxZoom: cfg.maxZoom || 20, subdomains: cfg.subdomains || 'abc',
+    }).addTo(m);
+    let fails = 0;
+    layer.on('tileerror', () => {
+      if (++fails < 5 || !m.hasLayer(layer)) return;
+      m.removeLayer(layer);
+      L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
+    });
   });
 }
 
