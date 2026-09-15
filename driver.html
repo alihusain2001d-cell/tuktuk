@@ -735,9 +735,29 @@ async function loadContactSettings() {
   try { contactSettings = await fetch('/api/contact-settings').then(r => r.json()); } catch (e) {}
 }
 
-function addTileLayer(m) {
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+/* ===== بلاطات الخريطة =====
+   نستعمل LocationIQ (أنظف وأوضح للسواق)، ومفتاحه يجي من السيرفر.
+   لو نفدت الباقة أو وقفت الخدمة، نرجع تلقائياً لـOpenStreetMap — المهم
+   السائق ما تبقى عنده شاشة فارغة وهو بنص رحلة. */
+const OSM_TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+let mapCfg = null;
+function loadMapConfig() {
+  return fetch('/api/map-config').then(r => r.json()).then(c => { mapCfg = c; return c; }).catch(() => null);
 }
+
+function addTileLayer(m) {
+  if (!mapCfg || !mapCfg.tiles) { L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m); return; }
+  const layer = L.tileLayer(mapCfg.tiles, {
+    maxZoom: mapCfg.maxZoom || 20, subdomains: mapCfg.subdomains || 'abc',
+  }).addTo(m);
+  let fails = 0;
+  layer.on('tileerror', () => {
+    if (++fails < 5 || !m.hasLayer(layer)) return;
+    m.removeLayer(layer);
+    L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
+  });
+}
+
 
 let map, meMarker, pickupMarker, destMarker, routeLine;
 let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
@@ -1081,6 +1101,7 @@ async function showExpired(acc) {
   }
 
   if (!contactSettings || !Object.keys(contactSettings).length) await loadContactSettings();
+loadMapConfig();
   const btn = document.getElementById('exp-contact-btn');
   if (contactSettings.whatsapp) {
     btn.href = `https://wa.me/${contactSettings.whatsapp.replace(/\D/g,'')}?text=${encodeURIComponent('مرحبا، أنا سائق بتطبيق جايك وأحتاج مساعدة بحسابي')}`;

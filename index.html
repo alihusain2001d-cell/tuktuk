@@ -1411,9 +1411,32 @@ function exitFlow() {
 }
 
 // ============ الخرائط ============
+/* ===== بلاطات الخريطة =====
+   نستعمل LocationIQ (أنظف وأوضح للسواق)، ومفتاحه يجي من السيرفر.
+   لو نفدت الباقة أو وقفت الخدمة، نرجع تلقائياً لـOpenStreetMap — المهم
+   السائق ما تبقى عنده شاشة فارغة وهو بنص رحلة. */
+const OSM_TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+let mapCfg = null;
+function loadMapConfig() {
+  return fetch('/api/map-config').then(r => r.json()).then(c => { mapCfg = c; return c; }).catch(() => null);
+}
+
+function addTileLayer(m) {
+  if (!mapCfg || !mapCfg.tiles) { L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m); return; }
+  const layer = L.tileLayer(mapCfg.tiles, {
+    maxZoom: mapCfg.maxZoom || 20, subdomains: mapCfg.subdomains || 'abc',
+  }).addTo(m);
+  let fails = 0;
+  layer.on('tileerror', () => {
+    if (++fails < 5 || !m.hasLayer(layer)) return;
+    m.removeLayer(layer);
+    L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
+  });
+}
+
 function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 15);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+  addTileLayer(m);
   L.control.zoom({ position:'topright' }).addTo(m);
   // الضغط على الخريطة يحدد النقطة مباشرة
   m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
@@ -2048,6 +2071,7 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 // ============ التشغيل ============
 connectWS();
 loadFareSettings();
+loadMapConfig();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 if (user) {
   // مسجّل من قبل — ادخل مباشرة

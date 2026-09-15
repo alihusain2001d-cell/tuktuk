@@ -766,6 +766,18 @@ app.get('/api/driver/pending-rides', async (req, res) => {
 });
 
 // ============ إشعارات المتصفح (Web Push) ============
+// إعدادات الخريطة — نرجّع رابط البلاطات وقت التشغيل بدل ما نحط المفتاح
+// بالكود، لأن المستودع عام على GitHub والبوتات تلقط المفاتيح منه.
+app.get('/api/map-config', (req, res) => {
+  res.json({
+    tiles: LOCATIONIQ_API_KEY
+      ? `https://{s}-tiles.locationiq.com/v3/streets/r/{z}/{x}/{y}.png?key=${LOCATIONIQ_API_KEY}`
+      : null,
+    subdomains: 'abc',
+    maxZoom: 20,
+  });
+});
+
 app.get('/api/push/vapid-public-key', (req, res) => res.json({ key: VAPID_PUBLIC_KEY, enabled: PUSH_ENABLED }));
 
 app.post('/api/driver/push-subscribe', async (req, res) => {
