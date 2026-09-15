@@ -108,15 +108,60 @@ function forceArabic(m) {
   }
 }
 
+/* ألوان على طراز Baly — نمط Bright خلفيته بيج/رصاصي والأخضر باهت،
+   فنعيد تلوينه وقت التشغيل: خلفية بيضاء، حدائق خضراء واضحة،
+   شوارع بيضاء بحواف رمادية فاتحة، مي أزرق صافي. */
+const BALY = {
+  bg:        '#F4F6F7',
+  green:     '#C2E6BC',
+  greenDark: '#A3D69C',
+  water:     '#A8D5EF',
+  road:      '#FFFFFF',
+  roadMain:  '#FFFFFF',
+  casing:    '#E2E5E8',
+  building:  '#EBEDEF',
+};
+
+function balyColors(m) {
+  const set = (id, prop, val) => { try { m.setPaintProperty(id, prop, val); } catch (e) {} };
+  let layers = [];
+  try { layers = m.getStyle().layers || []; } catch (e) { return; }
+
+  for (const l of layers) {
+    const id = l.id;
+    if (l.type === 'background') { set(id, 'background-color', BALY.bg); continue; }
+
+    if (/park|grass|wood|landcover-(grass|wood)/i.test(id) && l.type === 'fill') {
+      set(id, 'fill-color', /wood/i.test(id) ? BALY.greenDark : BALY.green);
+      set(id, 'fill-opacity', 1);
+      continue;
+    }
+    if (/^water|waterway/i.test(id)) {
+      set(id, l.type === 'fill' ? 'fill-color' : 'line-color', BALY.water);
+      continue;
+    }
+    if (/^building/i.test(id)) { set(id, 'fill-color', BALY.building); continue; }
+
+    // الشوارع: الحواف رمادي فاتح، والوسط أبيض — مثل Baly
+    if (l.type === 'line' && /(road|motorway|trunk|primary|secondary|tertiary|minor|service|track|link)/i.test(id)) {
+      set(id, 'line-color', /casing/i.test(id) ? BALY.casing : BALY.road);
+      continue;
+    }
+    // المساحات الملونة الزائدة (مدارس، مستشفيات، سكني) نهدّيها حتى ما تشوّش
+    if (/^landuse/i.test(id) && l.type === 'fill') { set(id, 'fill-opacity', 0.35); }
+  }
+}
+
 let current = null;
 
-function vector(url) {
+function vector(url, baly) {
   return () => {
     const gl = L.maplibreGL({ style: url });
     gl.on('add', () => {
       const m = gl.getMaplibreMap();
-      m.on('styledata', () => forceArabic(m));
-      if (m.isStyleLoaded && m.isStyleLoaded()) forceArabic(m);
+      const apply = () => { forceArabic(m); if (baly) balyColors(m); };
+      m.on('styledata', apply);
+      if (m.isStyleLoaded && m.isStyleLoaded()) apply();
     });
     return gl;
   };
@@ -138,6 +183,7 @@ const STYLES = [
   { n:'٤', name:'٤ — Positron (فاتح وهادئ)', build: vector(OFM + 'positron') },
   { n:'٥', name:'٥ — Colorful', build: vector(VT + 'colorful/style.json') },
   { n:'٦', name:'٦ — Neutrino (بسيط جداً)', build: vector(VT + 'neutrino/style.json') },
+  { n:'⭐', name:'⭐ — ألوان Baly (مجاني)', build: vector(OFM + 'bright', true) },
 ];
 
 // أنماط MapTiler — تبيّن بس إذا المفتاح بالرابط
@@ -160,7 +206,7 @@ function pick(i) {
 document.getElementById('styles').innerHTML = STYLES.map((s,i) =>
   `<button class="sbtn" onclick="pick(${i})">${s.n}</button>`).join('');
 
-pick(MT_KEY ? 6 : 2);   // نبدي بالأقرب لـBaly
+pick(6);   // نبدي بألوان Baly   // نبدي بالأقرب لـBaly
 </script>
 </body>
 </html>
