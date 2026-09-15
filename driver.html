@@ -106,11 +106,19 @@
   .h-title { flex:1; }
   .h-title h1 { font-size:16px; }
   .h-title .status-text { font-size:11.5px; color:var(--muted); }
-  .live-badge { display:flex; align-items:center; gap:6px; background:#F2FBF6; color:var(--go); font-size:12px; font-weight:700; padding:7px 12px; border-radius:20px; flex-shrink:0; }
+  .live-badge { display:flex; align-items:center; gap:6px; background:#F2FBF6; color:var(--go); font-size:12px; font-weight:700; padding:7px 12px; border-radius:20px; flex-shrink:0;
+    border:none; font-family:inherit; cursor:pointer; transition:transform .08s; }
+  .live-badge:active { transform:scale(.94); }
   .live-badge.off { background:#FEECEC; color:var(--stop); }
   .live-dot { width:8px; height:8px; border-radius:50%; background:var(--go); animation:livePulse 1.5s infinite; }
   .live-badge.off .live-dot { background:var(--stop); animation:none; }
   @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.85)} }
+
+  /* شريط تنبيه لما السائق مطفي — واضح حتى ما ينسى نفسه مطفي ويستغرب ليش ماكو طلبات */
+  .off-banner { background:#FEECEC; color:var(--stop); padding:11px 16px; font-size:13px; font-weight:700;
+    text-align:center; display:flex; align-items:center; justify-content:center; gap:10px; }
+  .off-banner button { background:var(--go); color:#fff; border:none; border-radius:9px; padding:7px 14px;
+    font-size:12.5px; font-weight:700; font-family:inherit; cursor:pointer; }
 
   /* شريط الاشتراك */
   .sub-banner { padding:9px 16px; font-size:12.5px; text-align:center; font-weight:600; }
@@ -252,6 +260,21 @@
   .earn-card.hl { background:var(--sky-light); border-color:var(--sky-light); }
   .earn-card .num { font-size:20px; font-weight:700; margin-bottom:2px; color:var(--ink); }
   .earn-card .lbl { font-size:10.5px; color:var(--muted); }
+  /* مستحقات السائق من الإدارة */
+  .owed-box { border-radius:16px; padding:15px 16px; margin-bottom:20px; border:1.5px solid var(--line); background:#fff; }
+  .owed-box.has-due { background:#FFF9E8; border-color:#FFE3B0; }
+  .owed-box.clear { background:#F2FBF6; border-color:#C8EBD6; }
+  .owed-row { display:flex; align-items:center; gap:12px; }
+  .owed-ico { width:42px; height:42px; border-radius:12px; background:rgba(0,0,0,.05); display:flex;
+    align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
+  .owed-body { flex:1; min-width:0; }
+  .owed-body h4 { font-size:14px; margin-bottom:2px; }
+  .owed-body p { font-size:11.5px; color:var(--muted); }
+  .owed-amt { font-size:22px; font-weight:800; flex-shrink:0; }
+  .owed-box.has-due .owed-amt { color:#B26A00; }
+  .owed-box.clear .owed-amt { color:var(--go); }
+  .owed-note { font-size:11.5px; color:var(--muted); margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+
   .earn-section-title { font-size:15px; font-weight:700; margin-bottom:12px; }
   .trip-item { background:#fff; border:1px solid var(--line); border-radius:12px; padding:13px 15px; margin-bottom:10px; display:flex; align-items:center; gap:12px; }
   .trip-item .ti-icon { width:38px; height:38px; border-radius:10px; background:var(--sky-pale); display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
@@ -279,6 +302,56 @@
   .cancel-reason.sel { border-color:var(--sky-dark); background:var(--sky-light); font-weight:600; }
   .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
   .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
+
+  /* أزرار فتح خط السير بتطبيق ملاحة خارجي */
+  .nav-row { display:flex; gap:9px; margin-bottom:12px; }
+  .nav-btn { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:13px 10px;
+    border:1.5px solid var(--line); border-radius:13px; background:#fff; font-size:13.5px; font-weight:700;
+    font-family:inherit; color:var(--ink); cursor:pointer; transition:transform .08s; }
+  .nav-btn:active { transform:scale(.96); }
+  .nav-btn span { font-size:17px; }
+  .nav-btn.waze { border-color:#B8E4F5; background:#F2FBFE; }
+  .nav-btn.gmaps { border-color:#C8E6C9; background:#F4FBF4; }
+
+  /* ===== شاشة الطلب الجديد (تغطي الشاشة كاملة) =====
+     تطلع فوق كل شي وبخط كبير، لأن السائق غالباً سايق وما يقدر يدقق بكارت صغير */
+  .incoming { position:fixed; inset:0; z-index:4000; background:rgba(26,26,26,.72); display:none;
+    align-items:flex-end; justify-content:center; padding:0; }
+  .incoming.show { display:flex; animation:incFade .18s ease; }
+  @keyframes incFade { from{opacity:0} to{opacity:1} }
+  .inc-card { background:#fff; width:100%; max-width:480px; border-radius:24px 24px 0 0; padding:20px 20px 22px;
+    max-height:92vh; overflow-y:auto; animation:incUp .25s cubic-bezier(.2,.8,.3,1); }
+  @keyframes incUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+  .inc-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  .inc-pulse { width:52px; height:52px; border-radius:16px; background:var(--sky-light); display:flex;
+    align-items:center; justify-content:center; font-size:26px; flex-shrink:0; animation:incPulse 1.1s infinite; }
+  @keyframes incPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.09)} }
+  .inc-head h2 { font-size:21px; line-height:1.25; }
+  .inc-head .inc-type { font-size:12.5px; color:var(--muted); font-weight:600; }
+  .inc-timer { margin-inline-start:auto; font-size:22px; font-weight:800; color:var(--stop); flex-shrink:0;
+    font-variant-numeric:tabular-nums; }
+  .inc-fare { background:var(--sky-light); border-radius:14px; padding:13px 15px; margin:12px 0;
+    display:flex; align-items:center; justify-content:space-between; }
+  .inc-fare .l { font-size:13px; color:var(--muted); font-weight:600; }
+  .inc-fare .a { font-size:24px; font-weight:800; }
+  .inc-addr { border:1.5px solid var(--line); border-radius:14px; padding:14px 15px; margin-bottom:12px; }
+  .inc-leg { display:flex; gap:11px; align-items:flex-start; }
+  .inc-leg + .inc-leg { margin-top:13px; padding-top:13px; border-top:1px dashed var(--line); }
+  .inc-leg .d { width:12px; height:12px; border-radius:50%; margin-top:4px; flex-shrink:0; }
+  .inc-leg .d.from { background:var(--go); }
+  .inc-leg .d.to { background:var(--stop); }
+  .inc-leg .d.store { background:var(--sky-dark); }
+  .inc-leg .t { flex:1; min-width:0; }
+  .inc-leg .t .lbl { font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:2px; }
+  .inc-leg .t .val { font-size:16px; font-weight:700; line-height:1.35; }
+  .inc-dist { font-size:13px; color:var(--muted); text-align:center; margin-bottom:14px; }
+  .inc-item { background:#FFF9E8; border-radius:12px; padding:11px 14px; font-size:14px; margin-bottom:12px; }
+  .inc-offer label { font-size:12.5px; color:var(--muted); font-weight:600; display:block; margin-bottom:6px; }
+  .inc-offer input { width:100%; padding:14px; border:1.5px solid var(--line); border-radius:12px;
+    font-size:17px; font-family:inherit; margin-bottom:9px; }
+  .inc-actions { display:flex; gap:10px; }
+  .inc-actions .btn { flex:1; margin:0; }
+  .inc-actions .btn.go { flex:2; font-size:17px; padding:17px; }
 
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--ink); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.25); }
@@ -483,8 +556,13 @@
       <h1 id="drv-name-h">السائق</h1>
       <div class="status-text" id="status-text">نتصل...</div>
     </div>
-    <div class="live-badge" id="live-badge"><span class="live-dot"></span> شغّال</div>
+    <button class="live-badge" id="live-badge" onclick="toggleWorking()"><span class="live-dot"></span> شغّال</button>
   </header>
+
+  <div class="off-banner hidden" id="off-banner">
+    <span>🔴 إنت مطفي — ما توصلك طلبات</span>
+    <button onclick="toggleWorking()">شغّلني</button>
+  </div>
 
   <div class="sub-banner hidden" id="sub-banner"></div>
 
@@ -539,6 +617,13 @@
       </div>
       <div class="ar-fare"><span class="l">أجرة الطلب</span><span class="a" id="ar-fare">—</span></div>
       <div class="rr-route" id="ar-route"></div>
+
+      <!-- فتح خط السير بتطبيق الملاحة الموجود بموبايل السائق -->
+      <div class="nav-row">
+        <button class="nav-btn waze" onclick="openInWaze()"><span>🧭</span> Waze</button>
+        <button class="nav-btn gmaps" onclick="openInGoogleMaps()"><span>🗺️</span> خرائط جوجل</button>
+      </div>
+
       <button class="btn go" id="ar-arrived-btn" onclick="markArrived()" style="margin-bottom:10px">وصلت لموقع الزبون ✅</button>
       <div id="ar-waiting-actions" class="hidden">
         <button class="btn go" id="ar-start-btn" onclick="startTrip()" style="margin-bottom:10px">🚗 الزبون طلع، ابدأ الرحلة</button>
@@ -547,6 +632,41 @@
       <div class="btn-row">
         <button class="btn go" onclick="callCustomer()">📞 اتصل</button>
         <button class="btn danger" onclick="finishRide()">إنهاء الطلب</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- شاشة الطلب الجديد: تغطي الشاشة كاملة حتى ما يفوت السائق الطلب -->
+  <div class="incoming" id="incoming">
+    <div class="inc-card">
+      <div class="inc-head">
+        <div class="inc-pulse" id="inc-icon">🚗</div>
+        <div style="flex:1;min-width:0">
+          <div class="inc-type" id="inc-type">طلب جديد</div>
+          <h2 id="inc-customer">—</h2>
+        </div>
+        <div class="inc-timer" id="inc-timer"></div>
+      </div>
+
+      <div class="inc-fare" id="inc-fare-box">
+        <span class="l" id="inc-fare-lbl">أجرتك</span>
+        <span class="a" id="inc-fare">—</span>
+      </div>
+
+      <div class="inc-addr" id="inc-addr"></div>
+      <div class="inc-dist" id="inc-dist"></div>
+      <div class="inc-item hidden" id="inc-item"></div>
+
+      <div class="inc-offer hidden" id="inc-offer">
+        <label>سعرك (أجرة التوصيل + سعر البضاعة)</label>
+        <input type="number" inputmode="numeric" id="inc-price" placeholder="مثال: 8000" min="250" step="250">
+        <input type="text" id="inc-note" placeholder="ملاحظة للزبون (اختياري)"
+          style="width:100%;padding:13px;border:1.5px solid var(--line);border-radius:12px;font-size:14px;font-family:inherit;margin-bottom:9px">
+      </div>
+
+      <div class="inc-actions">
+        <button class="btn ghost" onclick="declineIncoming()">تجاهل</button>
+        <button class="btn go" id="inc-accept-btn" onclick="acceptIncoming()">اقبل الطلب ✅</button>
       </div>
     </div>
   </div>
@@ -575,6 +695,19 @@
       <div class="earn-card hl"><div class="num" id="today-earnings">0</div><div class="lbl">أرباح اليوم (د.ع)</div></div>
       <div class="earn-card"><div class="num" id="total-trips">0</div><div class="lbl">عدد الطلبات</div></div>
       <div class="earn-card"><div class="num" id="total-km">0</div><div class="lbl">الكيلومترات</div></div>
+    </div>
+
+    <!-- مستحقات الرحلات المجانية: الإدارة تدفعها للسائق نقداً، ولما تدفع يصير الرقم صفر -->
+    <div class="owed-box" id="owed-box">
+      <div class="owed-row">
+        <div class="owed-ico">💰</div>
+        <div class="owed-body">
+          <h4>مستحقاتك من الإدارة</h4>
+          <p id="owed-sub">من الرحلات المجانية (المكافآت)</p>
+        </div>
+        <div class="owed-amt" id="owed-amt">0</div>
+      </div>
+      <div class="owed-note" id="owed-note"></div>
     </div>
     <div class="earn-section-title">آخر الطلبات</div>
     <div class="filter-row" id="trips-filter">
@@ -977,8 +1110,24 @@ function showMainApp(acc) {
   setTimeout(async () => {
     if (!map) initMap(); else map.invalidateSize();
     await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
-    startWorking(); // السائق دائماً شغّال
+    // نحترم آخر اختيار للسائق (شغّال/مطفي) — محفوظ بالسيرفر مو بالجهاز،
+    // حتى لو فتح التطبيق من موبايل ثاني تبقى نفس الحالة
+    if (acc.available === false) stopWorking(); else startWorking();
   }, 80);
+}
+
+// ============ زر شغّال / مطفي ============
+async function toggleWorking() {
+  const turningOn = !isOnline;
+  if (!turningOn && activeRide) return toast('عندك طلب شغّال — خلّصه أول');
+  if (turningOn) startWorking(); else stopWorking();
+  try {
+    await fetch(`/api/driver/${driverId}/availability`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ available: turningOn }),
+    });
+  } catch (e) { /* الحالة بالتطبيق تغيّرت، والسيرفر يتزامن بأول تحديث */ }
+  toast(turningOn ? '✅ صرت شغّال — راح توصلك الطلبات' : '🔴 طفّيت — ما توصلك طلبات');
 }
 
 function logout() {
@@ -1022,9 +1171,29 @@ async function loadEarnings() {
     document.getElementById('today-earnings').textContent = data.todayEarnings.toLocaleString();
     document.getElementById('total-trips').textContent = data.totalTrips;
     document.getElementById('total-km').textContent = data.totalKm;
+    renderOwed(data);
     allDriverTrips = data.trips || [];
     renderTrips(allDriverTrips);
   } catch(e) { toast('ما كدرنا نجيب كشف الحساب'); }
+}
+
+/* مستحقات السائق من الإدارة (أجور الرحلات المجانية).
+   أول ما الإدارة تدفعله من لوحة التحكم، الرقم يصير صفر تلقائياً. */
+function renderOwed(data) {
+  const owed = data.rewardsOwed || 0;
+  const trips = data.rewardsOwedTrips || 0;
+  const paid = data.rewardsPaid || 0;
+  const box = document.getElementById('owed-box');
+
+  box.classList.toggle('has-due', owed > 0);
+  box.classList.toggle('clear', owed === 0);
+  document.getElementById('owed-amt').textContent = owed > 0 ? owed.toLocaleString() : '0';
+  document.getElementById('owed-sub').textContent = owed > 0
+    ? `${trips} رحلة مجانية سويتها — الإدارة تدفعلك أجرتها`
+    : 'ماكو مستحقات — حسابك مصفّر';
+  document.getElementById('owed-note').textContent = paid > 0
+    ? `💵 استلمت من الإدارة سابقاً: ${paid.toLocaleString()} د.ع`
+    : '';
 }
 
 function renderTrips(allTrips) {
@@ -1203,7 +1372,7 @@ function stopWatchingPosition() {
   if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
 }
 
-// السائق دائماً شغّال — يبدأ تلقائياً بمجرد ما يفتح التطبيق
+// يبدأ تلقائياً أول ما يفتح التطبيق، إلا إذا السائق طفّى الزر بنفسه
 function startWorking() {
   isOnline = true;
   setLive(true, 'متصل - جاهز');
@@ -1250,6 +1419,36 @@ async function activatePush(vapidKey) {
   } catch (e) { console.error('تعذّر تفعيل إشعارات المتصفح:', e); }
 }
 
+/* لما السائق يضغط الإشعار والتطبيق بالخلفية، الـ service worker يرسلنا رسالة
+   حتى نعرض شاشة الطلب فوراً بدون ما ننتظر دورة الفحص (٥ ثواني). */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'ride:show') openRideFromNotification(e.data.rideId);
+  });
+}
+
+async function openRideFromNotification(rideId) {
+  if (!isOnline || activeRide || offeredRide) return;
+  // الطلب موجود عندنا؟ اعرضه فوراً. مو موجود (التطبيق كان مسكّر)؟ اجلبه من السيرفر
+  if (rideId && pendingRides.has(rideId)) return showIncoming(rideId);
+  await pollPendingRides();
+  if (rideId && pendingRides.has(rideId)) showIncoming(rideId);
+  else if (pendingRides.size) showIncoming([...pendingRides.keys()][0]);
+}
+
+/* التطبيق انفتح من رابط الإشعار (driver.html?ride=…) وهو كان مسكّر تماماً */
+function checkRideFromUrl() {
+  const id = new URLSearchParams(location.search).get('ride');
+  if (!id) return;
+  history.replaceState(null, '', location.pathname); // ننضّف الرابط حتى ما يتكرر بالتحديث
+  setTimeout(() => openRideFromNotification(id), 1200); // ننطي وقت للتطبيق يخلص تحميل
+}
+
+/* رجع للتطبيق بعد ما كان بالخلفية: نفحص فوراً بدل ما ننتظر الدورة الجاية */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isOnline && !activeRide && !offeredRide) pollPendingRides();
+});
+
 async function requestPushPermission() {
   document.getElementById('push-permission-banner').classList.add('hidden');
   try {
@@ -1274,8 +1473,11 @@ function stopWorking() {
 function setLive(on, text) {
   const badge = document.getElementById('live-badge');
   badge.classList.toggle('off', !on);
-  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'شغّال' : 'متوقف'}`;
+  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'شغّال' : 'مطفي'}`;
   document.getElementById('status-text').textContent = text;
+  document.getElementById('off-banner').classList.toggle('hidden', on);
+  // لما يطفّي، ننضّف الطلبات المعروضة — ما نخليه يقبل طلب وهو مطفي
+  if (!on) { pendingRides.clear(); hideIncoming(); renderRequests(); }
 }
 
 // يرسل بس لو السوكت فعلاً مفتوح — يفادي خطأ "Still in CONNECTING state"
@@ -1299,8 +1501,107 @@ function stopLocationUpdates(){ if(locTimer) clearInterval(locTimer); locTimer=n
 function onNewRide(data) {
   if (!isOnline || activeRide || offeredRide) return;
   pendingRides.set(data.rideId, data);
-  renderRequests(); beep(); toast('🚗 طلب جديد!');
+  renderRequests();
+  showIncoming(data.rideId);
 }
+
+/* ===== شاشة الطلب الجديد (تغطي الشاشة كاملة) =====
+   السائق غالباً سايق أو التطبيق كان بالخلفية، فالكارت الصغير ما ينفع.
+   هاي تطلع فوق كل شي، بصوت واهتزاز، وبعداد ٤٥ ثانية. */
+let incomingId = null, incTimer = null, incLeft = 0;
+const INCOMING_SECONDS = 45;
+
+function showIncoming(rideId) {
+  const r = pendingRides.get(rideId);
+  if (!r || activeRide || offeredRide || !isOnline) return;
+  // لو نفس الطلب معروض أصلاً، ما نعيد العدّاد من الصفر
+  if (incomingId === rideId) return;
+  incomingId = rideId;
+
+  const isDel = r.type === 'delivery';
+  const dist = haversine(myPos.lat, myPos.lng, r.pickup.lat, r.pickup.lng);
+  const fromLbl = r.pickup.label || 'نقطة على الخريطة';
+  const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
+  const storeTxt = r.storeName || (r.store ? r.store.label : '') || 'محل غير محدد';
+
+  document.getElementById('inc-icon').textContent = isDel ? '🛒' : '🚗';
+  document.getElementById('inc-type').textContent = isDel ? 'طلب توصيل بضاعة' : 'طلب رحلة';
+  document.getElementById('inc-customer').textContent = r.customer?.name || 'زبون';
+  document.getElementById('inc-dist').textContent = `📍 يبعد عنك ${dist.toFixed(1)} كم`;
+
+  // العنوان — أهم شي بالشاشة، بخط كبير
+  document.getElementById('inc-addr').innerHTML = isDel
+    ? `<div class="inc-leg"><div class="d store"></div><div class="t"><div class="lbl">تروح تجيب من</div><div class="val">${storeTxt}</div></div></div>
+       <div class="inc-leg"><div class="d to"></div><div class="t"><div class="lbl">توصّلها لـ</div><div class="val">${fromLbl}</div></div></div>`
+    : `<div class="inc-leg"><div class="d from"></div><div class="t"><div class="lbl">تاخذه من</div><div class="val">${fromLbl}</div></div></div>
+       <div class="inc-leg"><div class="d to"></div><div class="t"><div class="lbl">توصّله لـ</div><div class="val">${toLbl}</div></div></div>`;
+
+  // بضاعة التوصيل
+  const itemBox = document.getElementById('inc-item');
+  itemBox.classList.toggle('hidden', !isDel);
+  if (isDel) itemBox.innerHTML = `📦 <b>الطلب:</b> ${r.itemDesc || '—'}`;
+
+  // التوصيل = السائق يعرض سعر | الرحلة = سعر محسوب
+  document.getElementById('inc-offer').classList.toggle('hidden', !isDel);
+  document.getElementById('inc-fare-box').classList.toggle('hidden', isDel);
+  document.getElementById('inc-accept-btn').textContent = isDel ? 'أرسل عرضي 💬' : 'اقبل الطلب ✅';
+  if (!isDel) {
+    document.getElementById('inc-fare-lbl').textContent = r.rewardApplied ? '🎁 مدفوعة من الإدارة — أجرتك' : 'أجرتك';
+    document.getElementById('inc-fare').textContent = (r.estFare || 0).toLocaleString() + ' د.ع';
+  } else {
+    document.getElementById('inc-price').value = '';
+    document.getElementById('inc-note').value = '';
+  }
+
+  document.getElementById('incoming').classList.add('show');
+  beep(); beep2();
+  if (navigator.vibrate) { try { navigator.vibrate([300,120,300,120,300]); } catch(e){} }
+
+  incLeft = INCOMING_SECONDS;
+  tickIncoming();
+  clearInterval(incTimer);
+  incTimer = setInterval(tickIncoming, 1000);
+}
+
+function tickIncoming() {
+  document.getElementById('inc-timer').textContent = incLeft > 0 ? incLeft + 'ث' : '';
+  // خلص الوقت: نسكّرها بس ما نحذف الطلب — يبقى بالقائمة تحت لو السائق يريده
+  if (incLeft <= 0) { hideIncoming(); return; }
+  incLeft--;
+}
+
+function hideIncoming() {
+  clearInterval(incTimer); incTimer = null;
+  incomingId = null;
+  document.getElementById('incoming').classList.remove('show');
+}
+
+function declineIncoming() {
+  const id = incomingId;
+  hideIncoming();
+  if (id) dismissRide(id);
+}
+
+function acceptIncoming() {
+  const id = incomingId;
+  if (!id) return hideIncoming();
+  const r = pendingRides.get(id);
+  if (!r) return hideIncoming();
+
+  if (r.type === 'delivery') {
+    // نمرر السعر والملاحظة من شاشة الطلب لنفس دالة العرض
+    const price = parseInt(document.getElementById('inc-price').value, 10);
+    if (!price || price < 250) return toast('اكتب سعرك أول');
+    hideIncoming();
+    sendOffer(id, price, document.getElementById('inc-note').value.trim());
+  } else {
+    hideIncoming();
+    acceptRide(id);
+  }
+}
+
+// نغمة ثانية أعلى بعد الأولى — أوضح من صفّارة وحدة لو السائق بمكان مزعج
+function beep2(){ setTimeout(()=>{ try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value=1180; g.gain.setValueAtTime(.15,c.currentTime); o.start(); o.stop(c.currentTime+.18); }catch(e){} }, 220); }
 
 // ============ شبكة أمان: نسأل السيرفر عن الطلبات الجديدة كل ٥ ثواني ============
 // (لو انقطع اتصال الـ WebSocket بصمت — بسبب شبكة الموبايل أو قفل الشاشة — هاي تضمن إنه الطلب ما يفوت السائق)
@@ -1327,7 +1628,12 @@ async function pollPendingRides() {
       if (!pendingRides.has(r.rideId)) { pendingRides.set(r.rideId, r); changed = true; addedNew = true; }
     }
     if (changed) renderRequests();
-    if (addedNew) { beep(); toast('🚗 طلب جديد!'); }
+    // لو الطلب المعروض بالشاشة الكبيرة انسحب (سائق ثاني أخذه)، سكّرها
+    if (incomingId && !seenIds.has(incomingId)) hideIncoming();
+    if (addedNew) {
+      const newest = list.find(r => r.rideId !== incomingId) || list[0];
+      if (newest) showIncoming(newest.rideId);
+    }
   } catch (e) { /* نتجاهل، نحاول بالدورة الجاية */ }
 }
 
@@ -1404,17 +1710,18 @@ function renderRequests() {
   }
 }
 
-// السائق يرسل عرض سعر
-async function sendOffer(id) {
+// السائق يرسل عرض سعر — السعر إما من الكارت الصغير أو من شاشة الطلب الكبيرة
+async function sendOffer(id, priceArg, noteArg) {
   const priceEl = document.getElementById('price-'+id);
   const noteEl = document.getElementById('note-'+id);
-  const price = parseInt(priceEl?.value, 10);
+  const price = priceArg != null ? priceArg : parseInt(priceEl?.value, 10);
+  const note = noteArg != null ? noteArg : (noteEl?.value.trim() || '');
   if (!price || price < 250) return toast('اكتب سعرك أول');
 
   try {
     const res = await fetch('/api/offer', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ rideId:id, driverId, price, note: noteEl?.value.trim() || '' }),
+      body: JSON.stringify({ rideId:id, driverId, price, note }),
     });
     const out = await res.json();
     if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
@@ -1579,13 +1886,41 @@ async function fetchRoute(from, to) {
 let lastRouteFetch = 0;
 let routeFitDone = false; // نكبّر/نصغّر الخريطة تلقائياً مرة وحدة بس، وبعدها نتابع موقع السائق بدون ما نصفّر تكبيره اليدوي
 
-async function drawRoute() {
-  if (!activeRide || !map) return;
+/* وين لازم يروح السائق هسه؟ نفس المنطق يستعمله خط السير بالخريطة
+   وأزرار Waze/خرائط جوجل، حتى ما يختلفون أبداً. */
+function currentTarget() {
+  if (!activeRide) return null;
   const isDel = activeRide.type === 'delivery';
-  // المسار يتبع المرحلة الحالية: للنقطة الأولى (محل/زبون) وهو بالطريق، وللوجهة النهائية بعد ما يبدأ الرحلة
-  const target = activeRide.phase === 'leg2'
+  return activeRide.phase === 'leg2'
     ? (isDel ? activeRide.pickup : activeRide.destination)
     : (isDel ? activeRide.store : activeRide.pickup);
+}
+
+/* ===== فتح خط السير بتطبيق ملاحة بموبايل السائق =====
+   الروابط هاي رسمية: إذا التطبيق منصّب يفتح بيه مباشرة، وإذا مو منصّب
+   يفتح نسخة الموقع — بالحالتين السائق يشوف خط السير. */
+function navTargetOrWarn() {
+  const t = currentTarget();
+  if (!activeRide) { toast('ماكو طلب شغّال'); return null; }
+  if (activeRide.phase === 'waiting') { toast('إنت واصل — اضغط "ابدأ الرحلة" أول'); return null; }
+  if (!t || t.lat == null) { toast('ماكو موقع محدد لهذي المرحلة'); return null; }
+  return t;
+}
+
+function openInWaze() {
+  const t = navTargetOrWarn(); if (!t) return;
+  window.open(`https://waze.com/ul?ll=${t.lat},${t.lng}&navigate=yes`, '_blank');
+}
+
+function openInGoogleMaps() {
+  const t = navTargetOrWarn(); if (!t) return;
+  window.open(`https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lng}&travelmode=driving`, '_blank');
+}
+
+async function drawRoute() {
+  if (!activeRide || !map) return;
+  // المسار يتبع المرحلة الحالية: للنقطة الأولى (محل/زبون) وهو بالطريق، وللوجهة النهائية بعد ما يبدأ الرحلة
+  const target = currentTarget();
   if (activeRide.phase === 'waiting' || !target) {
     if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
     return;
@@ -1714,6 +2049,7 @@ if (driver) {
   // مسجّل من قبل — نتأكد من حالته
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
   checkAccess();
+  checkRideFromUrl(); // انفتح من ضغطة إشعار؟ اعرض الطلب
 } else {
   gotoStep('welcome');
 }

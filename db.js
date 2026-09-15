@@ -83,6 +83,9 @@ async function init() {
     await pool.query(`UPDATE drivers SET approved=true WHERE approved=false AND (sub_ends_at IS NOT NULL OR trial_ends_at IS NOT NULL);`);
     // ترقية: اشتراك إشعارات المتصفح (Web Push) — يوصل الطلب للسائق حتى لو التطبيق مقفل بالخلفية
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS push_subscription JSONB;`);
+    // ترقية: زر شغّال/مطفي — السائق يوقف استلام الطلبات بدون ما يسجّل خروج.
+    // محفوظ بالقاعدة مو بالذاكرة، لأن الإشعار لازم يحترم الحالة حتى والتطبيق مسكّر.
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS available BOOLEAN NOT NULL DEFAULT true;`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS customers (
         phone      TEXT PRIMARY KEY,
@@ -338,10 +341,23 @@ async function clearDriverPushSubscription(id) {
   await pool.query('UPDATE drivers SET push_subscription=NULL WHERE id=$1', [id]);
 }
 // كل السواق المسموحلهم يشتغلون وعندهم اشتراك إشعارات مسجّل — نرسلها بغض النظر عن حالة اتصال الـ WebSocket
+// السواق اللي يستلمون إشعار طلب جديد: عندهم اشتراك إشعارات + مفعّلين + زرّهم شغّال
 async function getDriversForPush() {
-  if (!HAS_DB) return [...mem.drivers.values()].filter(d => d.push_subscription && computeAccess(d).allowed);
+  const ok = d => d.available !== false && computeAccess(d).allowed;
+  if (!HAS_DB) return [...mem.drivers.values()].filter(d => d.push_subscription && ok(d));
   const res = await pool.query('SELECT * FROM drivers WHERE push_subscription IS NOT NULL');
-  return res.rows.filter(d => computeAccess(d).allowed);
+  return res.rows.filter(ok);
+}
+
+// زر شغّال/مطفي
+async function setDriverAvailability(driverId, available) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(driverId);
+    if (d) d.available = !!available;
+    return !!available;
+  }
+  await pool.query('UPDATE drivers SET available=$2 WHERE id=$1', [driverId, !!available]);
+  return !!available;
 }
 
 // حالة السواق: هل يقدر يشتغل؟ (دالة صافية — تحسب من صف السائق مباشرة، بدون استعلام إضافي)
@@ -841,9 +857,14 @@ async function getDriverEarnings(driverId) {
     const km = trips.reduce((s,t) => s + (t.estKm||0), 0);
     const today = new Date(); today.setHours(0,0,0,0);
     const todayTrips = trips.filter(t => t.done_at && t.done_at.getTime() >= today.getTime());
+    // مستحقات المكافآت: الرحلات المجانية اللي سواها السائق والإدارة تدفع أجرتها
+    const myRewards = (mem.rewards || []).filter(r => r.driver_id === driverId && r.status === 'used');
     return {
       totalEarnings: total, totalKm: Math.round(km*10)/10, totalTrips: trips.length,
       todayEarnings: todayTrips.reduce((s,t)=>s+(t.estFare||0),0), todayTrips: todayTrips.length,
+      rewardsOwed: myRewards.filter(r => !r.payout_settled).reduce((s,r)=>s+(r.driver_payout||0),0),
+      rewardsOwedTrips: myRewards.filter(r => !r.payout_settled).length,
+      rewardsPaid: myRewards.filter(r => r.payout_settled).reduce((s,r)=>s+(r.driver_payout||0),0),
       trips: trips.slice(-20).reverse().map(t => {
         const reward = t.rewardId ? (mem.rewards || []).find(r => r.id === t.rewardId) : null;
         return {
@@ -855,7 +876,7 @@ async function getDriverEarnings(driverId) {
       }),
     };
   }
-  const [totals, todayRes, list] = await Promise.all([
+  const [totals, todayRes, list, rewardsRes] = await Promise.all([
     pool.query(`
       SELECT COUNT(*)::int AS trips, COALESCE(SUM(est_fare),0)::int AS earnings,
              COALESCE(SUM(est_km),0) AS km
@@ -872,11 +893,19 @@ async function getDriverEarnings(driverId) {
       LEFT JOIN customer_rewards cr ON cr.ride_id = r.id AND cr.status = 'used'
       WHERE r.driver_id=$1 AND r.status='done' ORDER BY r.done_at DESC LIMIT 20;
     `, [driverId]),
+    // مستحقات المكافآت: الرحلات المجانية اللي سواها السائق والإدارة تدفع أجرتها
+    pool.query(`
+      SELECT COALESCE(SUM(driver_payout) FILTER (WHERE payout_settled=false),0)::int AS owed,
+             COUNT(*) FILTER (WHERE payout_settled=false)::int AS owed_trips,
+             COALESCE(SUM(driver_payout) FILTER (WHERE payout_settled=true),0)::int AS paid
+      FROM customer_rewards WHERE driver_id=$1 AND status='used';
+    `, [driverId]),
   ]);
-  const t = totals.rows[0], td = todayRes.rows[0];
+  const t = totals.rows[0], td = todayRes.rows[0], rw = rewardsRes.rows[0];
   return {
     totalEarnings: t.earnings, totalKm: Math.round(t.km*10)/10, totalTrips: t.trips,
     todayEarnings: td.earnings, todayTrips: td.trips,
+    rewardsOwed: rw.owed, rewardsOwedTrips: rw.owed_trips, rewardsPaid: rw.paid,
     trips: list.rows.map(r => ({
       rideId: r.id, customer: r.customer_name, km: Math.round((r.est_km||0)*10)/10,
       fare: r.est_fare||0,
@@ -1486,6 +1515,6 @@ module.exports = {
   rateRide, getDriverRatingSummary, getComplaints,
   getContactSettings, setContactSettings,
   getFareSettings, setFareSettings,
-  saveDriverPushSubscription, clearDriverPushSubscription, getDriversForPush,
+  saveDriverPushSubscription, clearDriverPushSubscription, getDriversForPush, setDriverAvailability,
   saveCustomerPushSubscription, clearCustomerPushSubscription, getCustomerPushSubscription,
 };

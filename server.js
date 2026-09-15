@@ -341,7 +341,7 @@ app.post('/api/driver/login', async (req, res) => {
     const access = await db.getDriverAccess(d.id);
     res.json({
       ok: true,
-      driver: { id: d.id, name: d.name, phone: d.phone, car: d.car },
+      driver: { id: d.id, name: d.name, phone: d.phone, car: d.car, available: d.available !== false },
       access,
     });
   } catch (e) {
@@ -384,12 +384,24 @@ app.post('/api/driver/register', async (req, res) => {
 // حالة وصول السائق (تجربة/اشتراك/محظور)
 app.get('/api/driver/:id/access', async (req, res) => {
   try {
-    const access = await db.getDriverAccess(req.params.id);
-    res.json(access);
+    const [access, d] = await Promise.all([db.getDriverAccess(req.params.id), db.getDriver(req.params.id)]);
+    res.json({ ...access, available: d ? d.available !== false : true });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
 // كشف حساب السائق
+// زر شغّال/مطفي — محفوظ بالقاعدة حتى الإشعارات تحترمه والتطبيق مسكّر
+app.post('/api/driver/:id/availability', async (req, res) => {
+  try {
+    const available = await db.setDriverAvailability(req.params.id, !!req.body.available);
+    if (!available) onlineDrivers.delete(req.params.id); // شيله فوراً من قائمة المتاحين
+    res.json({ ok: true, available });
+  } catch (e) {
+    console.error('خطأ بتغيير حالة السائق:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
 app.get('/api/driver/:id/earnings', async (req, res) => {
   try {
     res.json(await db.getDriverEarnings(req.params.id));
@@ -685,8 +697,13 @@ app.post('/api/book', async (req, res) => {
     });
     // إشعار متصفح لكل السواق المتاحين — يوصل حتى لو التطبيق مقفل بالخلفية (تكملة للـ WebSocket)
     pushToAllDrivers({
-      title: '🚗 طلب جديد!', body: type === 'delivery' ? 'طلب توصيل جديد بالقرب منك' : 'رحلة جديدة بالقرب منك',
-      url: '/driver.html',
+      title: type === 'delivery' ? '🛒 طلب توصيل جديد!' : '🚗 طلب رحلة جديد!',
+      body: type === 'delivery'
+        ? `من: ${ride.storeName || ride.store?.label || 'محل'} ← ${ride.pickup.label || 'موقع الزبون'}`
+        : `${ride.pickup.label || 'موقع الزبون'} ← ${ride.destination?.label || 'وجهة غير محددة'}${estFare ? ` · ${estFare.toLocaleString()} د.ع` : ''}`,
+      url: '/driver.html?ride=' + rideId,
+      rideId,
+      urgent: true, // يخلي الإشعار يبقى بالشاشة لحد ما السائق يضغطه
     });
 
     res.json({

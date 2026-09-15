@@ -12,20 +12,32 @@ self.addEventListener('push', (event) => {
     badge: '/logo.png',
     dir: 'rtl',
     lang: 'ar',
-    vibrate: [200, 100, 200],
-    data: { url: data.url || '/' },
+    // اهتزاز أطول للطلب الجديد حتى ينتبه السائق وهو سايق
+    vibrate: data.urgent ? [300, 120, 300, 120, 300] : [200, 100, 200],
+    // الطلب يبقى معروض بالشاشة لحد ما يضغطه — ما يختفي لحاله ويفوت السائق
+    requireInteraction: !!data.urgent,
+    // tag ثابت للطلب الواحد: لو وصل نفس الإشعار مرتين ما يتكرر بالشاشة
+    tag: data.rideId ? ('ride-' + data.rideId) : undefined,
+    renotify: !!data.urgent,
+    data: { url: data.url || '/', rideId: data.rideId || null },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
+  const d = event.notification.data || {};
+  const url = d.url || '/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      // لو التطبيق مفتوح بالخلفية: ركّز عليه وخبّره يعرض الطلب بشاشة كاملة
       for (const c of list) {
-        if (c.url.includes(url) && 'focus' in c) return c.focus();
+        if (c.url.includes('/driver') && 'focus' in c) {
+          c.postMessage({ type: 'ride:show', rideId: d.rideId || null });
+          return c.focus();
+        }
       }
+      // مقفل تماماً: افتحه على رابط فيه رقم الطلب
       if (clients.openWindow) return clients.openWindow(url);
     })
   );
