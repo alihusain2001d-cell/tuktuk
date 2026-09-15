@@ -2096,7 +2096,7 @@ async function sendOffer(id, priceArg, noteArg) {
     const out = await res.json();
     if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
     if (out.taken) { toast('الطلب مأخوذ من سائق ثاني'); pendingRides.delete(id); renderRequests(); return; }
-    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+    if (!res.ok || out.error) { toast(out.error || 'صار خطأ'); goOnline(); return; }
 
     // خزّن الطلب لحد ما الزبون يرد
     offeredRide = { rideId:id, data: pendingRides.get(id), price };
@@ -2151,6 +2151,13 @@ async function acceptRide(id) {
     const out = await res.json();
     if (out.blocked) { showExpired(out.access || { reason:'expired' }); return; }
     if (out.taken) { toast('الطلب انحجز من سائق ثاني'); pendingRides.delete(id); renderRequests(); return; }
+    /* لو ما فحصنا الخطأ هنا، نكمل ونقرا out.customer الفاضي فينهار الكود،
+       ويطلع "صار خطأ" العام بدل سبب الرفض — ويبقى عدنا رحلة ناقصة مخزونة. */
+    if (!res.ok || out.error || !out.customer) {
+      toast(out.error || 'ما كدرنا ناخذ الطلب، حاول مرة ثانية');
+      goOnline();          // نرجّع تسجيلنا لو الاتصال كان منقطع
+      return;
+    }
     activeRide = { rideId:id, type:r.type, pickup:r.pickup, destination:r.destination, store:r.store, itemDesc:r.itemDesc, customer:out.customer };
     customerPhone = out.customer.phone || '';
     pendingRides.clear();

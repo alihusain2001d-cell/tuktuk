@@ -796,18 +796,28 @@ app.post('/api/accept', async (req, res) => {
     const access = await db.getDriverAccess(driverId);
     if (!access.allowed) return res.status(403).json({ error: 'اشتراكك منتهي', blocked: true, access });
 
-    const driver = onlineDrivers.get(driverId);
-    if (!driver) return res.status(404).json({ error: 'السائق غير متصل' });
+    /* لا نشترط اتصال لحظي مفتوح.
+       شبكة الأمان (فحص الطلبات كل ٥ ثواني) تعرض الطلب حتى والـWebSocket
+       منقطع بصمت — وهذا بالضبط سبب وجودها. فلو رفضنا القبول هنا،
+       يصير السائق يشوف طلب ما يقدر ياخذه. الموقع ناخذه من القاعدة ويتحدث
+       أول ما يرجع الاتصال. */
+    const dRec = await db.getDriver(driverId);
+    if (!dRec) return res.status(404).json({ error: 'السائق غير معروف' });
+    const online = onlineDrivers.get(driverId);
+    const driver = online || {
+      name: dRec.name, phone: dRec.phone, car: dRec.car,
+      lat: dRec.last_lat, lng: dRec.last_lng,
+    };
 
     ride.status = 'accepted';
     ride.driverId = driverId;
     await db.updateRideStatus(rideId, 'accepted', driverId);
 
-    const dist = haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng);
-    const etaMin = Math.max(1, Math.round((dist / 25) * 60));
-
-    // جيب صورة السائق الشخصية حتى الزبون يتعرف عليه
-    const dRec = await db.getDriver(driverId);
+    // ما نعرف موقعه؟ نرجّع صفر — الزبون يشوف الوقت أول ما يوصل موقع السائق
+    const hasPos = driver.lat != null && driver.lng != null;
+    const etaMin = hasPos
+      ? Math.max(1, Math.round((haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng) / 25) * 60))
+      : 0;
 
     sendTo(ride.customerSocketId, 'ride:accepted', {
       driver: {
