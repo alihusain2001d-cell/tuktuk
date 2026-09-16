@@ -816,11 +816,11 @@ async function clearRideOffer(rideId) {
 async function acceptRideOffer(rideId) {
   if (!HAS_DB) {
     const r = mem.rides.get(rideId);
-    if (r) { r.estFare = r.offer_price; r.status = 'accepted'; }
+    if (r) { r.estFare = r.offer_price; r.customerPaid = r.offer_price; r.status = 'accepted'; }
     return r;
   }
   const res = await pool.query(`
-    UPDATE rides SET est_fare = offer_price, status='accepted'
+    UPDATE rides SET est_fare = offer_price, customer_paid = offer_price, status='accepted'
     WHERE id=$1 RETURNING *;
   `, [rideId]);
   return res.rows[0];
@@ -1419,17 +1419,28 @@ async function getDriverFullStatement({ driverId, from, to }) {
 }
 
 // ============ تقييم الرحلات ============
+// رحلة وحدة من القاعدة — حتى اللي خلصت وانشالت من ذاكرة السيرفر
+async function getRide(rideId) {
+  if (!HAS_DB) return mem.rides.get(rideId) || null;
+  const res = await pool.query('SELECT * FROM rides WHERE id=$1', [rideId]);
+  return res.rows[0] || null;
+}
+
+// يرجّع الرحلة إذا انحفظ التقييم، وnull إذا الرحلة ما خلصت أو متقيّمة من قبل.
+// الشرط داخل الـUPDATE نفسه حتى طلبين بنفس اللحظة ما ينحفظون الاثنين.
 async function rateRide(rideId, rating, note) {
   if (!HAS_DB) {
     const r = mem.rides.get(rideId);
-    if (r) { r.rating = rating; r.ratingNote = note || null; }
+    if (!r || r.status !== 'done' || r.rating) return null;
+    r.rating = rating; r.ratingNote = note || null;
     return r;
   }
   const res = await pool.query(
-    `UPDATE rides SET rating=$2, rating_note=$3 WHERE id=$1 RETURNING *`,
+    `UPDATE rides SET rating=$2, rating_note=$3
+     WHERE id=$1 AND status='done' AND rating IS NULL RETURNING *`,
     [rideId, rating, note || null]
   );
-  return res.rows[0];
+  return res.rows[0] || null;
 }
 
 // متوسط تقييم السائق
@@ -1536,7 +1547,7 @@ module.exports = {
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
   updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount, getCustomerNoShowCount,
   banCustomer, unbanCustomer,
-  createRide, updateRideStatus, cancelRideWithReason, getAllRides, getInProgressRides, getDriverEarnings, getStats,
+  createRide, getRide, updateRideStatus, cancelRideWithReason, getAllRides, getInProgressRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,

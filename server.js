@@ -341,6 +341,40 @@ app.post('/api/otp/verify', (req, res) => {
 });
 
 // تنظيف الأكواد المنتهية كل ١٠ دقايق
+/* ===== طلبات ما قبلها أحد =====
+   بدون هذا الزبون يبقى على "نبحثلك عن أقرب سائق" للأبد، والطلب
+   يبقى معلق بالذاكرة والقاعدة — وكل إعادة تشغيل ترجّعه ويتراكم.
+   ببلدة زغيرة بيها سواق قليل، هاي حالة تصير فعلاً. */
+// قابلة للتغيير بالبيئة حتى نفحصها بثواني بدل دقائق
+const SEARCH_TIMEOUT_MS = Number(process.env.SEARCH_TIMEOUT_MS) || 10 * 60 * 1000;
+const SEARCH_SWEEP_MS = Number(process.env.SEARCH_SWEEP_MS) || 60 * 1000;
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const ride of [...activeRides.values()]) {
+    if (ride.status !== 'searching') continue;
+    if (now - (ride.createdAt || now) < SEARCH_TIMEOUT_MS) continue;
+
+    ride.status = 'cancelled';
+    activeRides.delete(ride.id);
+    const reason = 'ما لقينا سائق متاح';
+    try { await db.cancelRideWithReason(ride.id, reason, 'system'); } catch (e) {}
+    // المكافأة المحجوزة ترجع للزبون — ما تضيع عليه وهو ما خذ رحلة
+    if (ride.rewardId) { try { await db.releaseRewardByRide(ride.id); } catch (e) {} }
+
+    sendTo(ride.customerSocketId, 'ride:cancelled', { rideId: ride.id, reason, by: 'system' });
+    broadcast('driver', 'ride:taken', { rideId: ride.id });
+    if (ride.customer?.phone) {
+      pushToCustomer(ride.customer.phone, {
+        title: 'ما لقينا سائق',
+        body: 'ما قبل أحد طلبك هسه — جرّب تطلب مرة ثانية',
+        url: '/index.html',
+      });
+    }
+    console.log(`⏰ انلغى طلب ${ride.id} — ما قبله أحد`);
+  }
+}, SEARCH_SWEEP_MS);
+
 setInterval(() => {
   const now = Date.now();
   for (const [phone, rec] of otpCodes) if (now > rec.expiresAt) otpCodes.delete(phone);
@@ -714,6 +748,15 @@ app.post('/api/book', async (req, res) => {
     const { name, phone, pickup, destination, socketId, orderType, store, storeName, itemDesc } = req.body;
     if (!pickup || !pickup.lat) return res.status(400).json({ error: 'موقعك مطلوب' });
 
+    /* نتأكد إن الإحداثيات أرقام حقيقية بمدى معقول — قبل كان نص مثل "abc"
+       يعبر الفحص ويوصل للقاعدة وينهار بـ٥٠٠ بدل رسالة واضحة. */
+    const validPoint = pt => pt && Number.isFinite(Number(pt.lat)) && Number.isFinite(Number(pt.lng))
+      && Math.abs(Number(pt.lat)) <= 90 && Math.abs(Number(pt.lng)) <= 180;
+    if (!validPoint(pickup)) return res.status(400).json({ error: 'موقع الانطلاق غير صحيح' });
+    if (destination && destination.lat != null && !validPoint(destination)) {
+      return res.status(400).json({ error: 'موقع الوصول غير صحيح' });
+    }
+
     if (phone) {
       const existing = await db.getCustomerByPhone(phone);
       if (existing && existing.banned) {
@@ -952,6 +995,9 @@ app.post('/api/offer/accept', async (req, res) => {
 
     ride.status = 'accepted';
     ride.estFare = ride.offerPrice;
+    /* بدون هذا السطر يبقى customerPaid = ٠ من وقت الحجز (التوصيل ما إله سعر
+       تلقائي)، فبنهاية الطلب ينقال للزبون إن المبلغ صفر ويطلعله "مجانية". */
+    ride.customerPaid = ride.offerPrice;
     await db.acceptRideOffer(rideId);
 
     const driver = onlineDrivers.get(ride.driverId);
@@ -1567,7 +1613,16 @@ app.post('/api/ride/:id/rate', async (req, res) => {
   try {
     const rating = parseInt(req.body.rating, 10);
     if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'تقييم غير صحيح' });
-    await db.rateRide(req.params.id, rating, (req.body.note || '').trim());
+
+    /* التقييم يحسب بمعدل السائق اللي تشوفه الإدارة، فلازم يكون مرة وحدة
+       وبس لرحلة خلصت فعلاً — قبل كان ينقبل لأي رحلة وبأي حالة وينكتب فوق القديم. */
+    const saved = await db.rateRide(req.params.id, rating, (req.body.note || '').trim());
+    if (!saved) {
+      const ride = await db.getRide(req.params.id);
+      if (!ride) return res.status(404).json({ error: 'الرحلة غير موجودة' });
+      if (ride.rating) return res.status(409).json({ error: 'قيّمت هذي الرحلة من قبل', alreadyRated: true });
+      return res.status(409).json({ error: 'ما تقدر تقيّم رحلة ما خلصت' });
+    }
     res.json({ ok: true });
   } catch (e) {
     console.error('خطأ بالتقييم:', e.message);
