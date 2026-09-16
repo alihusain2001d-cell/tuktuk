@@ -610,12 +610,12 @@
       <h1 id="drv-name-h">السائق</h1>
       <div class="status-text" id="status-text">نتصل...</div>
     </div>
-    <button class="live-badge" id="live-badge" onclick="toggleWorking()"><span class="live-dot"></span> شغّال</button>
+    <button class="live-badge" id="live-badge" onclick="toggleWorking()"><span class="live-dot"></span> جاهز</button>
   </header>
 
   <div class="off-banner hidden" id="off-banner">
-    <span>🔴 إنت مطفي — ما توصلك طلبات</span>
-    <button onclick="toggleWorking()">شغّلني</button>
+    <span>☕ إنت باستراحة — ما توصلك طلبات</span>
+    <button onclick="toggleWorking()">رجّعني جاهز</button>
   </div>
 
   <div class="sub-banner hidden" id="sub-banner"></div>
@@ -1320,6 +1320,7 @@ function showMainApp(acc) {
   }
   setTimeout(async () => {
     if (!map) initMap(); else map.resize();
+    startWatchingPosition();   // الموقع يبيّن دائماً — حتى وهو باستراحة
     await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
     // نحترم آخر اختيار للسائق (شغّال/مطفي) — محفوظ بالسيرفر مو بالجهاز،
     // حتى لو فتح التطبيق من موبايل ثاني تبقى نفس الحالة
@@ -1338,7 +1339,7 @@ async function toggleWorking() {
       body: JSON.stringify({ available: turningOn }),
     });
   } catch (e) { /* الحالة بالتطبيق تغيّرت، والسيرفر يتزامن بأول تحديث */ }
-  toast(turningOn ? '✅ صرت شغّال — راح توصلك الطلبات' : '🔴 طفّيت — ما توصلك طلبات');
+  toast(turningOn ? '✅ صرت جاهز — راح توصلك الطلبات' : '☕ صرت باستراحة — ما توصلك طلبات');
 }
 
 function logout() {
@@ -1681,6 +1682,23 @@ function initMap() {
    بدونه لو السائق سحب الخريطة يبقى ضايع لحد ما ترجع لحالها. */
 function centerOnMe() {
   if (!map) return;
+  // لسه ما وصلنا موقع حقيقي؟ نطلبه هسه بدل ما نوديه لوسط المسيب
+  if (myPos.lat === MUSAYYIB[0] && myPos.lng === MUSAYYIB[1]) {
+    toast('ندوّر على موقعك...');
+    startWatchingPosition();
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          if (meMarker) meMarker.setLngLat([myPos.lng, myPos.lat]);
+          mapEase(myPos.lat, myPos.lng, { zoom: 17, duration: 500 });
+        },
+        () => toast('ما كدرنا نحدد موقعك — تأكد من إذن الموقع', 5000),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+    return;
+  }
   mapEase(myPos.lat, myPos.lng, { zoom: Math.max(map.getZoom(), 17), duration: 500 });
   routeFitDone = true;   // المتابعة تكمل من هنا بدل ما تصفّر تكبيره
 }
@@ -1800,6 +1818,8 @@ function onOfferRejected(data) {
 let watchId = null;
 
 // تتبع GPS حقيقي مستمر (بدل التحديد لمرة وحدة)
+let geoWarned = false;   // ما نزعجه بنفس التحذير كل ثانية
+
 function startWatchingPosition() {
   if (!navigator.geolocation) { if (isOnline) goOnline(); return; }
   if (watchId !== null) return; // أصلاً شغّال
@@ -1820,19 +1840,24 @@ function startWatchingPosition() {
       if (activeRide) drawRoute();
       if (first && isOnline) goOnline();
     },
-    () => { if (isOnline) goOnline(); },
+    (err) => {
+      /* قبل كنا نسكت عن خطأ الموقع، فالسائق يشوف الخريطة معلقة على المسيب
+         وما يعرف ليش. هسه نقوله مرة وحدة شنو المشكلة. */
+      if (!geoWarned) {
+        geoWarned = true;
+        toast(err && err.code === 1
+          ? 'التطبيق ما عنده إذن الموقع — فعّله من إعدادات الموبايل حتى تبيّن على الخريطة'
+          : 'ما كدرنا نحدد موقعك — تأكد إن الـGPS شغّال', 6000);
+      }
+      if (isOnline) goOnline();
+    },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
   );
 }
-function stopWatchingPosition() {
-  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-}
-
 // يبدأ تلقائياً أول ما يفتح التطبيق، إلا إذا السائق طفّى الزر بنفسه
 function startWorking() {
   isOnline = true;
   setLive(true, 'متصل - جاهز');
-  startWatchingPosition();
   goOnline();
   startLocationUpdates();
   startRidePolling();
@@ -1921,7 +1946,6 @@ function stopWorking() {
   setLive(false, 'غير متصل');
   goOffline();
   stopLocationUpdates();
-  stopWatchingPosition();
   stopRidePolling();
   releaseWakeLock();
 }
@@ -1929,7 +1953,7 @@ function stopWorking() {
 function setLive(on, text) {
   const badge = document.getElementById('live-badge');
   badge.classList.toggle('off', !on);
-  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'شغّال' : 'مطفي'}`;
+  badge.innerHTML = `<span class="live-dot"></span> ${on ? 'جاهز' : 'استراحة'}`;
   document.getElementById('status-text').textContent = text;
   document.getElementById('off-banner').classList.toggle('hidden', on);
   // لما يطفّي، ننضّف الطلبات المعروضة — ما نخليه يقبل طلب وهو مطفي
