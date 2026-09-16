@@ -11,7 +11,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="جايك سائق">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
@@ -822,9 +821,7 @@
 
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <script>
 const MUSAYYIB = [32.7789, 44.2892];
 let contactSettings = {};
@@ -890,30 +887,66 @@ function mapRecolor(m) {
   }
 }
 
-function addTileLayer(m) {
-  // لو المكتبة ما تحمّلت (شبكة ضعيفة) نرجع للخريطة العادية بدل ما تبقى فارغة
-  if (!window.maplibregl || !L.maplibreGL) {
-    L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
-    return;
-  }
-  let fellBack = false;
-  const gl = L.maplibreGL({ style: VECTOR_STYLE });
-  gl.on('add', () => {
-    const mm = gl.getMaplibreMap();
-    const apply = () => { mapForceArabic(mm); mapRecolor(mm); };
-    mm.on('styledata', apply);
-    if (mm.isStyleLoaded && mm.isStyleLoaded()) apply();
-    // فشل تحميل النمط (الخدمة واقفة؟) — نبدّل بدل ما يقعد السائق قدام شاشة فارغة
-    mm.on('error', () => {
-      if (fellBack) return;
-      if (mm.isStyleLoaded && mm.isStyleLoaded()) return;
-      fellBack = true;
-      try { m.removeLayer(gl); } catch (err) {}
-      L.tileLayer(OSM_TILES, { maxZoom: 19 }).addTo(m);
-    });
-  });
-  gl.addTo(m);
+/* خريطة احتياطية بصور عادية — ننتقل إلها لو فشل تحميل النمط المتجه،
+   حتى ما يقعد السائق قدام شاشة فارغة وهو بنص رحلة. */
+const RASTER_STYLE = {
+  version: 8,
+  sources: { osm: { type:'raster', tiles:[
+    'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  ], tileSize:256, maxzoom:19 } },
+  layers: [{ id:'osm', type:'raster', source:'osm' }],
+};
+
+/* ===== أدوات الخريطة =====
+   MapLibre تاخذ [طول, عرض] بالعكس عن Leaflet — نلفها بدوال صغيرة
+   حتى باقي الكود يبقى يشتغل بـ(عرض، طول) مثل ما كان. */
+function mapJump(lat, lng, zoom) {
+  if (!map) return;
+  map.jumpTo({ center: [lng, lat], zoom: zoom != null ? zoom : map.getZoom() });
 }
+function mapEase(lat, lng, opts) {
+  if (!map) return;
+  map.easeTo(Object.assign({ center: [lng, lat] }, opts || {}));
+}
+
+// علامة بسيطة من رمز تعبيري
+function emojiMarker(emoji, lat, lng) {
+  const el = document.createElement('div');
+  el.style.cssText = 'font-size:26px;line-height:1;transform:translateY(-8px)';
+  el.textContent = emoji;
+  return new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([lng, lat]).addTo(map);
+}
+
+/* خط السير — بـMapLibre ماكو polyline جاهز، نستعمل طبقة خط على مصدر بيانات */
+let pendingRoute = null;   // لو طلبنا رسم خط والنمط لسه ما جهز، نخزنه ونرسمه أول ما يجهز
+
+/* ما نعتمد على isStyleLoaded() — طلع يرد false ببعض البيئات حتى والنمط
+   شغّال، فكننا نمتنع عن رسم خط السير بلا سبب. نجرّب ونمسك الخطأ بدلها. */
+function ensureRouteLayer() {
+  if (!map || map.getSource('route')) return true;
+  try {
+    map.addSource('route', { type:'geojson',
+      data:{ type:'Feature', geometry:{ type:'LineString', coordinates: [] } } });
+    map.addLayer({ id:'route-line', type:'line', source:'route',
+      layout:{ 'line-cap':'round', 'line-join':'round' },
+      paint:{ 'line-color':'#2BA9E0', 'line-width':6, 'line-opacity':0.9 } });
+    return true;
+  } catch (e) { return false; }   // النمط لسه ما جهز — نعيدها بـstyle.load
+}
+
+function setRoute(latlngs) {
+  if (!map) return;
+  const data = { type:'Feature',
+    geometry:{ type:'LineString', coordinates: latlngs.map(c => [c[1], c[0]]) } };
+  pendingRoute = data;
+  ensureRouteLayer();
+  const src = map.getSource('route');
+  if (src) { src.setData(data); pendingRoute = null; }
+}
+
+function clearRoute() { setRoute([]); }
 
 
 let map, meMarker, pickupMarker, destMarker, routeLine;
@@ -1286,7 +1319,7 @@ function showMainApp(acc) {
     banner.textContent = `✅ اشتراكك فعّال — باقي ${acc.daysLeft} يوم`;
   }
   setTimeout(async () => {
-    if (!map) initMap(); else map.invalidateSize();
+    if (!map) initMap(); else map.resize();
     await resumeActiveRide(); // لو عنده رحلة نشطة من قبل ما يسكّر التطبيق، نرجّعها أول شي
     // نحترم آخر اختيار للسائق (شغّال/مطفي) — محفوظ بالسيرفر مو بالجهاز،
     // حتى لو فتح التطبيق من موبايل ثاني تبقى نفس الحالة
@@ -1339,7 +1372,7 @@ function switchTab(tab) {
   ['earn-view','owed-view','trips-view'].forEach(id =>
     document.getElementById(id).classList.toggle('active', DRIVER_VIEWS[tab] === id));
   if (tab !== 'work') loadEarnings();
-  if (tab === 'work') setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+  if (tab === 'work') setTimeout(() => { if (map) map.resize(); }, 80);
 }
 
 // ============ الدعم الفني ============
@@ -1494,15 +1527,13 @@ let mapFull = false;
    رمز التكتك القديم كان ثابت على جنب مهما كان اتجاه السائق. */
 let myHeading = 0;
 
-function meIcon() {
-  return L.divIcon({
-    className: '', iconSize: [0,0],
-    html: `<div class="nav-arrow" style="transform:translate(-50%,-50%) rotate(${myHeading}deg)">
-      <svg width="42" height="42" viewBox="0 0 46 46">
-        <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
-        <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/>
-      </svg></div>`,
-  });
+function meEl() {
+  const el = document.createElement('div');
+  el.className = 'nav-arrow';
+  el.innerHTML = `<svg width="42" height="42" viewBox="0 0 46 46">
+      <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
+      <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/></svg>`;
+  return el;
 }
 
 /* الزاوية بين نقطتين — نستعملها لما الـGPS ما يعطي heading
@@ -1532,7 +1563,12 @@ function setMyHeading(deg, source) {
   if (source === 'compass' && diff < 4) return;
 
   myHeading = next;
-  if (meMarker) meMarker.setIcon(meIcon());
+  if (meMarker) meMarker.setRotation(myHeading);
+  /* بوضع الملاحة ندير الخريطة وياه مثل ويز — إلا إذا السائق
+     دارها بإيده قبل شوي، نخليه يشوف اللي يريده. */
+  if (map && activeRide && Date.now() - userRotatedAt > 8000) {
+    map.easeTo({ bearing: myHeading, duration: 500 });
+  }
 }
 
 /* ===== البوصلة =====
@@ -1597,16 +1633,47 @@ document.addEventListener('click', function once() {
   else updateCompassMenu();   // ما سألناه بعد — نخليها خيار بالقائمة
 }, { once: true });
 
-function initMap() {
-  map = L.map('map', { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 17);
-  addTileLayer(map);
-  L.control.zoom({ position:'topright' }).addTo(map);
-  meMarker = L.marker(myPos, { icon: meIcon(), interactive:false }).addTo(map);
+let userRotatedAt = 0;   // آخر مرة دار السائق الخريطة بإيده
 
-  // الضغط على الخريطة يكبّرها
+function initMap() {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: VECTOR_STYLE,
+    center: [MUSAYYIB[1], MUSAYYIB[0]],
+    zoom: 17,
+    attributionControl: false,
+    pitchWithRotate: false,   // ما نريد الخريطة تميل، بس تدور
+    dragPan: true,
+  });
+  map.touchZoomRotate.enableRotation();   // الدوران بإصبعين
+  map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), 'top-right');
+
+  map.on('style.load', () => {
+    mapForceArabic(map);
+    mapRecolor(map);
+    ensureRouteLayer();
+    if (pendingRoute) {                     // خط سير انطلب قبل ما يجهز النمط
+      const src = map.getSource('route');
+      if (src) { src.setData(pendingRoute); pendingRoute = null; }
+    }
+  });
+
+  // فشل النمط المتجه؟ ننتقل للخريطة العادية بدل ما تبقى فارغة
+  let fellBack = false;
+  map.on('error', () => {
+    if (fellBack || map.isStyleLoaded()) return;
+    fellBack = true;
+    map.setStyle(RASTER_STYLE);
+  });
+
+  // نعرف إذا السائق دارها بنفسه حتى ما نزاحمه
+  map.on('rotatestart', () => { userRotatedAt = Date.now(); });
+
+  meMarker = new maplibregl.Marker({ element: meEl(), rotationAlignment: 'map' })
+    .setLngLat([myPos.lng, myPos.lat]).addTo(map);
+
   map.on('click', () => { if (!mapFull) toggleMapFull(true); });
 
-  // نخفي التلميح بعد ٦ ثواني
   setTimeout(() => { const h = document.getElementById('map-hint'); if (h) h.style.opacity = '0'; }, 6000);
 }
 
@@ -1614,7 +1681,7 @@ function initMap() {
    بدونه لو السائق سحب الخريطة يبقى ضايع لحد ما ترجع لحالها. */
 function centerOnMe() {
   if (!map) return;
-  map.setView([myPos.lat, myPos.lng], Math.max(map.getZoom(), 17), { animate: true });
+  mapEase(myPos.lat, myPos.lng, { zoom: Math.max(map.getZoom(), 17), duration: 500 });
   routeFitDone = true;   // المتابعة تكمل من هنا بدل ما تصفّر تكبيره
 }
 
@@ -1625,7 +1692,7 @@ function toggleMapFull(full) {
   wv.classList.toggle('map-full', full);
   if (full) updateMapMini();
   // نعيد حساب حجم الخريطة بعد الحركة (بس ما نغيّر تكبير الملاحة القريب اللي السائق متابعه)
-  setTimeout(() => { if (map) map.invalidateSize(); }, 320);
+  setTimeout(() => { if (map) map.resize(); }, 320);
 }
 
 // بطاقة المعلومات الصغيرة بوضع الخريطة الكاملة
@@ -1741,7 +1808,7 @@ function startWatchingPosition() {
       const first = !watchId || (myPos.lat === MUSAYYIB[0] && myPos.lng === MUSAYYIB[1]);
       const prev = myPos;
       myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      if (meMarker) meMarker.setLatLng(myPos);
+      if (meMarker) meMarker.setLngLat([myPos.lng, myPos.lat]);
       // اتجاه السياقة: من الـGPS إذا متوفر، وإلا نحسبه من حركته بين نقطتين.
       // نتجاهل الحركة الزغيرة جداً — تشويش الـGPS يخلي السهم يرجف وهو واقف.
       if (pos.coords.heading != null && !isNaN(pos.coords.heading) && pos.coords.speed > 0.5) {
@@ -1749,7 +1816,7 @@ function startWatchingPosition() {
       } else if (prev && haversine(prev.lat, prev.lng, myPos.lat, myPos.lng) > 0.008) {
         setMyHeading(bearingBetween(prev, myPos), 'gps');
       }
-      if (map && !activeRide) map.setView(myPos, 17);
+      if (map && !activeRide) mapJump(myPos.lat, myPos.lng, 17);
       if (activeRide) drawRoute();
       if (first && isOnline) goOnline();
     },
@@ -2248,17 +2315,14 @@ function showActiveRide(out, r) {
   document.getElementById('ar-route').innerHTML = html + (isDel && r.itemDesc ? `<div class="item-box" style="margin-top:8px;margin-bottom:0">📦 <b>الطلب:</b> ${r.itemDesc}</div>` : '');
 
   // بالتوصيل: المحل نقطة أولى (🏪) وعنوان الزبون نقطة وصول (🔴) — بالرحلة العادية: الانطلاق (🟢) والوجهة (🔴)
-  const pIcon = L.divIcon({ className:'', html:`<div style="font-size:26px;transform:translate(-50%,-90%)">${isDel?'🔴':'🟢'}</div>`, iconSize:[0,0] });
-  if (pickupMarker) map.removeLayer(pickupMarker);
-  pickupMarker = L.marker([r.pickup.lat, r.pickup.lng], { icon:pIcon, interactive:false }).addTo(map);
+  if (pickupMarker) pickupMarker.remove();
+  pickupMarker = emojiMarker(isDel ? '🔴' : '🟢', r.pickup.lat, r.pickup.lng);
   if (isDel && r.store) {
-    const sIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🏪</div>', iconSize:[0,0] });
-    if (destMarker) map.removeLayer(destMarker);
-    destMarker = L.marker([r.store.lat, r.store.lng], { icon:sIcon, interactive:false }).addTo(map);
+    if (destMarker) destMarker.remove();
+    destMarker = emojiMarker('🏪', r.store.lat, r.store.lng);
   } else if (r.destination) {
-    const dIcon = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🔴</div>', iconSize:[0,0] });
-    if (destMarker) map.removeLayer(destMarker);
-    destMarker = L.marker([r.destination.lat, r.destination.lng], { icon:dIcon, interactive:false }).addTo(map);
+    if (destMarker) destMarker.remove();
+    destMarker = emojiMarker('🔴', r.destination.lat, r.destination.lng);
   }
   drawRoute();
 }
@@ -2318,7 +2382,7 @@ async function drawRoute() {
   // المسار يتبع المرحلة الحالية: للنقطة الأولى (محل/زبون) وهو بالطريق، وللوجهة النهائية بعد ما يبدأ الرحلة
   const target = currentTarget();
   if (activeRide.phase === 'waiting' || !target) {
-    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    clearRoute(); routeLine = null;
     return;
   }
   const now = Date.now();
@@ -2326,19 +2390,21 @@ async function drawRoute() {
   lastRouteFetch = now;
   const route = await fetchRoute(myPos, target);
   if (!activeRide) return; // الرحلة خلصت وإحنا ننتظر الرد
-  if (routeLine) map.removeLayer(routeLine);
   if (route) {
-    routeLine = L.polyline(route.coords, { color:'#2BA9E0', weight:5, opacity:.9, lineCap:'round' }).addTo(map);
+    setRoute(route.coords); routeLine = true;
   } else {
-    routeLine = L.polyline([[myPos.lat,myPos.lng],[target.lat,target.lng]], { color:'#2BA9E0', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(map);
+    setRoute([[myPos.lat,myPos.lng],[target.lat,target.lng]]); routeLine = true;
   }
   // متل خرائط الملاحة: نضل مقرّبين على موقع السائق (مو نكبّر لنشوف المسار كله)، ونتابع بدون ما نغيّر تكبيره اليدوي
   const NAV_ZOOM = 17;
   if (!routeFitDone) {
-    map.setView([myPos.lat, myPos.lng], NAV_ZOOM);
+    mapEase(myPos.lat, myPos.lng, { zoom: NAV_ZOOM, duration: 600 });
     routeFitDone = true;
   } else {
-    map.panTo([myPos.lat, myPos.lng], { animate: true });
+    // نتابع موقعه، وندير الخريطة باتجاهه إلا إذا دارها هو قبل شوي
+    const opts = { duration: 600 };
+    if (Date.now() - userRotatedAt > 8000) opts.bearing = myHeading;
+    mapEase(myPos.lat, myPos.lng, opts);
   }
 }
 
@@ -2442,11 +2508,12 @@ function endActive() {
   activeRide = null; customerPhone='';
   toggleMapFull(false);                                    // ارجع للوضع العادي
   document.getElementById('map-mini').classList.remove('show');
-  if (pickupMarker) { map.removeLayer(pickupMarker); pickupMarker=null; }
-  if (destMarker) { map.removeLayer(destMarker); destMarker=null; }
-  if (routeLine) { map.removeLayer(routeLine); routeLine=null; }
+  if (pickupMarker) { pickupMarker.remove(); pickupMarker=null; }
+  if (destMarker) { destMarker.remove(); destMarker=null; }
+  clearRoute(); routeLine = null;
+  if (map) map.easeTo({ bearing: 0, duration: 400 });   // الرحلة خلصت — نرجّع الشمال لفوق
   routeFitDone = false;
-  if (map) map.setView(myPos, 17);
+  if (map) mapJump(myPos.lat, myPos.lng, 17);
   document.getElementById('panel-active').classList.add('hidden');
   document.getElementById('panel-waiting').classList.remove('hidden');
   renderRequests();
