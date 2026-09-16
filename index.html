@@ -300,6 +300,7 @@
   .final-fare .ff-amt { font-size:32px; font-weight:800; color:#B26A00; margin:4px 0 2px; }
   .final-fare .ff-detail { font-size:12px; color:var(--muted); line-height:1.6; }
 
+  .btn.wa { background:#25D366; color:#fff; }
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -686,6 +687,16 @@
   </div>
 
   <!-- ============ نافذة الحظر ============ -->
+  <div class="cancel-modal-bg" id="call-modal-bg">
+    <div class="cancel-modal">
+      <h3 style="text-align:center;margin-bottom:4px">اتصل بالسائق</h3>
+      <div style="text-align:center;font-size:14px;color:var(--muted);direction:ltr;margin-bottom:18px" id="call-phone">—</div>
+      <button class="btn go full" onclick="callByPhone()" style="margin-bottom:10px">📞 اتصال عادي</button>
+      <button class="btn wa full" onclick="callByWhatsapp()" style="margin-bottom:14px">💬 واتساب</button>
+      <button class="btn ghost full" onclick="closeCallModal()">تراجع</button>
+    </div>
+  </div>
+
   <div class="cancel-modal-bg" id="ban-modal-bg">
     <div class="cancel-modal" style="text-align:center">
       <div style="font-size:44px;margin-bottom:10px">🚫</div>
@@ -2119,7 +2130,38 @@ async function confirmCancelRide() {
   if (currentRide) await fetch('/api/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId: currentRide, reason }) });
   resetAll();
 }
-function callDriver() { if (driverPhone) location.href = `tel:${driverPhone}`; else toast('رقم السواق غير متوفر'); }
+/* ===== الاتصال بالسائق =====
+   خيارين — الزبون ممكن يكون بلا رصيد وعنده إنترنيت. */
+
+// الواتساب يريد صيغة دولية: 07701234567 → 9647701234567
+function toIntlIraq(phone) {
+  let n = String(phone || '').replace(/\D/g, '');
+  if (n.startsWith('00')) n = n.slice(2);
+  if (n.startsWith('964')) return n;
+  if (n.startsWith('0')) return '964' + n.slice(1);
+  if (n.length === 10) return '964' + n;
+  return n;
+}
+
+function callDriver() {
+  if (!driverPhone) return toast('رقم السواق غير متوفر');
+  document.getElementById('call-phone').textContent = driverPhone;
+  document.getElementById('call-modal-bg').classList.add('show');
+}
+function closeCallModal() { document.getElementById('call-modal-bg').classList.remove('show'); }
+
+function callByPhone() {
+  closeCallModal();
+  location.href = 'tel:' + driverPhone;
+}
+
+function callByWhatsapp() {
+  closeCallModal();
+  const n = toIntlIraq(driverPhone);
+  if (!n) return toast('رقم السائق مو صحيح');
+  const msg = `مرحبا، أنا ${(user && user.name) || 'زبون'} — طالب رحلة بجايك`;
+  window.open(`https://wa.me/${n}?text=${encodeURIComponent(msg)}`, '_blank');
+}
 
 function resetAll() {
   currentRide = null; driverPhone=''; currentOffer = null;
