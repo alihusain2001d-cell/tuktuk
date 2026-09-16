@@ -690,7 +690,8 @@ async function getCustomerTrips(phone, limit = 30) {
           rideId: t.id, type: t.type,
           from: t.type === 'delivery' ? (t.storeName || t.store?.label || '—') : (t.pickup.label || '—'),
           to: t.destination?.label || '—',
-          fare: t.estFare || 0, km: Math.round((t.estKm || 0) * 10) / 10,
+          fare: t.estFare || 0, paid: t.customerPaid != null ? t.customerPaid : (t.estFare || 0),
+          km: Math.round((t.estKm || 0) * 10) / 10,
           at: t.done_at ? t.done_at.getTime() : Date.now(),
           driverName: d ? d.name : null,
           pickup: t.pickup ? { lat: t.pickup.lat, lng: t.pickup.lng } : null,
@@ -701,7 +702,7 @@ async function getCustomerTrips(phone, limit = 30) {
   }
   const res = await pool.query(`
     SELECT rides.id, rides.type, rides.pickup_label, rides.dest_label, rides.store_label, rides.store_name,
-           rides.est_km, rides.est_fare, rides.done_at,
+           rides.est_km, rides.est_fare, rides.customer_paid, rides.done_at,
            rides.pickup_lat, rides.pickup_lng, rides.dest_lat, rides.dest_lng, rides.store_lat, rides.store_lng,
            drivers.name AS driver_name
     FROM rides LEFT JOIN drivers ON drivers.id = rides.driver_id
@@ -712,7 +713,8 @@ async function getCustomerTrips(phone, limit = 30) {
     rideId: r.id, type: r.type,
     from: r.type === 'delivery' ? (r.store_name || r.store_label || '—') : (r.pickup_label || '—'),
     to: r.dest_label || '—',
-    fare: r.est_fare || 0, km: Math.round((r.est_km || 0) * 10) / 10,
+    fare: r.est_fare || 0, paid: r.customer_paid != null ? r.customer_paid : (r.est_fare || 0),
+    km: Math.round((r.est_km || 0) * 10) / 10,
     at: r.done_at ? new Date(r.done_at).getTime() : Date.now(),
     driverName: r.driver_name || null,
     pickup: r.pickup_lat != null ? { lat: r.pickup_lat, lng: r.pickup_lng } : null,

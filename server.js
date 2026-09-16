@@ -19,6 +19,23 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
+/* النصوص اللي يكتبها المستخدمين (اسم، اسم محل، ملاحظة...) تنعرض بصفحات غيرهم:
+   اسم الزبون عند السائق، وكلشي بلوحة الإدارة. لو أحد كتب كود بدل اسم،
+   كان ممكن يشتغل بمتصفحهم. نشيل الرموز اللي يحتاجها الكود — الكتابة العادية ما تتأثر.
+   الصور (data:) واشتراك الإشعارات ما نلمسها. */
+function cleanInput(v) {
+  if (typeof v === 'string') {
+    if (v.startsWith('data:')) return v;
+    return v.replace(/[<>]/g, '').replace(/"/g, '”').replace(/[`']/g, '’');
+  }
+  if (Array.isArray(v)) return v.map(cleanInput);
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) if (k !== 'subscription') v[k] = cleanInput(v[k]);
+  }
+  return v;
+}
+app.use((req, res, next) => { if (req.body && typeof req.body === 'object') cleanInput(req.body); next(); });
+
 // ============ مفتاح لوحة التحكم ============
 const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
 
@@ -283,6 +300,54 @@ function normalizePhone(p) {
   return String(p || '').replace(/\D/g, ''); // بس أرقام
 }
 
+/* ===== هوية الزبون =====
+   قبل كان رقم الموبايل وحده يكفي — أي أحد يعرف رقمك يكدر يشوف رحلاتك
+   ومواقعك، يغيّر اسمك، يطلب باسمك، أو حتى ينقل حسابك لرقمه.
+   هسه بعد كود التأكيد ناخذ توكن موقّع، وكل طلب يخص الحساب لازم يحمله. */
+const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_KEY;
+
+function signCustomer(id) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update('cust:' + id).digest('hex').slice(0, 40);
+}
+function customerToken(c) { return `${c.id}.${signCustomer(c.id)}`; }
+
+// يرجّع الزبون إذا التوكن صحيح ويخص هذا الرقم، وإلا يرد ٤٠١ ويرجّع null
+async function authCustomer(req, res, phone) {
+  const t = String(req.headers['x-customer-token'] || '');
+  const dot = t.lastIndexOf('.');
+  let c = null;
+  if (dot > 0 && phone) {
+    const id = t.slice(0, dot), sig = Buffer.from(t.slice(dot + 1));
+    const expected = Buffer.from(signCustomer(id));
+    if (sig.length === expected.length && crypto.timingSafeEqual(sig, expected)) {
+      const rec = await db.getCustomerByPhone(phone);
+      if (rec && String(rec.id) === id) c = rec;
+    }
+  }
+  if (!c) res.status(401).json({ error: 'سجّل دخولك مرة ثانية', authRequired: true });
+  return c;
+}
+async function requireCustomer(req, res, next) {
+  try {
+    if (await authCustomer(req, res, req.params.phone || req.body.phone)) next();
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+}
+
+// يتأكد من كود التأكيد ويستهلكه. يرجّع null إذا صحيح، أو { status, body } للخطأ
+function checkOtp(phone, code) {
+  const clean = normalizePhone(phone);
+  const rec = otpCodes.get(clean);
+  if (!rec) return { status: 400, body: { error: 'اطلب كود جديد أول' } };
+  if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return { status: 400, body: { error: 'الكود انتهت صلاحيته، اطلب واحد جديد' } }; }
+  if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpCodes.delete(clean); return { status: 429, body: { error: 'محاولات كثيرة، اطلب كود جديد' } }; }
+  if (rec.code !== String(code || '').trim()) {
+    rec.attempts++;
+    return { status: 400, body: { error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts } };
+  }
+  otpCodes.delete(clean);
+  return null;
+}
+
 // طلب كود
 app.post('/api/otp/send', async (req, res) => {
   try {
@@ -497,7 +562,7 @@ app.get('/api/driver/:id/earnings', async (req, res) => {
 app.post('/api/customer/check-phone', async (req, res) => {
   try {
     const c = await db.getCustomerByPhone(req.body.phone);
-    res.json({ exists: !!c, name: c ? c.name : null });
+    res.json({ exists: !!c });   // بدون الاسم — ما نكشف أسماء الناس لأي أحد يجرب أرقام
   } catch (e) {
     console.error('خطأ بفحص رقم الزبون:', e.message);
     res.status(500).json({ error: 'خطأ' });
@@ -507,7 +572,7 @@ app.post('/api/customer/check-phone', async (req, res) => {
 // حساب جديد (بعد تأكيد الكود)
 app.post('/api/customer/register', async (req, res) => {
   try {
-    const { name, phone } = req.body;
+    const { name, phone, code } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
 
     // امنع التسجيل برقم موجود
@@ -519,8 +584,12 @@ app.post('/api/customer/register', async (req, res) => {
       });
     }
 
+    // قبل كان التأكيد بالمتصفح بس — أي أحد يكدر يسجّل برقم غيره
+    const otpErr = checkOtp(phone, code);
+    if (otpErr) return res.status(otpErr.status).json(otpErr.body);
+
     const c = await db.upsertCustomer(phone, name);
-    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo } });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo }, token: customerToken(c) });
   } catch (e) {
     console.error('خطأ بتسجيل الزبون:', e.message);
     res.status(500).json({ error: 'صار خطأ بالتسجيل' });
@@ -554,7 +623,7 @@ app.post('/api/customer/login', async (req, res) => {
     }
 
     const trips = await db.getCustomerTripCount(clean);
-    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo }, trips });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone, photo: c.photo }, trips, token: customerToken(c) });
   } catch (e) {
     console.error('خطأ بدخول الزبون:', e.message);
     res.status(500).json({ error: 'صار خطأ بتسجيل الدخول' });
@@ -562,7 +631,7 @@ app.post('/api/customer/login', async (req, res) => {
 });
 
 // سجل رحلات الزبون المنجزة
-app.get('/api/customer/:phone/trips', async (req, res) => {
+app.get('/api/customer/:phone/trips', requireCustomer, async (req, res) => {
   try {
     const trips = await db.getCustomerTrips(req.params.phone);
     res.json({ trips });
@@ -573,7 +642,7 @@ app.get('/api/customer/:phone/trips', async (req, res) => {
 });
 
 // تحديث اسم/صورة الزبون
-app.post('/api/customer/:phone/profile', async (req, res) => {
+app.post('/api/customer/:phone/profile', requireCustomer, async (req, res) => {
   try {
     const { name, photo } = req.body;
     const c = await db.updateCustomerProfile(req.params.phone, { name, photo });
@@ -586,15 +655,18 @@ app.post('/api/customer/:phone/profile', async (req, res) => {
 });
 
 // تغيير رقم الزبون (بعد تحقق OTP على الرقم الجديد بواسطة /api/otp/send و /api/otp/verify)
-app.post('/api/customer/:phone/change-phone', async (req, res) => {
+app.post('/api/customer/:phone/change-phone', requireCustomer, async (req, res) => {
   try {
     const newPhone = normalizePhone(req.body.newPhone);
     if (newPhone.length < 10) return res.status(400).json({ error: 'رقم غير صحيح' });
     const existing = await db.getCustomerByPhone(newPhone);
     if (existing) return res.status(409).json({ error: 'هذا الرقم مستخدم من حساب ثاني' });
+    // الرقم الجديد لازم يكون فعلاً بيد صاحب الحساب
+    const otpErr = checkOtp(newPhone, req.body.code);
+    if (otpErr) return res.status(otpErr.status).json(otpErr.body);
     const c = await db.changeCustomerPhone(req.params.phone, newPhone);
     if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم' });
-    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone } });
+    res.json({ ok: true, customer: { id: c.id, name: c.name, phone: c.phone }, token: customerToken(c) });
   } catch (e) {
     console.error('خطأ بتغيير الرقم:', e.message);
     res.status(500).json({ error: 'خطأ' });
@@ -602,7 +674,7 @@ app.post('/api/customer/:phone/change-phone', async (req, res) => {
 });
 
 // مكافآت الزبون (المتاحة الحين + رحلاته المتبقية للمكافأة الجاية)
-app.get('/api/customer/:phone/rewards', async (req, res) => {
+app.get('/api/customer/:phone/rewards', requireCustomer, async (req, res) => {
   try {
     const [pending, settings, tripCount] = await Promise.all([
       db.getPendingReward(req.params.phone),
@@ -622,7 +694,7 @@ app.get('/api/customer/:phone/rewards', async (req, res) => {
 });
 
 // المواقع المفضلة للزبون
-app.get('/api/customer/:phone/places', async (req, res) => {
+app.get('/api/customer/:phone/places', requireCustomer, async (req, res) => {
   try {
     res.json({ places: await db.getSavedPlaces(req.params.phone) });
   } catch (e) {
@@ -631,7 +703,7 @@ app.get('/api/customer/:phone/places', async (req, res) => {
   }
 });
 
-app.post('/api/customer/:phone/places', async (req, res) => {
+app.post('/api/customer/:phone/places', requireCustomer, async (req, res) => {
   try {
     const { name, lat, lng, address } = req.body;
     if (!name || lat == null || lng == null) return res.status(400).json({ error: 'بيانات ناقصة' });
@@ -643,7 +715,7 @@ app.post('/api/customer/:phone/places', async (req, res) => {
   }
 });
 
-app.delete('/api/customer/:phone/places/:id', async (req, res) => {
+app.delete('/api/customer/:phone/places/:id', requireCustomer, async (req, res) => {
   try {
     await db.deleteSavedPlace(req.params.id, req.params.phone);
     res.json({ ok: true });
@@ -743,7 +815,7 @@ app.get('/api/static-map', async (req, res) => {
 // ============================================================
 //  API — الحجز
 // ============================================================
-app.post('/api/book', async (req, res) => {
+app.post('/api/book', requireCustomer, async (req, res) => {
   try {
     const { name, phone, pickup, destination, socketId, orderType, store, storeName, itemDesc } = req.body;
     if (!pickup || !pickup.lat) return res.status(400).json({ error: 'موقعك مطلوب' });
@@ -868,7 +940,7 @@ app.post('/api/driver/push-subscribe', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/customer/push-subscribe', async (req, res) => {
+app.post('/api/customer/push-subscribe', requireCustomer, async (req, res) => {
   try {
     const { phone, subscription } = req.body;
     if (!phone || !subscription) return res.status(400).json({ error: 'بيانات ناقصة' });
@@ -996,6 +1068,8 @@ app.post('/api/offer/accept', async (req, res) => {
     const { rideId } = req.body;
     const ride = activeRides.get(rideId);
     if (!ride) return res.status(404).json({ error: 'الطلب غير موجود' });
+    // بس صاحب الطلب — رقم الطلب يوصل لكل السواق، فبدون هذا السائق يكدر يوافق على سعره بنفسه
+    if (!(await authCustomer(req, res, ride.customer?.phone))) return;
     if (ride.status !== 'offered') return res.status(409).json({ error: 'ماكو عرض معلّق' });
 
     ride.status = 'accepted';
@@ -1029,6 +1103,7 @@ app.post('/api/offer/reject', async (req, res) => {
     const { rideId } = req.body;
     const ride = activeRides.get(rideId);
     if (!ride) return res.status(404).json({ error: 'الطلب غير موجود' });
+    if (!(await authCustomer(req, res, ride.customer?.phone))) return;
 
     const rejectedDriver = ride.driverId;
     ride.status = 'searching';
@@ -1185,6 +1260,8 @@ app.post('/api/cancel', async (req, res) => {
 
     // إلغاء السائق بسبب "الزبون ما حضر" — مسموح بس للسائق المكلّف بالرحلة، وبس بعد ما وصل فعلاً
     let cancelledBy = 'customer';
+    // إلغاء باسم الزبون لازم يكون من الزبون نفسه، مو من سائق يعرف رقم الطلب
+    if (by !== 'driver_noshow' && !(await authCustomer(req, res, ride.customer?.phone))) return;
     if (by === 'driver_noshow') {
       if (!driverId || ride.driverId !== driverId) return res.status(403).json({ error: 'غير مصرح' });
       if (ride.status !== 'arrived') return res.status(409).json({ error: 'لازم توصل أول قبل الإلغاء' });
@@ -1613,7 +1690,7 @@ app.get('/api/driver/:id/active-ride', (req, res) => {
 });
 
 // الرحلة النشطة الحالية للزبون — نفس الفكرة، وتحدّث socketId الزبون بالسوكت الجديد
-app.get('/api/customer/:phone/active-ride', async (req, res) => {
+app.get('/api/customer/:phone/active-ride', requireCustomer, async (req, res) => {
   try {
     const clean = req.params.phone.replace(/\D/g, '');
     for (const ride of activeRides.values()) {
@@ -1651,6 +1728,11 @@ app.post('/api/ride/:id/rate', async (req, res) => {
   try {
     const rating = parseInt(req.body.rating, 10);
     if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'تقييم غير صحيح' });
+
+    // بس الزبون صاحب الرحلة — وإلا السائق يكدر يقيّم نفسه
+    const owner = await db.getRide(req.params.id);
+    if (!owner) return res.status(404).json({ error: 'الرحلة غير موجودة' });
+    if (!(await authCustomer(req, res, owner.customer_phone || owner.customer?.phone))) return;
 
     /* التقييم يحسب بمعدل السائق اللي تشوفه الإدارة، فلازم يكون مرة وحدة
        وبس لرحلة خلصت فعلاً — قبل كان ينقبل لأي رحلة وبأي حالة وينكتب فوق القديم. */

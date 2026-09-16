@@ -222,6 +222,7 @@
   .sr-icon { color:var(--ink); font-size:18px; }
   .sr-text .name { font-size:15px; margin-bottom:2px; }
   .sr-text .addr { font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sr-saved-title { padding:14px 18px 6px; font-size:12px; font-weight:700; color:var(--muted); }
   .sr-hint { padding:24px; text-align:center; color:var(--muted); font-size:13px; line-height:1.7; }
   .sr-map-btn { margin:14px 18px; }
 
@@ -801,6 +802,33 @@
 <script>
 const MUSAYYIB = [32.7789, 44.2892];
 let user = JSON.parse(localStorage.getItem('jayak_user') || 'null');
+
+/* كل طلب لسيرفرنا يحمل توكن الزبون، حتى السيرفر يعرف إنه صاحب الحساب فعلاً
+   (قبل كان رقم الموبايل وحده يكفي). لو السيرفر رفض التوكن نرجعه لتسجيل الدخول. */
+const _fetch = window.fetch.bind(window);
+window.fetch = async (url, opts = {}) => {
+  const isApi = String(url).startsWith('/api/');
+  if (isApi && user && user.token) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), 'x-customer-token': user.token } };
+  }
+  const res = await _fetch(url, opts);
+  if (isApi && res.status === 401 && user) {
+    res.clone().json().then(b => { if (b && b.authRequired) forceRelogin(); }).catch(() => {});
+  }
+  return res;
+};
+let reloginStarted = false;
+function forceRelogin() {
+  if (reloginStarted) return;
+  reloginStarted = true;
+  localStorage.removeItem('jayak_user');
+  user = null;
+  toast('سجّل دخولك مرة ثانية 🔒');
+  setTimeout(() => location.reload(), 1800);
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
 let ws, socketId = null, currentRide = null, driverPhone = '', currentType = 'ride';
 
 // خرائط منفصلة لكل تدفق
@@ -948,23 +976,20 @@ async function verifyOtpAndProceed() {
         else clearCustOtp();
         return;
       }
-      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null };
+      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null, token: out.token };
       localStorage.setItem('jayak_user', JSON.stringify(user));
       toast(`أهلاً ${user.name}! 🎉`);
       finishAuth();
     } else {
-      const v = await fetch('/api/otp/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: pendingPhone, code }) });
-      const vOut = await v.json();
-      if (!v.ok) { toast(vOut.error || 'الكود غلط'); clearCustOtp(); return; }
-
-      const res = await fetch('/api/customer/register', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: pendingName, phone: pendingPhone }) });
+      const res = await fetch('/api/customer/register', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: pendingName, phone: pendingPhone, code }) });
       const out = await res.json();
       if (!res.ok) {
         toast(out.error || 'صار خطأ');
         if (out.alreadyExists) setTimeout(() => authStep('login'), 1500);
+        else clearCustOtp();
         return;
       }
-      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null };
+      user = { name: out.customer.name, phone: out.customer.phone, id: out.customer.id, photo: out.customer.photo || null, token: out.token };
       localStorage.setItem('jayak_user', JSON.stringify(user));
       toast('أهلاً بيك بجايك! 🎉');
       finishAuth();
@@ -1144,12 +1169,12 @@ function renderTrips() {
       <div class="ti-row">
         <div class="ti-icon">${t.type === 'delivery' ? '🛒' : '🚗'}</div>
         <div class="ti-body">
-          <div class="route">${t.from} ← ${t.to}</div>
-          ${t.driverName ? `<div class="driver">🚗 ${t.driverName}</div>` : ''}
+          <div class="route">${esc(t.from)} ← ${esc(t.to)}</div>
+          ${t.driverName ? `<div class="driver">🚗 ${esc(t.driverName)}</div>` : ''}
           <div class="date">${new Date(t.at).toLocaleDateString('ar', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</div>
         </div>
         <div class="ti-fare">
-          <div class="f">${t.fare.toLocaleString()} د.ع</div>
+          <div class="f">${(t.paid ?? t.fare) === 0 && t.fare > 0 ? 'مجانية 🎁' : (t.paid ?? t.fare).toLocaleString() + ' د.ع'}</div>
           ${t.type !== 'delivery' ? `<div class="k">${t.km} كم</div>` : ''}
         </div>
       </div>
@@ -1188,8 +1213,8 @@ async function loadFavorites() {
         <div class="trip-item">
           <div class="ti-icon">⭐</div>
           <div class="ti-body">
-            <div class="route">${p.name}</div>
-            <div class="date">${p.address || ''}</div>
+            <div class="route">${esc(p.name)}</div>
+            <div class="date">${esc(p.address || '')}</div>
           </div>
           <div class="ti-fare" style="cursor:pointer" onclick="deleteFavorite(${p.id})">🗑️</div>
         </div>
@@ -1205,6 +1230,7 @@ async function deleteFavorite(id) {
   if (!confirm('تحذف هذا الموقع؟')) return;
   try {
     await fetch(`/api/customer/${encodeURIComponent(user.phone)}/places/${id}`, { method: 'DELETE' });
+    savedPlacesCache = null;
     loadFavorites();
   } catch (e) { toast('صار خطأ'); }
 }
@@ -1232,7 +1258,7 @@ function loadSettings() {
     </div>
     <div class="lg-field">
       <label>الاسم</label>
-      <input id="set-name" value="${user.name || ''}">
+      <input id="set-name" value="${esc(user.name || '')}">
     </div>
     <button class="btn" onclick="saveName()" style="margin-bottom:22px">حفظ الاسم</button>
 
@@ -1306,15 +1332,13 @@ async function changePhoneFlow() {
     const hint = out.devCode ? ` (وضع التجربة: ${out.devCode})` : '';
     const code = prompt('اكتب كود التأكيد اللي وصلك عالرقم الجديد' + hint, '');
     if (!code) return;
-    const v = await fetch('/api/otp/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: newPhone, code }) });
-    const vOut = await v.json();
-    if (!v.ok) return toast(vOut.error || 'الكود غلط');
     const chg = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/change-phone`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newPhone }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newPhone, code }),
     });
     const chgOut = await chg.json();
     if (!chg.ok) return toast(chgOut.error || 'صار خطأ');
     user.phone = chgOut.customer.phone;
+    if (chgOut.token) user.token = chgOut.token;
     localStorage.setItem('jayak_user', JSON.stringify(user));
     showApp();
     toast('اتغيّر رقمك ✅');
@@ -1414,6 +1438,7 @@ async function saveFavoritePlace(place) {
       body: JSON.stringify({ name, lat: place.lat, lng: place.lng, address: place.label }),
     });
     toast('انحفظ الموقع ✅');
+    savedPlacesCache = null;
     loadFavorites();
   } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
@@ -1710,6 +1735,35 @@ function openSearch(mode, flow) {
   document.getElementById('search-results').innerHTML = `<div class="sr-hint">${hint}</div>`;
   document.getElementById('search-screen').classList.add('active');
   setTimeout(() => document.getElementById('search-input').focus(), 100);
+  showSavedInSearch(mode);
+}
+
+/* المواقع المحفوظة (البيت، الشغل...) تطلع فوق البحث بضغطة وحدة.
+   قبل كان الزبون يحفظها بس ما عنده طريقة يستعملها بالطلب. */
+let savedPlacesCache = null;
+async function showSavedInSearch(mode) {
+  if (!user) return;
+  try {
+    if (!savedPlacesCache) {
+      const out = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/places`).then(r => r.json());
+      savedPlacesCache = out.places || [];
+    }
+  } catch (e) { return; }
+  // الزبون بدا يكتب أو سكّر البحث وإحنا ننتظر — ما نخربط الشاشة
+  if (!savedPlacesCache.length || searchMode !== mode) return;
+  if (!document.getElementById('search-screen').classList.contains('active')) return;
+  if (document.getElementById('search-input').value.trim().length >= 2) return;
+  const box = document.getElementById('search-results');
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<div class="sr-saved-title">⭐ مواقعك المحفوظة</div>';
+  savedPlacesCache.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'sr-item';
+    div.innerHTML = `<div class="sr-icon">⭐</div><div class="sr-text"><div class="name">${esc(p.name)}</div><div class="addr">${esc(p.address || '')}</div></div>`;
+    div.onclick = () => selectPlace({ lat: Number(p.lat), lng: Number(p.lng), label: p.name });
+    wrap.appendChild(div);
+  });
+  box.prepend(wrap);
 }
 function closeSearch() {
   document.getElementById('search-screen').classList.remove('active');
@@ -1743,7 +1797,7 @@ function renderResults(results) {
     if (r.lat == null || r.lng == null) return;
     const div = document.createElement('div');
     div.className = 'sr-item';
-    div.innerHTML = `<div class="sr-icon">📍</div><div class="sr-text"><div class="name">${r.name}</div><div class="addr">${r.address||''}</div></div>`;
+    div.innerHTML = `<div class="sr-icon">📍</div><div class="sr-text"><div class="name">${esc(r.name)}</div><div class="addr">${esc(r.address||'')}</div></div>`;
     div.onclick = () => selectPlace({ lat: r.lat, lng: r.lng, label: r.name });
     box.appendChild(div);
   });
@@ -2461,6 +2515,11 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 connectWS();
 loadFareSettings();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
+if (user && !user.token) {
+  // دخل قبل تحديث الأمان — ما عنده توكن، فلازم يسجّل دخول مرة وحدة
+  localStorage.removeItem('jayak_user');
+  user = null;
+}
 if (user) {
   // مسجّل من قبل — ادخل مباشرة
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
