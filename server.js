@@ -756,6 +756,9 @@ app.post('/api/book', async (req, res) => {
     if (destination && destination.lat != null && !validPoint(destination)) {
       return res.status(400).json({ error: 'موقع الوصول غير صحيح' });
     }
+    if (store && store.lat != null && !validPoint(store)) {
+      return res.status(400).json({ error: 'موقع المحل غير صحيح' });
+    }
 
     if (phone) {
       const existing = await db.getCustomerByPhone(phone);
@@ -912,6 +915,7 @@ app.post('/api/accept', async (req, res) => {
         name: driver.name, phone: driver.phone, car: driver.car,
         lat: driver.lat, lng: driver.lng,
         photo: dRec ? dRec.photo_self : null,
+        carPhoto: dRec ? dRec.photo_car : null,
       },
       etaMin,
     });
@@ -970,7 +974,8 @@ app.post('/api/offer', async (req, res) => {
       etaMin,
       driver: {
         name: driver.name, phone: driver.phone, car: driver.car,
-        photo: dRec ? dRec.photo_self : null, lat: driver.lat, lng: driver.lng,
+        photo: dRec ? dRec.photo_self : null, carPhoto: dRec ? dRec.photo_car : null,
+        lat: driver.lat, lng: driver.lng,
       },
     });
     pushToCustomer(ride.customer.phone, { title: '💬 وصلك عرض سعر', body: `${driver.name} عرض ${p.toLocaleString()} د.ع لطلبك`, url: '/index.html' });
@@ -1592,6 +1597,7 @@ app.get('/api/customer/:phone/active-ride', async (req, res) => {
           const online = onlineDrivers.get(ride.driverId);
           driver = dRec ? {
             name: dRec.name, phone: dRec.phone, car: dRec.car, photo: dRec.photo_self,
+            carPhoto: dRec.photo_car,
             lat: online?.lat, lng: online?.lng,
           } : null;
         }

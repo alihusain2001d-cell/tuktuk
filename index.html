@@ -322,6 +322,23 @@
   .final-fare .ff-detail { font-size:12px; color:var(--muted); line-height:1.6; }
 
   .btn.wa { background:#25D366; color:#fff; }
+  /* صور السائق — الزبون يعرف منو جاي وشكل التكتك قبل ما يصعد */
+  .avatar { cursor:pointer; overflow:hidden; }
+  .driver-photos { display:flex; gap:8px; margin:12px 0 4px; }
+  .dp-item { flex:1; position:relative; border-radius:14px; overflow:hidden; aspect-ratio:4/3;
+    background:var(--dark); cursor:pointer; border:1.5px solid var(--line); }
+  .dp-item img { width:100%; height:100%; object-fit:cover; display:block; }
+  .dp-item span { position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent,rgba(0,0,0,.65));
+    color:#fff; font-size:11.5px; font-weight:700; padding:14px 8px 6px; text-align:center; }
+  /* عارض الصورة بكامل الشاشة */
+  .photo-viewer { position:fixed; inset:0; z-index:5000; background:rgba(0,0,0,.92); display:none;
+    align-items:center; justify-content:center; padding:20px; cursor:zoom-out; }
+  .photo-viewer.show { display:flex; }
+  .photo-viewer img { max-width:100%; max-height:85vh; border-radius:12px; }
+  .photo-viewer .pv-cap { position:absolute; top:calc(20px + env(safe-area-inset-top)); left:0; right:0;
+    text-align:center; color:#fff; font-size:15px; font-weight:700; }
+
+  .tp-dot.store { background:#F5A623; }
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -590,6 +607,12 @@
         <textarea id="d-item" placeholder="مثال: ٢ سندويش شاورما دجاج + بيبسي كبير"></textarea>
       </div>
       <div class="trip-points">
+        <!-- موقع المحل: بدونه السائق ما يطلعله خط سير للمحل ولا يشتغل ويز -->
+        <div class="tp-row" onclick="openSearch('store','d')">
+          <div class="tp-dot store"></div>
+          <div class="tp-text"><b>موقع المحل <span style="font-weight:400;color:var(--muted);font-size:11px">(يساعد السائق)</span></b><div class="val empty" id="d-store">حرّك الخريطة وثبّت، أو ابحث</div></div>
+          <div class="tp-edit">✎</div>
+        </div>
         <div class="tp-row" onclick="openSearch('destination','d')">
           <div class="tp-dot to"></div>
           <div class="tp-text"><b>وين نوصّل الطلب؟</b><div class="val empty" id="d-dest">نحدد موقعك تلقائياً...</div></div>
@@ -673,10 +696,11 @@
       <div id="arrived-box" class="arrived-banner hidden"><h2>وصل السواق 🎉</h2><p id="arrived-sub">السائق ينتظرك برة</p></div>
       <div class="status-strip" id="status-strip"><div class="pulse"></div><span id="driver-status">السواق بالطريق إلك</span></div>
       <div class="driver-head">
-        <div class="avatar" id="d-avatar">؟</div>
+        <div class="avatar" id="d-avatar" onclick="viewDriverPhoto('self')">؟</div>
         <div class="driver-info"><h2 id="dv-name">—</h2><div class="car" id="dv-car">—</div></div>
         <div class="eta-badge"><b id="dv-eta">—</b><span>دقيقة</span></div>
       </div>
+      <div class="driver-photos hidden" id="d-photos"></div>
       <div class="actions">
         <button class="btn go" onclick="callDriver()">📞 اتصل</button>
         <button class="btn ghost" id="cancel-ride-btn" onclick="cancelRide()">إلغاء</button>
@@ -716,6 +740,11 @@
   </div>
 
   <!-- ============ نافذة الحظر ============ -->
+  <div class="photo-viewer" id="photo-viewer" onclick="closePhotoViewer()">
+    <div class="pv-cap" id="pv-cap"></div>
+    <img id="pv-img" alt="">
+  </div>
+
   <div class="cancel-modal-bg" id="call-modal-bg">
     <div class="cancel-modal">
       <h3 style="text-align:center;margin-bottom:4px">اتصل بالسائق</h3>
@@ -773,7 +802,7 @@ let ws, socketId = null, currentRide = null, driverPhone = '', currentType = 'ri
 
 // خرائط منفصلة لكل تدفق
 let mapR, mapD, mapS, mapT;
-let driverMarker, routeLine, pkMarker, dsMarker, stMarker;
+let driverMarker, routeLine, pkMarker, dsMarker, stMarker, shopMarker; // shopMarker: المحل بشاشة التوصيل (stMarker للتتبع)
 
 // نقاط
 let pickup = null, destination = null, store = null;
@@ -1570,8 +1599,9 @@ function onMapTap(lat, lng, flow) {
     if (tapTarget === 'pickup') pickup = place;
     else destination = place;
   } else {
-    // بالتوصيل: بس مكان التوصيل (المحل يكتبه نص)
-    destination = place;
+    // بالتوصيل: الدبوس يحدد المحل أو مكان التوصيل — حسب الصف اللي ضغطه
+    if (tapTarget === 'store') store = place;
+    else destination = place;
   }
   updatePlanUI();
   drawPlanMarkers();
@@ -1585,7 +1615,7 @@ async function confirmPin(which) {
   if (!m) return;
   const c = m.getCenter();
   const btn = document.getElementById('confirm-' + which);
-  const target = (currentType === 'ride') ? tapTarget : 'destination';
+  const target = (currentType === 'ride') ? tapTarget : (tapTarget === 'store' ? 'store' : 'destination');
   onMapTap(c.lat, c.lng, which === 'r' ? 'ride' : 'delivery');
 
   btn.disabled = true;
@@ -1594,7 +1624,7 @@ async function confirmPin(which) {
   try {
     const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
     // نتأكد إن الزبون ما غيّر النقطة وإحنا ننتظر الاسم
-    const place = target === 'pickup' ? pickup : destination;
+    const place = target === 'pickup' ? pickup : (target === 'store' ? store : destination);
     if (r && r.name && place && place.lat === c.lat && place.lng === c.lng) {
       place.label = r.name;
       updatePlanUI();
@@ -1608,7 +1638,7 @@ function updateConfirmLabel() {
   const r = document.getElementById('confirm-r');
   if (r) r.textContent = tapTarget === 'pickup' ? '✓ ثبّت نقطة الانطلاق هنا' : '✓ ثبّت نقطة الوصول هنا';
   const d = document.getElementById('confirm-d');
-  if (d) d.textContent = '✓ ثبّت مكان التوصيل هنا';
+  if (d) d.textContent = tapTarget === 'store' ? '✓ ثبّت موقع المحل هنا' : '✓ ثبّت مكان التوصيل هنا';
 }
 
 function activeMap() { return currentType === 'ride' ? mapR : mapD; }
@@ -1706,6 +1736,7 @@ function updatePlanUI() {
     setVal('r-pickup', pickup); setVal('r-dest', destination);
     updateFare('r', pickup, destination);
   } else {
+    setVal('d-store', store);
     setVal('d-dest', destination);
     // التوصيل: ماكو سعر تلقائي — السائق يعرض
   }
@@ -1763,10 +1794,22 @@ function drawPlanMarkers() {
   const red = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🔴</div>', iconSize:[0,0] });
 
   if (currentType === 'delivery') {
-    // بس مكان التوصيل
+    const shop = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🏪</div>', iconSize:[0,0] });
     if (destination) {
       if (dsMarker) m.removeLayer(dsMarker);
       dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m);
+    }
+    if (store) {
+      if (shopMarker) m.removeLayer(shopMarker);
+      shopMarker = L.marker([store.lat,store.lng],{icon:shop,interactive:false}).addTo(m);
+    }
+    if (store && destination) {
+      // خط من المحل للزبون — الزبون يشوف المسافة ويتأكد إنه حدد المحل الصح
+      if (routeLine) { m.removeLayer(routeLine); routeLine = null; }
+      routeLine = L.polyline([[store.lat,store.lng],[destination.lat,destination.lng]],
+        { color:'#F5A623', weight:4, opacity:.6, dashArray:'2,9', lineCap:'round' }).addTo(m);
+      m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
+    } else if (destination) {
       m.setView([destination.lat, destination.lng], 17);
     }
     return;
@@ -1926,7 +1969,7 @@ async function bookDelivery() {
   btn.disabled = true; btn.textContent = 'نرسل الطلب...';
   deliveryInfo = { storeName, itemDesc: item };
   // بالتوصيل: موقع الزبون = نقطة الانطلاق والوصول (السائق يجي له)
-  await sendBooking({ orderType:'delivery', pickup:destination, destination, storeName, itemDesc:item },
+  await sendBooking({ orderType:'delivery', pickup:destination, destination, store, storeName, itemDesc:item },
     () => { btn.disabled=false; btn.textContent='أرسل الطلب للسواق 🛒'; });
 }
 
@@ -1998,6 +2041,37 @@ async function resumeActiveRide() {
   } catch (e) { return false; }
 }
 
+/* ===== صور السائق =====
+   الصورة الشخصية وصورة التكتك بس — صور الهوية ما توصل للزبون أبداً.
+   الهدف إن الزبون يتأكد إنه صعد ويا السائق الصح وبالتكتك الصح. */
+let currentDriverPhotos = { self: null, car: null, name: '' };
+
+function renderDriverPhotos() {
+  const p = currentDriverPhotos;
+  const av = document.getElementById('d-avatar');
+  // ماكو صورة شخصية؟ نطلع صورة التكتك بمكانها بدل الحرف
+  const avatarSrc = p.self || p.car;
+  if (avatarSrc) av.innerHTML = `<img src="${avatarSrc}" alt="">`;
+  else av.textContent = (p.name || '؟').charAt(0);
+
+  const box = document.getElementById('d-photos');
+  const items = [];
+  if (p.self) items.push(`<div class="dp-item" onclick="viewDriverPhoto('self')"><img src="${p.self}" alt=""><span>السائق</span></div>`);
+  if (p.car)  items.push(`<div class="dp-item" onclick="viewDriverPhoto('car')"><img src="${p.car}" alt=""><span>التكتك</span></div>`);
+  box.innerHTML = items.join('');
+  box.classList.toggle('hidden', items.length === 0);
+}
+
+function viewDriverPhoto(which) {
+  const p = currentDriverPhotos;
+  const src = which === 'car' ? p.car : (p.self || p.car);
+  if (!src) return;
+  document.getElementById('pv-img').src = src;
+  document.getElementById('pv-cap').textContent = which === 'car' ? 'تكتك ' + p.name : p.name;
+  document.getElementById('photo-viewer').classList.add('show');
+}
+function closePhotoViewer() { document.getElementById('photo-viewer').classList.remove('show'); }
+
 function onDriverAccepted(data) {
   clearTimeout(searchHintTimer);
   driverHeadingToDestination = false; // رحلة جديدة (أو استرجاع رحلة) — نبدأ من مرحلة التوجه لنقطة الالتقاء
@@ -2009,9 +2083,8 @@ function onDriverAccepted(data) {
   document.getElementById('driver-flow-title').textContent = currentType === 'delivery' ? 'السائق يجيب طلبك 🛒' : 'السائق بالطريق 🚗';
   document.getElementById('dv-name').textContent = d.name;
   document.getElementById('dv-car').textContent = d.car || 'مركبة';
-  const av = document.getElementById('d-avatar');
-  if (d.photo) av.innerHTML = `<img src="${d.photo}" alt="">`;
-  else av.textContent = (d.name||'؟').charAt(0);
+  currentDriverPhotos = { self: d.photo || null, car: d.carPhoto || null, name: d.name || '' };
+  renderDriverPhotos();
   document.getElementById('dv-eta').textContent = data.etaMin;
   document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السائق رايح يجيب طلبك' : 'السائق بالطريق إلك';
   document.getElementById('cancel-ride-btn').classList.remove('hidden');
@@ -2265,6 +2338,7 @@ function callByWhatsapp() {
 
 function resetAll() {
   currentRide = null; driverPhone=''; currentOffer = null;
+  currentDriverPhotos = { self: null, car: null, name: '' };
   pickup = null; destination = null; store = null;
   deliveryInfo = { storeName:'', itemDesc:'' };
   driverHeadingToDestination = false;
@@ -2278,8 +2352,9 @@ function resetAll() {
     if (routeLine) m.removeLayer(routeLine);
     if (pkMarker) m.removeLayer(pkMarker);
     if (dsMarker) m.removeLayer(dsMarker);
+    if (shopMarker) m.removeLayer(shopMarker);
   });
-  routeLine = null; pkMarker = null; dsMarker = null;
+  routeLine = null; pkMarker = null; dsMarker = null; shopMarker = null;
   resetRideUI(); resetDeliveryUI();
 }
 
@@ -2292,6 +2367,7 @@ function resetRideUI() {
 function resetDeliveryUI() {
   const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='أرسل الطلب للسواق 🛒';
   setEmpty('d-dest','نحدد موقعك تلقائياً...');
+  setEmpty('d-store','حرّك الخريطة وثبّت، أو ابحث');
   const sn = document.getElementById('d-store-name'); if (sn) sn.value='';
   const item = document.getElementById('d-item'); if (item) item.value='';
 }
