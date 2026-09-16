@@ -620,6 +620,39 @@ app.delete('/api/customer/:phone/places/:id', async (req, res) => {
 });
 
 // البحث عن موقع بالاسم — Google Places لو مفعّل، وإلا OpenStreetMap تلقائياً بدون ما ينكسر البحث
+/* من إحداثيات إلى اسم مكان — نحتاجه لما الزبون يحرك الدبوس على الخريطة،
+   حتى يشوف اسم المكان بدل "موقع على الخريطة" ويتأكد إنه المكان الصح. */
+app.get('/api/reverse', async (req, res) => {
+  try {
+    const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);
+    if (isNaN(lat) || isNaN(lng)) return res.json({ name: null });
+
+    const url = LOCATIONIQ_API_KEY
+      ? `https://us1.locationiq.com/v1/reverse?key=${LOCATIONIQ_API_KEY}&format=json&lat=${lat}&lon=${lng}&accept-language=ar&zoom=18`
+      : `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ar&zoom=18`;
+    const gRes = await fetch(url, { headers: { 'Accept-Language': 'ar', 'User-Agent': 'JayakApp/1.0' } });
+    const out = await gRes.json();
+    if (!gRes.ok || !out || out.error) return res.json({ name: null });
+
+    /* نريد أقرب شي يعرفه الناس: محل أو معلم، وإلا اسم الشارع.
+       لو ماكو إلا اسم المدينة/الناحية نرجّع فاضي — "المسيب، ناحية مركز..."
+       يطلع نفسه لكل مكان بالبلدة، فما يفيد الزبون ويوهمه إنه تحدد بدقة. */
+    const a = out.address || {};
+    const landmark = out.name || a.amenity || a.shop || a.building || a.tourism || a.leisure;
+    const road = a.road || a.pedestrian || a.footway;
+    const hood = a.neighbourhood || a.suburb || a.quarter;
+    let name = null;
+    if (landmark && road) name = `${landmark}، ${road}`;
+    else if (landmark) name = landmark;
+    else if (road && hood) name = `${road}، ${hood}`;
+    else if (road) name = road;
+    else if (hood) name = hood;
+    res.json({ name });
+  } catch (e) {
+    res.json({ name: null });   // ما نكسر التحديد لو فشل العنوان
+  }
+});
+
 app.get('/api/geocode', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();

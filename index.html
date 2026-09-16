@@ -123,9 +123,30 @@
   .flow-head { background:#fff; padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:0 2px 10px rgba(15,27,61,.06); z-index:10; }
   .flow-head .back { font-size:24px; cursor:pointer; }
   .flow-head h2 { font-size:17px; font-weight:700; }
+  /* الخريطة جوّا حاوية موضعها نسبي — حتى الدبوس والأزرار تنحط نسبة للخريطة مو للشاشة */
+  .map-wrap { flex:1; position:relative; display:flex; min-height:0; }
   #map, #map-d { flex:1; z-index:1; background:#dde3ee; }
-  .center-pin { display:none; }
-  .locate-btn { position:absolute; bottom:calc(38% + 12px); left:16px; z-index:600; width:44px; height:44px; background:#fff; border:none; border-radius:50%; box-shadow:0 3px 12px rgba(0,0,0,.15); font-size:20px; cursor:pointer; }
+
+  /* دبوس ثابت بنص الخريطة: الزبون يحرك الخريطة تحته وهو يبقى بمكانه.
+     أدق من سحب علامة بالإصبع — الإصبع ما يغطي المكان اللي ديحدده. */
+  .center-pin { position:absolute; left:50%; top:50%; z-index:600; pointer-events:none;
+    transform:translate(-50%,-100%); transition:transform .15s ease; }
+  .center-pin .cp-head { width:34px; height:34px; border-radius:50%; background:var(--brand, #FFC800);
+    border:4px solid #fff; box-shadow:0 3px 10px rgba(0,0,0,.28); }
+  .center-pin .cp-stick { width:3px; height:16px; background:#1A1A1A; margin:-2px auto 0; border-radius:2px; }
+  .center-pin.lift { transform:translate(-50%,-118%); }
+  /* ظل زغير بالنقطة المحددة بالضبط */
+  .pin-dot { position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
+    background:rgba(0,0,0,.35); border-radius:50%; z-index:599; pointer-events:none; }
+
+  .locate-btn { position:absolute; bottom:16px; left:16px; z-index:600; width:44px; height:44px; background:#fff; border:none; border-radius:50%; box-shadow:0 3px 12px rgba(0,0,0,.15); font-size:20px; cursor:pointer; }
+
+  /* زر تثبيت النقطة */
+  .pin-confirm { position:absolute; bottom:16px; left:50%; transform:translateX(-50%); z-index:600;
+    background:#1A1A1A; color:#fff; border:none; border-radius:24px; padding:12px 22px;
+    font-size:14px; font-weight:700; font-family:inherit; cursor:pointer; white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,0,0,.25); max-width:calc(100% - 140px); overflow:hidden; text-overflow:ellipsis; }
+  .pin-confirm:active { transform:translateX(-50%) scale(.96); }
 
   .sheet { background:#fff; border-radius:22px 22px 0 0; box-shadow:0 -6px 24px rgba(15,27,61,.12); padding:18px 18px calc(18px + env(safe-area-inset-bottom)); z-index:700; position:relative; }
   .grip { width:40px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px; }
@@ -513,9 +534,13 @@
       <div class="back" onclick="exitFlow()">→</div>
       <h2>اطلب رحلة 🚗</h2>
     </div>
-    <div id="map"></div>
-    <div class="center-pin" id="pin-r">📍</div>
-    <button class="locate-btn" onclick="locateMe('r')">◎</button>
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="pin-dot"></div>
+      <div class="center-pin" id="pin-r"><div class="cp-head"></div><div class="cp-stick"></div></div>
+      <button class="locate-btn" onclick="locateMe('r')">◎</button>
+      <button class="pin-confirm" id="confirm-r" onclick="confirmPin('r')">✓ ثبّت نقطة الوصول هنا</button>
+    </div>
 
     <div class="sheet" id="ride-sheet">
       <div class="grip"></div>
@@ -527,7 +552,7 @@
         </div>
         <div class="tp-row" onclick="openSearch('destination','r')">
           <div class="tp-dot to"></div>
-          <div class="tp-text"><b>نقطة الوصول</b><div class="val empty" id="r-dest">اضغط على الخريطة أو ابحث</div></div>
+          <div class="tp-text"><b>نقطة الوصول</b><div class="val empty" id="r-dest">حرّك الخريطة وثبّت، أو ابحث</div></div>
           <div class="tp-edit">✎</div>
         </div>
       </div>
@@ -546,9 +571,13 @@
       <div class="back" onclick="exitFlow()">→</div>
       <h2>توصيل بضاعة 🛒</h2>
     </div>
-    <div id="map-d"></div>
-    <div class="center-pin" id="pin-d">📍</div>
-    <button class="locate-btn" onclick="locateMe('d')">◎</button>
+    <div class="map-wrap">
+      <div id="map-d"></div>
+      <div class="pin-dot"></div>
+      <div class="center-pin" id="pin-d"><div class="cp-head"></div><div class="cp-stick"></div></div>
+      <button class="locate-btn" onclick="locateMe('d')">◎</button>
+      <button class="pin-confirm" id="confirm-d" onclick="confirmPin('d')">✓ ثبّت مكان التوصيل هنا</button>
+    </div>
 
     <div class="sheet" id="delivery-sheet">
       <div class="grip"></div>
@@ -1525,8 +1554,12 @@ function makeMap(elId, flow) {
   const m = L.map(elId, { zoomControl:false, attributionControl:false }).setView(MUSAYYIB, 17);
   addTileLayer(m);
   L.control.zoom({ position:'topright' }).addTo(m);
-  // الضغط على الخريطة يحدد النقطة مباشرة
-  m.on('click', (e) => onMapTap(e.latlng.lat, e.latlng.lng, flow));
+  /* الضغط على الخريطة يودي الدبوس لهالمكان — بس ما يثبّته.
+     التثبيت يصير بالزر، حتى ما يتغير المكان لو الزبون ضغط بالغلط وهو يتصفح. */
+  m.on('click', (e) => m.panTo(e.latlng, { animate: true }));
+  const pinId = elId === 'map-d' ? 'pin-d' : 'pin-r';
+  m.on('movestart', () => document.getElementById(pinId)?.classList.add('lift'));
+  m.on('moveend', () => document.getElementById(pinId)?.classList.remove('lift'));
   return m;
 }
 
@@ -1542,6 +1575,40 @@ function onMapTap(lat, lng, flow) {
   }
   updatePlanUI();
   drawPlanMarkers();
+}
+
+/* تثبيت النقطة تحت الدبوس.
+   نحطها فوراً باسم مؤقت حتى يبين السعر بسرعة،
+   وبعدين نبدل الاسم باسم المكان الحقيقي أول ما يوصل. */
+async function confirmPin(which) {
+  const m = which === 'r' ? mapR : mapD;
+  if (!m) return;
+  const c = m.getCenter();
+  const btn = document.getElementById('confirm-' + which);
+  const target = (currentType === 'ride') ? tapTarget : 'destination';
+  onMapTap(c.lat, c.lng, which === 'r' ? 'ride' : 'delivery');
+
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '✓ تثبّتت';
+  try {
+    const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
+    // نتأكد إن الزبون ما غيّر النقطة وإحنا ننتظر الاسم
+    const place = target === 'pickup' ? pickup : destination;
+    if (r && r.name && place && place.lat === c.lat && place.lng === c.lng) {
+      place.label = r.name;
+      updatePlanUI();
+    }
+  } catch (e) { /* نبقى على الاسم المؤقت */ }
+  setTimeout(() => { btn.disabled = false; updateConfirmLabel(); }, 700);
+}
+
+// نص الزر يتبع شنو النقطة اللي ديحددها هسه
+function updateConfirmLabel() {
+  const r = document.getElementById('confirm-r');
+  if (r) r.textContent = tapTarget === 'pickup' ? '✓ ثبّت نقطة الانطلاق هنا' : '✓ ثبّت نقطة الوصول هنا';
+  const d = document.getElementById('confirm-d');
+  if (d) d.textContent = '✓ ثبّت مكان التوصيل هنا';
 }
 
 function activeMap() { return currentType === 'ride' ? mapR : mapD; }
@@ -1564,7 +1631,7 @@ function locateMe(which) {
 // ============ البحث عن مكان ============
 function openSearch(mode, flow) {
   searchMode = mode; searchFlow = flow;
-  tapTarget = mode; // لو رجع وضغط الخريطة، يحدد هالنقطة
+  tapTarget = mode; updateConfirmLabel(); // لو رجع وضغط الخريطة، يحدد هالنقطة
   document.getElementById('search-input').value = '';
   const hint = mode === 'store' ? 'اكتب اسم المحل أو المطعم<br>مثال: مطعم فلان، صيدلية، سوبرماركت' : 'اكتب اسم منطقة أو مكان بالمسيب<br>مثال: مستشفى المسيب، حي العسكري، الجسر';
   document.getElementById('search-results').innerHTML = `<div class="sr-hint">${hint}</div>`;
@@ -1627,7 +1694,7 @@ function assignPoint(place) {
 
 // تحديد من الخريطة — بس نسكّر البحث والزبون يضغط على الخريطة مباشرة
 function pickFromMap() {
-  tapTarget = searchMode; // الضغط الجاي على الخريطة يحدد هالنقطة
+  tapTarget = searchMode; updateConfirmLabel(); // الضغط الجاي على الخريطة يحدد هالنقطة
   closeSearch();
   const label = { pickup:'نقطة الانطلاق', destination:currentType==='delivery'?'عنوان التوصيل':'نقطة الوصول', store:'موقع المحل' }[searchMode];
   toast(`اضغط على الخريطة لتحديد ${label}`);
@@ -2025,10 +2092,12 @@ function onTripStarted() {
   lastDriverRouteFetch = 0; // نجبر تحديث فوري لمسار الوجهة الجديدة
 }
 
-let lastPricing = null;
+let lastPricing = null, lastFare = null;
 
 function onDone(data) {
   lastPricing = (data && data.pricing) || null;
+  // نخزن المبلغ دائماً — مو بس لما تنحسب الأجرة بالنهاية
+  lastFare = data ? { fare: data.fare, estFare: data.estFare } : null;
   let fareMsg = '';
   if (data && data.fare != null) {
     if (data.fare > 0) fareMsg = ` — الأجرة ${data.fare.toLocaleString()} د.ع`;
@@ -2058,12 +2127,28 @@ function pickStar(v) {
 function openRateScreen() {
   /* لو الأجرة انحسبت بالنهاية (ما حدّد وجهة، أو غيّرها ومشوا أبعد)
      نعرضها واضحة هنا — التوست يختفي والزبون راح يدفع هذا المبلغ. */
+  /* مبلغ الرحلة يطلع مع التقييم دائماً — التوست يختفي بثواني،
+     والزبون لازم يعرف شكد يدفع قبل ما ينزل. */
   const box = document.getElementById('final-fare');
+  const amt = document.getElementById('ff-amt');
+  const detail = document.getElementById('ff-detail');
   if (lastPricing) {
-    document.getElementById('ff-amt').textContent = lastPricing.fare.toLocaleString() + ' د.ع';
-    document.getElementById('ff-detail').textContent = lastPricing.reason === 'longer_trip'
+    amt.textContent = lastPricing.fare.toLocaleString() + ' د.ع';
+    detail.textContent = lastPricing.reason === 'longer_trip'
       ? `المتفق عليه ${lastPricing.base.toLocaleString()} + ${lastPricing.extra.toLocaleString()} لأن المشوار طال ${lastPricing.extraKm} كم`
       : `انحسبت على ${lastPricing.km} كم من المسافة اللي قطعتوها`;
+    box.classList.remove('hidden');
+  } else if (lastFare && lastFare.fare != null) {
+    if (lastFare.fare > 0) {
+      amt.textContent = lastFare.fare.toLocaleString() + ' د.ع';
+      detail.textContent = '';
+    } else {
+      // مكافأة: الزبون ما يدفع شي
+      amt.textContent = 'مجانية 🎁';
+      detail.textContent = lastFare.estFare
+        ? `قيمتها ${lastFare.estFare.toLocaleString()} د.ع — مكافأة من جايك`
+        : 'مكافأة من جايك';
+    }
     box.classList.remove('hidden');
   } else {
     box.classList.add('hidden');
