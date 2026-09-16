@@ -1838,7 +1838,11 @@ function handleWS(type, data) {
 // السائق ألغى الرحلة (مثلاً وصل وما لقاك) — نبلغك ونرجعك للصفحة الرئيسية
 function onDriverCancelled(data) {
   if (!currentRide || data.rideId !== currentRide) return;
-  toast('السائق ألغى الرحلة' + (data.reason ? ' — ' + data.reason : ''));
+  clearTimeout(searchHintTimer);
+  // النظام ألغاه لأن ماكو سائق — مو "السائق ألغى"، هذا كان يخلط على الزبون
+  toast(data.by === 'system'
+    ? 'ما لقينا سائق متاح حالياً — جرّب تطلب مرة ثانية'
+    : 'السائق ألغى الرحلة' + (data.reason ? ' — ' + data.reason : ''), 5000);
   resetAll();
 }
 
@@ -1952,7 +1956,17 @@ function goSearching(type, notified) {
   document.getElementById('searching-h').textContent = type === 'delivery' ? 'نبحثلك عن سواق يجيب طلبك...' : 'نبحثلك عن أقرب سائق...';
   document.getElementById('searching-sub').textContent = notified > 0 ? `أرسلنا طلبك لـ ${notified} سواق` : 'ننتظر سواق يفتح التطبيق...';
   setTimeout(() => { if (!mapS) mapS = makeMap('map-s',null); else mapS.invalidateSize(); }, 60);
+
+  /* بعد ٣ دقائق بلا سائق نصارحه — بدل ما يبقى يباوع على نفس الرسالة وما يعرف
+     شنو ديصير. السيرفر يلغيه لحاله بعد ١٠ دقائق. */
+  clearTimeout(searchHintTimer);
+  searchHintTimer = setTimeout(() => {
+    if (!document.getElementById('flow-searching').classList.contains('active')) return;
+    document.getElementById('searching-h').textContent = 'السواق مشغولين هسه...';
+    document.getElementById('searching-sub').textContent = 'مازلنا ندوّر — تكدر تنتظر أو تلغي وتجرب بعدين';
+  }, 3 * 60 * 1000);
 }
+let searchHintTimer = null;
 
 // الزبون سكّر التطبيق أو انقفلت الشاشة وياه رحلة نشطة — نرجّعها بمجرد ما يفتحه من جديد
 async function resumeActiveRide() {
@@ -1985,6 +1999,7 @@ async function resumeActiveRide() {
 }
 
 function onDriverAccepted(data) {
+  clearTimeout(searchHintTimer);
   driverHeadingToDestination = false; // رحلة جديدة (أو استرجاع رحلة) — نبدأ من مرحلة التوجه لنقطة الالتقاء
   document.getElementById('flow-searching').classList.remove('active');
   document.getElementById('flow-offer').classList.remove('active');
