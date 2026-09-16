@@ -964,6 +964,32 @@ function clearRoute() { setRoute([]); }
 let map, meMarker, pickupMarker, destMarker, routeLine;
 let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
 let driver = JSON.parse(localStorage.getItem('jayak_driver') || 'null');
+
+/* كل طلب لسيرفرنا يحمل توكن السائق، حتى السيرفر يعرف إنه هو فعلاً.
+   لو رفضه، نرجعه لتسجيل الدخول. */
+const _fetch = window.fetch.bind(window);
+window.fetch = async (url, opts = {}) => {
+  const isApi = String(url).startsWith('/api/');
+  if (isApi && driver && driver.token) {
+    opts = { ...opts, headers: { ...(opts.headers || {}), 'x-driver-token': driver.token } };
+  }
+  const res = await _fetch(url, opts);
+  if (isApi && res.status === 401 && driver) {
+    res.clone().json().then(b => { if (b && b.authRequired) forceRelogin(); }).catch(() => {});
+  }
+  return res;
+};
+let reloginStarted = false;
+function forceRelogin() {
+  if (reloginStarted) return;
+  reloginStarted = true;
+  localStorage.removeItem('jayak_driver');
+  localStorage.removeItem('jayak_driver_id');
+  driver = null;
+  toast('سجّل دخولك مرة ثانية 🔒');
+  setTimeout(() => location.reload(), 1800);
+}
+let phoneToken = null;   // إثبات إن الرقم تأكد بالكود — التسجيل يحتاجه
 let myPos = { lat: MUSAYYIB[0], lng: MUSAYYIB[1] };
 let isOnline = false, activeRide = null, customerPhone = '', locTimer = null;
 let photos = { self:null, car:null, idf:null, idb:null };
@@ -1086,7 +1112,7 @@ async function doLogin() {
     // احفظ بياناته محلياً
     driverId = out.driver.id;
     localStorage.setItem('jayak_driver_id', driverId);
-    driver = { name: out.driver.name, phone: out.driver.phone, car: out.driver.car };
+    driver = { name: out.driver.name, phone: out.driver.phone, car: out.driver.car, token: out.token };
     localStorage.setItem('jayak_driver', JSON.stringify(driver));
     toast(`أهلاً ${driver.name}! 🎉`);
     document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
@@ -1182,6 +1208,7 @@ async function verifyOtp() {
     const res = await fetch('/api/otp/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ phone: pendingPhone, code }) });
     const out = await res.json();
     if (!res.ok) { toast(out.error || 'الكود غلط'); clearOtpBoxes(); return; }
+    phoneToken = out.token;
     toast('تأكد رقمك ✅');
     gotoStep('photos');
   } catch(e) { toast('صار خطأ'); }
@@ -1233,7 +1260,7 @@ async function finishRegister() {
     const res = await fetch('/api/driver/register', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        driverId,
+        phoneToken,
         name: document.getElementById('f-name').value.trim(),
         phone: document.getElementById('f-phone').value.trim(),
         car: document.getElementById('f-car').value.trim(),
@@ -1245,9 +1272,13 @@ async function finishRegister() {
     if (!res.ok) {
       toast(out.error || 'صار خطأ بالتسجيل');
       if (out.alreadyExists) setTimeout(() => gotoStep('login'), 1500);
+      // الإثبات انتهى (أخذ وقت طويل بالصور) — يأكد رقمه مرة ثانية، والصور تبقى
+      if (out.phoneNotVerified) setTimeout(() => sendOtp(), 1200);
       return;
     }
-    driver = { name: out.driver.name, phone: document.getElementById('f-phone').value.trim(), car: document.getElementById('f-car').value.trim() };
+    driverId = out.driver.id;   // السيرفر هو اللي يولّد الرقم
+    localStorage.setItem('jayak_driver_id', driverId);
+    driver = { name: out.driver.name, phone: document.getElementById('f-phone').value.trim(), car: document.getElementById('f-car').value.trim(), token: out.token };
     localStorage.setItem('jayak_driver', JSON.stringify(driver));
     toast('أهلاً بيك بجايك! 🎉');
     document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));
@@ -1820,6 +1851,7 @@ function handleWS(type, data) {
     case 'ride:cancelled': if (activeRide && activeRide.rideId===data.rideId) { toast('الزبون ألغى'); endActive(); } break;
     case 'offer:accepted': onOfferAccepted(data); break;
     case 'offer:rejected': onOfferRejected(data); break;
+    case 'auth:required': forceRelogin(); break;
     case 'driver:blocked': {
       stopWorking();
       showExpired(data);
@@ -2008,7 +2040,7 @@ function wsSend(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-function goOnline(){ wsSend({ type:'driver:online', data:{ driverId, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } }); }
+function goOnline(){ wsSend({ type:'driver:online', data:{ driverId, token:driver.token, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } }); }
 function goOffline(){ wsSend({ type:'driver:offline', data:{ driverId } }); }
 
 function startLocationUpdates() {
@@ -2633,6 +2665,12 @@ loadContactSettings().then(() => {
 });
 ['earn','owed','trips'].forEach(k => setupPullToRefresh(k + '-view', 'ptr-' + k));
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
+if (driver && !driver.token) {
+  // دخل قبل تحديث الأمان — يسجّل دخول مرة وحدة
+  localStorage.removeItem('jayak_driver');
+  localStorage.removeItem('jayak_driver_id');
+  driver = null;
+}
 if (driver) {
   // مسجّل من قبل — نتأكد من حالته
   document.querySelectorAll('.auth-screen').forEach(s=>s.classList.remove('active'));

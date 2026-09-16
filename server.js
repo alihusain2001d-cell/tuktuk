@@ -184,6 +184,12 @@ wss.on('connection', (ws) => {
     try {
       switch (type) {
         case 'driver:online': {
+          /* بدون هذا أي أحد يكدر يتصل كسائق: توصله طلبات الزبائن، ويرسل مواقع
+             وهمية تغيّر الكيلومترات المحسوبة للرحلة. */
+          if (!data || driverIdFromToken(data.token) !== data.driverId) {
+            ws.send(JSON.stringify({ type: 'auth:required', data: {} }));
+            return;
+          }
           // تأكد إنه مسموح له يشتغل (تجربة أو اشتراك)
           const access = await db.getDriverAccess(data.driverId);
           if (!access.allowed) {
@@ -333,6 +339,55 @@ async function requireCustomer(req, res, next) {
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 }
 
+/* ===== هوية السائق =====
+   قبل كان رقم السائق (drv_...) وحده يكفي، وهذا الرقم يطلع ببيانات الطلبات.
+   فأي أحد يعرفه يكدر يشتغل باسمه، يشوف أرباحه، أو يكتب فوق حسابه.
+   هسه بعد كود التأكيد ياخذ توكن موقّع، ولازم يحمله بكل طلب. */
+function signDriver(id) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update('drv:' + id).digest('hex').slice(0, 40);
+}
+function driverToken(id) { return `${id}.${signDriver(id)}`; }
+
+// رقم السائق من التوكن إذا التوقيع صحيح، وإلا null
+function driverIdFromToken(token) {
+  const t = String(token || '');
+  const dot = t.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const id = t.slice(0, dot), sig = Buffer.from(t.slice(dot + 1));
+  const expected = Buffer.from(signDriver(id));
+  return sig.length === expected.length && crypto.timingSafeEqual(sig, expected) ? id : null;
+}
+
+// يتأكد إن الطلب جاي من هذا السائق بالذات، وإلا يرد ٤٠١
+function authDriver(req, res, driverId) {
+  const id = driverIdFromToken(req.headers['x-driver-token']);
+  if (!id || !driverId || id !== String(driverId)) {
+    res.status(401).json({ error: 'سجّل دخولك مرة ثانية', authRequired: true });
+    return false;
+  }
+  return true;
+}
+function requireDriver(req, res, next) {
+  if (authDriver(req, res, req.params.id || req.body.driverId)) next();
+}
+// أي سائق مسجّل دخول (لقائمة الطلبات)
+function requireAnyDriver(req, res, next) {
+  if (driverIdFromToken(req.headers['x-driver-token'])) return next();
+  res.status(401).json({ error: 'سجّل دخولك مرة ثانية', authRequired: true });
+}
+
+/* إثبات إن الرقم تأكد بالكود. السائق يأكد رقمه، وبعدين ياخذ وقت يصوّر
+   الهوية والتكتك، فالإثبات يبقى صالح ساعة ويتربط بالرقم. */
+const PHONE_PROOF_SLOT = 10 * 60 * 1000;
+function phoneProof(phone, slot) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(`phone:${normalizePhone(phone)}:${slot}`).digest('hex').slice(0, 32);
+}
+function checkPhoneProof(phone, proof) {
+  const now = Math.floor(Date.now() / PHONE_PROOF_SLOT);
+  for (let i = 0; i < 6; i++) if (proof && proof === phoneProof(phone, now - i)) return true;
+  return false;
+}
+
 // يتأكد من كود التأكيد ويستهلكه. يرجّع null إذا صحيح، أو { status, body } للخطأ
 function checkOtp(phone, code) {
   const clean = normalizePhone(phone);
@@ -396,9 +451,8 @@ app.post('/api/otp/verify', (req, res) => {
     }
 
     otpCodes.delete(phone);
-    // توكن بسيط يثبت إنه الرقم متأكد (صالح ١٠ دقايق)
-    const token = crypto.createHmac('sha256', ADMIN_KEY)
-      .update(`${phone}:${Math.floor(Date.now() / (10*60*1000))}`).digest('hex').slice(0, 32);
+    // إثبات إن الرقم تأكد — التسجيل يطلبه (صالح ساعة)
+    const token = phoneProof(phone, Math.floor(Date.now() / PHONE_PROOF_SLOT));
     res.json({ ok: true, verified: true, token });
   } catch (e) {
     res.status(500).json({ error: 'خطأ' });
@@ -453,7 +507,7 @@ setInterval(() => {
 app.post('/api/driver/check-phone', async (req, res) => {
   try {
     const d = await db.getDriverByPhone(req.body.phone);
-    res.json({ exists: !!d, name: d ? d.name : null });
+    res.json({ exists: !!d });   // بدون الاسم
   } catch (e) {
     console.error('خطأ بفحص الرقم:', e.message);
     res.status(500).json({ error: 'خطأ' });
@@ -486,6 +540,7 @@ app.post('/api/driver/login', async (req, res) => {
       ok: true,
       driver: { id: d.id, name: d.name, phone: d.phone, car: d.car, available: d.available !== false },
       access,
+      token: driverToken(d.id),
     });
   } catch (e) {
     console.error('خطأ بتسجيل الدخول:', e.message);
@@ -496,12 +551,21 @@ app.post('/api/driver/login', async (req, res) => {
 // تسجيل السائق (مع الصور)
 app.post('/api/driver/register', async (req, res) => {
   try {
-    const { driverId, name, phone, car, photoSelf, photoCar, photoIdFront, photoIdBack, lat, lng } = req.body;
-    if (!driverId || !name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
+    const { name, phone, car, photoSelf, photoCar, photoIdFront, photoIdBack, lat, lng, phoneToken } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'الاسم والرقم مطلوبين' });
+
+    // الرقم لازم يكون متأكد بالكود على السيرفر — قبل كان التأكيد بالمتصفح بس
+    if (!checkPhoneProof(phone, phoneToken)) {
+      return res.status(400).json({ error: 'أكّد رقمك بالكود مرة ثانية', phoneNotVerified: true });
+    }
+
+    /* رقم السائق يولّده السيرفر. قبل كان يجي من الموبايل، فأي أحد يعرف
+       رقم سائق ثاني يكدر يسجّل بيه ويكتب فوق اسمه وصوره. */
+    const driverId = 'drv_' + crypto.randomBytes(8).toString('hex');
 
     // امنع تسجيل رقم موجود بحساب ثاني
     const existing = await db.getDriverByPhone(phone);
-    if (existing && existing.id !== driverId) {
+    if (existing) {
       return res.status(409).json({
         error: 'هذا الرقم مسجّل من قبل. سجّل دخول بدل ما تسوي حساب جديد.',
         alreadyExists: true,
@@ -517,7 +581,7 @@ app.post('/api/driver/register', async (req, res) => {
       last_lat: lat || null, last_lng: lng || null,
     });
     const access = await db.getDriverAccess(driverId);
-    res.json({ ok: true, driver: { id: d.id, name: d.name, status: d.status }, access });
+    res.json({ ok: true, driver: { id: d.id, name: d.name, status: d.status }, access, token: driverToken(d.id) });
   } catch (e) {
     console.error('خطأ بالتسجيل:', e.message);
     res.status(500).json({ error: 'صار خطأ بالتسجيل' });
@@ -525,7 +589,7 @@ app.post('/api/driver/register', async (req, res) => {
 });
 
 // حالة وصول السائق (تجربة/اشتراك/محظور)
-app.get('/api/driver/:id/access', async (req, res) => {
+app.get('/api/driver/:id/access', requireDriver, async (req, res) => {
   try {
     const [access, d] = await Promise.all([db.getDriverAccess(req.params.id), db.getDriver(req.params.id)]);
     res.json({ ...access, available: d ? d.available !== false : true });
@@ -534,7 +598,7 @@ app.get('/api/driver/:id/access', async (req, res) => {
 
 // كشف حساب السائق
 // زر شغّال/مطفي — محفوظ بالقاعدة حتى الإشعارات تحترمه والتطبيق مسكّر
-app.post('/api/driver/:id/availability', async (req, res) => {
+app.post('/api/driver/:id/availability', requireDriver, async (req, res) => {
   try {
     const available = await db.setDriverAvailability(req.params.id, !!req.body.available);
     if (!available) onlineDrivers.delete(req.params.id); // شيله فوراً من قائمة المتاحين
@@ -545,7 +609,7 @@ app.post('/api/driver/:id/availability', async (req, res) => {
   }
 });
 
-app.get('/api/driver/:id/earnings', async (req, res) => {
+app.get('/api/driver/:id/earnings', requireDriver, async (req, res) => {
   try {
     res.json(await db.getDriverEarnings(req.params.id));
   } catch (e) {
@@ -912,7 +976,7 @@ app.post('/api/book', requireCustomer, async (req, res) => {
 });
 
 // شبكة أمان: يرجع كل الطلبات المعروضة حالياً على السواق (لو فاتت رسالة WebSocket بسبب انقطاع صامت بشبكة الموبايل)
-app.get('/api/driver/pending-rides', async (req, res) => {
+app.get('/api/driver/pending-rides', requireAnyDriver, async (req, res) => {
   try {
     const list = [];
     for (const ride of activeRides.values()) {
@@ -931,7 +995,7 @@ app.get('/api/driver/pending-rides', async (req, res) => {
 // ============ إشعارات المتصفح (Web Push) ============
 app.get('/api/push/vapid-public-key', (req, res) => res.json({ key: VAPID_PUBLIC_KEY, enabled: PUSH_ENABLED }));
 
-app.post('/api/driver/push-subscribe', async (req, res) => {
+app.post('/api/driver/push-subscribe', requireDriver, async (req, res) => {
   try {
     const { driverId, subscription } = req.body;
     if (!driverId || !subscription) return res.status(400).json({ error: 'بيانات ناقصة' });
@@ -949,7 +1013,7 @@ app.post('/api/customer/push-subscribe', requireCustomer, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/accept', async (req, res) => {
+app.post('/api/accept', requireDriver, async (req, res) => {
   try {
     const { rideId, driverId } = req.body;
     const ride = activeRides.get(rideId);
@@ -1010,7 +1074,7 @@ app.post('/api/accept', async (req, res) => {
 // ============================================================
 
 // السائق يقدّم عرض سعر
-app.post('/api/offer', async (req, res) => {
+app.post('/api/offer', requireDriver, async (req, res) => {
   try {
     const { rideId, driverId, price, note } = req.body;
     const ride = activeRides.get(rideId);
@@ -1136,6 +1200,8 @@ app.post('/api/arrived', async (req, res) => {
   try {
     const ride = activeRides.get(req.body.rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    // بس السائق المكلّف — قبل كان أي أحد عنده رقم الطلب يكدر يغيّر حالته
+    if (!authDriver(req, res, ride.driverId)) return;
     ride.status = 'arrived';
     await db.updateRideStatus(ride.id, 'arrived');
     sendTo(ride.customerSocketId, 'ride:arrived', {});
@@ -1149,6 +1215,7 @@ app.post('/api/start-trip', async (req, res) => {
   try {
     const ride = activeRides.get(req.body.rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    if (!authDriver(req, res, ride.driverId)) return;
     ride.status = 'started';
     await db.updateRideStatus(ride.id, 'started');
     sendTo(ride.customerSocketId, 'ride:started', {});
@@ -1182,6 +1249,8 @@ app.post('/api/complete', async (req, res) => {
   try {
     const ride = activeRides.get(req.body.rideId);
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    // بس السائق المكلّف — وإلا الزبون يكدر ينهي الرحلة بنص الطريق ويدفع أقل
+    if (!authDriver(req, res, ride.driverId)) return;
     ride.status = 'done';
 
     /* التسعير النهائي على الكيلومترات الفعلية:
@@ -1264,6 +1333,7 @@ app.post('/api/cancel', async (req, res) => {
     if (by !== 'driver_noshow' && !(await authCustomer(req, res, ride.customer?.phone))) return;
     if (by === 'driver_noshow') {
       if (!driverId || ride.driverId !== driverId) return res.status(403).json({ error: 'غير مصرح' });
+      if (!authDriver(req, res, driverId)) return;
       if (ride.status !== 'arrived') return res.status(409).json({ error: 'لازم توصل أول قبل الإلغاء' });
       cancelledBy = 'driver_noshow';
     } else if (ride.status === 'started') {
@@ -1664,18 +1734,14 @@ app.get('/api/ride/:id/status', (req, res) => {
     status: ride.status,
     driverId: ride.driverId,
     fare: ride.estFare || ride.offerPrice || 0,
-    customer: ride.customer,
+    // رقم الزبون بس للسائق اللي انقبل عرضه — مو لكل من يعرف رقم الطلب
+    customer: ride.driverId && driverIdFromToken(req.headers['x-driver-token']) === ride.driverId ? ride.customer : undefined,
   });
 });
 
-app.get('/api/ride/:id', (req, res) => {
-  const ride = activeRides.get(req.params.id);
-  if (!ride) return res.status(404).json({ error: 'غير موجودة' });
-  res.json(ride);
-});
 
 // الرحلة النشطة الحالية للسائق — تفيد لما يسكّر التطبيق ويرجع يفتحه ورحلته لسا مستمرة
-app.get('/api/driver/:id/active-ride', (req, res) => {
+app.get('/api/driver/:id/active-ride', requireDriver, (req, res) => {
   for (const ride of activeRides.values()) {
     if (ride.driverId === req.params.id && ['accepted', 'arrived', 'started'].includes(ride.status)) {
       return res.json({
