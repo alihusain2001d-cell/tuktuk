@@ -1590,23 +1590,58 @@ function onCompassEvent(e) {
    وهذا مزعج خصوصاً بالآيفون. لو رفض مرة، ما نرجع نزعجه. */
 const COMPASS_KEY = 'jayak_compass';
 
+function attachCompass() {
+  if (compassOn) return;
+  window.addEventListener('deviceorientationabsolute', onCompassEvent, true);
+  window.addEventListener('deviceorientation', onCompassEvent, true);
+  compassOn = true;
+  localStorage.setItem(COMPASS_KEY, 'granted');
+  updateCompassMenu();
+}
+
+/* نجرّب نسمع للبوصلة بدون ما نطلب إذن.
+   لو السائق سمح قبل، القراءات توصل عادي وما يطلع أي سؤال.
+   ولو ما سمح، ما توصل قراءات وما ينزعج بسؤال ما طلبه —
+   يبقى الخيار بالقائمة يفعّله وقت ما يريد. */
+function trySilentCompass() {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('deviceorientationabsolute', probe, true);
+      window.removeEventListener('deviceorientation', probe, true);
+      if (ok) attachCompass(); else updateCompassMenu();
+      resolve(ok);
+    };
+    const probe = (e) => {
+      const usable = (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading))
+                  || (e.absolute && typeof e.alpha === 'number' && !isNaN(e.alpha));
+      if (usable) finish(true);
+    };
+    window.addEventListener('deviceorientationabsolute', probe, true);
+    window.addEventListener('deviceorientation', probe, true);
+    setTimeout(() => finish(false), 2500);
+  });
+}
+
 async function enableCompass(manual) {
   if (compassOn) return true;
   try {
     const DOE = window.DeviceOrientationEvent;
     if (!DOE) return false;
-    if (typeof DOE.requestPermission === 'function') {
-      // رفضها قبل؟ ما نسأل من جديد إلا إذا طلبها هو من القائمة
-      if (!manual && localStorage.getItem(COMPASS_KEY) === 'denied') return false;
-      const perm = await DOE.requestPermission();
-      localStorage.setItem(COMPASS_KEY, perm === 'granted' ? 'granted' : 'denied');
-      if (perm !== 'granted') { updateCompassMenu(); return false; }
-    }
-    window.addEventListener('deviceorientationabsolute', onCompassEvent, true);
-    window.addEventListener('deviceorientation', onCompassEvent, true);
-    compassOn = true;
-    localStorage.setItem(COMPASS_KEY, 'granted');
-    updateCompassMenu();
+
+    // ما يحتاج إذن (أندرويد) — نسمع مباشرة
+    if (typeof DOE.requestPermission !== 'function') { attachCompass(); return true; }
+
+    /* الآيفون: ما نسأل إلا إذا السائق طلبها من القائمة.
+       وإلا نجربها بهدوء — لأن طلب الإذن يعيد السؤال كل مرة يفتح بيها التطبيق. */
+    if (!manual) return await trySilentCompass();
+
+    const perm = await DOE.requestPermission();
+    localStorage.setItem(COMPASS_KEY, perm === 'granted' ? 'granted' : 'denied');
+    if (perm !== 'granted') { updateCompassMenu(); return false; }
+    attachCompass();
     return true;
   } catch (e) { return false; }
 }
@@ -1624,14 +1659,10 @@ async function enableCompassFromMenu() {
              : 'ما انسمح للبوصلة — السهم راح يلف بس وإنت تسوق');
 }
 
-/* نحاول نفعّلها بهدوء بس إذا السائق سمح 
-   بالسابق — وإلا يفعّلها هو من القائمة وقت ما يريد. */
+// نجربها بهدوء أول ضغطة — بدون أي سؤال للسائق
 document.addEventListener('click', function once() {
   document.removeEventListener('click', once);
-  const saved = localStorage.getItem(COMPASS_KEY);
-  const needsPrompt = typeof window.DeviceOrientationEvent?.requestPermission === 'function';
-  if (!needsPrompt || saved === 'granted') enableCompass(false);
-  else updateCompassMenu();   // ما سألناه بعد — نخليها خيار بالقائمة
+  enableCompass(false);
 }, { once: true });
 
 let userRotatedAt = 0;   // آخر مرة دار السائق الخريطة بإيده
