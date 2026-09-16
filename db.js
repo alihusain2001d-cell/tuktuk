@@ -1420,6 +1420,25 @@ async function getDriverFullStatement({ driverId, from, to }) {
 
 // ============ تقييم الرحلات ============
 // رحلة وحدة من القاعدة — حتى اللي خلصت وانشالت من ذاكرة السيرفر
+/* آخر رحلة خلصت للزبون خلال ٦ ساعات وما تقيّمت.
+   تفيد لما السائق ينهي والزبون تطبيقه مسكّر — حتى يشوف المبلغ والتقييم لما يفتحه. */
+async function getUnratedDoneRide(phone) {
+  const clean = cleanPhone(phone);
+  const since = Date.now() - 6 * 3600 * 1000;
+  if (!HAS_DB) {
+    const r = [...mem.rides.values()].reverse().find(x =>
+      cleanPhone(x.customer?.phone) === clean && x.status === 'done' && !x.rating &&
+      x.done_at && x.done_at.getTime() > since);
+    return r ? { id: r.id, est_km: r.estKm, est_fare: r.estFare, customer_paid: r.customerPaid } : null;
+  }
+  const res = await pool.query(`
+    SELECT id, est_km, est_fare, customer_paid FROM rides
+    WHERE regexp_replace(customer_phone, '\\D', '', 'g') = $1
+      AND status = 'done' AND rating IS NULL AND done_at > NOW() - INTERVAL '6 hours'
+    ORDER BY done_at DESC LIMIT 1`, [clean]);
+  return res.rows[0] || null;
+}
+
 async function getRide(rideId) {
   if (!HAS_DB) return mem.rides.get(rideId) || null;
   const res = await pool.query('SELECT * FROM rides WHERE id=$1', [rideId]);
@@ -1539,7 +1558,7 @@ async function setContactSettings({ whatsapp, facebook, instagram, telegram }) {
 }
 
 module.exports = {
-  HAS_DB, init, ping,
+  HAS_DB, init, ping, getUnratedDoneRide,
   upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
   banDriver, unbanDriver, approveDriver,

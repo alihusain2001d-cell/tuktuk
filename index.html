@@ -339,6 +339,9 @@
     text-align:center; color:#fff; font-size:15px; font-weight:700; }
 
   .tp-dot.store { background:#F5A623; }
+  /* نقطة موقعي — نفس شكل خرائط الموبايل حتى يعرفها الزبون فوراً */
+  .my-dot { width:18px; height:18px; margin:-9px 0 0 -9px; border-radius:50%; background:#1A73E8;
+    border:3px solid #fff; box-shadow:0 0 0 1px rgba(26,115,232,.3), 0 2px 6px rgba(0,0,0,.3); }
   .hidden { display:none !important; }
   .toast { position:fixed; bottom:20px; right:20px; left:20px; background:var(--dark); color:#fff; padding:14px 18px; border-radius:12px; font-size:14px; text-align:center; z-index:3000; box-shadow:0 4px 20px rgba(0,0,0,.3); animation:slideup .3s; }
   @keyframes slideup { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
@@ -1587,9 +1590,47 @@ function makeMap(elId, flow) {
      التثبيت يصير بالزر، حتى ما يتغير المكان لو الزبون ضغط بالغلط وهو يتصفح. */
   m.on('click', (e) => m.panTo(e.latlng, { animate: true }));
   const pinId = elId === 'map-d' ? 'pin-d' : 'pin-r';
+  startMyLocation();
+  setTimeout(() => drawMyDot(m), 0);
   m.on('movestart', () => document.getElementById(pinId)?.classList.add('lift'));
   m.on('moveend', () => document.getElementById(pinId)?.classList.remove('lift'));
   return m;
+}
+
+/* ===== نقطة موقعي (الزرقاء) =====
+   تبين وين الزبون فعلاً على كل الخرائط — منفصلة عن نقطة الانطلاق
+   حتى لو حرّك الدبوس لمكان ثاني يبقى يعرف وين هو. */
+let myPos = null, myWatch = null;
+const myDots = new Map();   // الخريطة → { dot, halo }
+
+function startMyLocation() {
+  if (myWatch != null || !navigator.geolocation) return;
+  myWatch = navigator.geolocation.watchPosition(
+    (pos) => {
+      myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy || 0 };
+      [mapR, mapD, mapS, mapT].forEach(m => m && drawMyDot(m));
+    },
+    () => {},
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+}
+function stopMyLocation() {
+  if (myWatch != null && navigator.geolocation) navigator.geolocation.clearWatch(myWatch);
+  myWatch = null;
+}
+function drawMyDot(m) {
+  if (!myPos || !m) return;
+  const ll = [myPos.lat, myPos.lng];
+  let d = myDots.get(m);
+  if (!d) {
+    d = {
+      halo: L.circle(ll, { radius: 0, color: '#1A73E8', weight: 1, opacity: .25, fillColor: '#1A73E8', fillOpacity: .12, interactive: false }).addTo(m),
+      dot: L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="my-dot"></div>', iconSize: [0, 0] }), interactive: false, zIndexOffset: -500 }).addTo(m),
+    };
+    myDots.set(m, d);
+  }
+  d.dot.setLatLng(ll);
+  d.halo.setLatLng(ll).setRadius(Math.min(myPos.acc, 150));   // دقة الـGPS — نحدها حتى ما تغطي الخريطة
 }
 
 // عند الضغط على الخريطة
@@ -1646,6 +1687,8 @@ function activeMap() { return currentType === 'ride' ? mapR : mapD; }
 function locateMe(which) {
   const m = which === 'r' ? mapR : mapD;
   if (!navigator.geolocation) return toast('الموقع غير مدعوم');
+  if (myPos && m) m.setView([myPos.lat, myPos.lng], 17);   // فوراً، وبعدين نحدّث بالدقيق
+  startMyLocation();
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
@@ -1854,6 +1897,14 @@ function connectWS() {
   ws.onclose = () => setTimeout(connectWS, 2000);
 }
 
+// رجع للتطبيق من الخلفية: الاتصال يمكن ميت بصمت (خصوصاً الآيفون)، فنسأل السيرفر مباشرة
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') { stopMyLocation(); return; }
+  if (currentRide) resyncRideStatus();
+  else if (user) resumeActiveRide();
+  if (mapR || mapD || mapS || mapT) startMyLocation();
+});
+
 // شبكة أمان: لو انقطع الاتصال وبعدين رجع (شبكة الموبايل أو السيرفر أعاد التشغيل)، نتأكد ما فاتنا تحديث بالرحلة
 async function resyncRideStatus() {
   if (!currentRide) return;
@@ -1861,6 +1912,7 @@ async function resyncRideStatus() {
     const res = await fetch(`/api/ride/${currentRide}/status`);
     if (!res.ok) return;
     const s = await res.json();
+    if (s.status === 'done') { if (!rateShown(s.rideId)) onDone(s, true); return; }
     if (s.status === 'arrived') onArrived();
     else if (s.status === 'started') onTripStarted();
   } catch (e) {}
@@ -2018,6 +2070,13 @@ async function resumeActiveRide() {
     const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}/active-ride?socketId=${encodeURIComponent(socketId||'')}`);
     const ride = await res.json();
     if (!ride) return false;
+    if (ride.status === 'done') {
+      // خلصت وهو مسكّر التطبيق — نطلعله المبلغ والتقييم مرة وحدة بس
+      if (rateShown(ride.rideId)) return false;
+      currentRide = ride.rideId;
+      onDone(ride, true);
+      return true;
+    }
     currentRide = ride.rideId;
     currentType = ride.type;
     pickup = ride.pickup;
@@ -2182,7 +2241,25 @@ function onTripStarted() {
 
 let lastPricing = null, lastFare = null;
 
-function onDone(data) {
+// نتذكر الرحلات اللي طلعنا تقييمها، حتى ما يرجع يطلع كل ما يفتح التطبيق
+function rateShown(rideId) {
+  try { return (JSON.parse(localStorage.getItem('jayak_rate_shown') || '[]')).includes(rideId); }
+  catch (e) { return false; }
+}
+function markRateShown(rideId) {
+  if (!rideId) return;
+  try {
+    const list = JSON.parse(localStorage.getItem('jayak_rate_shown') || '[]').filter(x => x !== rideId);
+    list.push(rideId);
+    localStorage.setItem('jayak_rate_shown', JSON.stringify(list.slice(-20)));
+  } catch (e) {}
+}
+
+function onDone(data, quiet) {
+  if (data && data.rideId && currentRide && data.rideId !== currentRide) return;
+  // نفس الرحلة وصلت مرتين (الاتصال رجع + فحص الحالة) — شاشة التقييم مفتوحة أصلاً
+  if (document.getElementById('flow-rate').classList.contains('active') && lastRideId === currentRide) return;
+  markRateShown(currentRide);
   lastPricing = (data && data.pricing) || null;
   // نخزن المبلغ دائماً — مو بس لما تنحسب الأجرة بالنهاية
   lastFare = data ? { fare: data.fare, estFare: data.estFare } : null;
@@ -2191,9 +2268,11 @@ function onDone(data) {
     if (data.fare > 0) fareMsg = ` — الأجرة ${data.fare.toLocaleString()} د.ع`;
     else fareMsg = data.estFare ? ` — قيمة رحلتك ${data.estFare.toLocaleString()} د.ع، مجانية من جايك 🎁` : ' — رحلة مجانية 🎁';
   }
-  toast('انتهت الرحلة، شكراً لاستخدامك جايك 🙏' + fareMsg);
+  if (!quiet) toast('انتهت الرحلة، شكراً لاستخدامك جايك 🙏' + fareMsg);
   checkRewardBanner();
   lastRideId = currentRide;
+  document.querySelectorAll('.auth-screen').forEach(s => s.classList.remove('active'));
+  ['flow-ride','flow-delivery'].forEach(id => document.getElementById(id).classList.remove('active'));
   document.getElementById('flow-driver').classList.remove('active');
   document.getElementById('flow-searching').classList.remove('active');
   document.getElementById('flow-offer').classList.remove('active');

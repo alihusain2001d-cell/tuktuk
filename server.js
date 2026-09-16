@@ -1081,6 +1081,28 @@ app.post('/api/start-trip', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 
+/* رحلات خلصت قريباً — rideId → { phone, payload, at }
+   بالذاكرة لأن بيها تفاصيل التسعير (ليش المبلغ هيچ). لو السيرفر أعاد التشغيل
+   نرجع للقاعدة ونعرض المبلغ بدون التفاصيل. */
+const finishedRides = new Map();
+setInterval(() => {
+  const cutoff = Date.now() - 6 * 3600 * 1000;
+  for (const [id, f] of finishedRides) if (f.at < cutoff) finishedRides.delete(id);
+}, 30 * 60 * 1000);
+
+async function findFinishedRide(phone) {
+  const clean = String(phone || '').replace(/\D/g, '');
+  let latest = null;
+  for (const f of finishedRides.values()) {
+    if (f.phone.replace(/\D/g, '') === clean && (!latest || f.at > latest.at)) latest = f;
+  }
+  const row = await db.getUnratedDoneRide(clean);
+  if (!row) return null;                              // تقيّمت أو قديمة
+  if (latest && latest.payload.rideId === row.id) return latest.payload;
+  const fare = row.customer_paid != null ? row.customer_paid : row.est_fare;
+  return { rideId: row.id, fare, estFare: row.est_fare, km: row.est_km, pricing: null };
+}
+
 app.post('/api/complete', async (req, res) => {
   try {
     const ride = activeRides.get(req.body.rideId);
@@ -1134,9 +1156,11 @@ app.post('/api/complete', async (req, res) => {
     if (ride.customer?.phone) await db.maybeGrantAutoReward(ride.customer.phone);
 
     const paidByCustomer = ride.customerPaid != null ? ride.customerPaid : ride.estFare;
-    sendTo(ride.customerSocketId, 'ride:done', {
-      fare: paidByCustomer, estFare: ride.estFare, km: ride.estKm, pricing,
-    });
+    const donePayload = { rideId: ride.id, fare: paidByCustomer, estFare: ride.estFare, km: ride.estKm, pricing };
+    /* الزبون غالباً شاشته مقفولة لما السائق ينهي، فالرسالة المباشرة تضيع.
+       نحتفظ بالنتيجة حتى نرجعها له أول ما يفتح التطبيق. */
+    finishedRides.set(ride.id, { phone: ride.customer?.phone || '', payload: donePayload, at: Date.now() });
+    sendTo(ride.customerSocketId, 'ride:done', donePayload);
     pushToCustomer(ride.customer.phone, {
       title: '✅ انتهت الرحلة',
       body: pricing
@@ -1552,7 +1576,12 @@ app.get('/api/stats', async (req, res) => {
 // حالة الطلب — يستخدمها السائق كشبكة أمان لو انقطع الاتصال
 app.get('/api/ride/:id/status', (req, res) => {
   const ride = activeRides.get(req.params.id);
-  if (!ride) return res.status(404).json({ error: 'غير موجود' });
+  if (!ride) {
+    // خلصت وإحنا ما ندري (الشاشة كانت مقفولة) — نرجع المبلغ حتى يطلع التقييم
+    const f = finishedRides.get(req.params.id);
+    if (f) return res.json({ status: 'done', ...f.payload });
+    return res.status(404).json({ error: 'غير موجود' });
+  }
   res.json({
     rideId: ride.id,
     status: ride.status,
@@ -1610,6 +1639,9 @@ app.get('/api/customer/:phone/active-ride', async (req, res) => {
         });
       }
     }
+    // ماكو رحلة نشطة — بس يمكن خلصت وهو مسكّر، فنطلعله المبلغ والتقييم
+    const finished = await findFinishedRide(clean);
+    if (finished) return res.json({ status: 'done', ...finished });
     res.json(null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
