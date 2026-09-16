@@ -319,6 +319,8 @@
   .cancel-reason { padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; margin-bottom:9px; cursor:pointer; font-size:14px; }
   .cancel-reason.sel { border-color:var(--sky-dark); background:var(--sky-light); font-weight:600; }
   .cancel-custom { width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:12px; font-size:14px; margin-top:2px; margin-bottom:14px; resize:none; min-height:60px; font-family:inherit; }
+  .btn.wa { background:#25D366; color:#fff; box-shadow:0 3px 0 #1da851; }
+
   .btn.danger-solid { background:var(--stop); color:#fff; box-shadow:0 3px 0 #B93338; }
 
   /* ===== القائمة الجانبية ===== */
@@ -742,6 +744,19 @@
         <button class="btn ghost" onclick="declineIncoming()">تجاهل</button>
         <button class="btn go" id="inc-accept-btn" onclick="acceptIncoming()">اقبل الطلب ✅</button>
       </div>
+    </div>
+  </div>
+
+  <div class="cancel-modal-bg" id="call-modal">
+    <div class="cancel-modal">
+      <h3 style="text-align:center;margin-bottom:4px">اتصل بالزبون</h3>
+      <div style="text-align:center;font-size:14px;color:var(--muted);direction:ltr;margin-bottom:18px" id="call-phone">—</div>
+      <button class="btn go" onclick="callByPhone()" style="margin-bottom:10px">📞 اتصال عادي</button>
+      <button class="btn wa" onclick="callByWhatsapp()" style="margin-bottom:10px">💬 واتساب</button>
+      <div style="font-size:11.5px;color:var(--muted);text-align:center;margin-bottom:14px">
+        ماكو رصيد؟ استعمل الواتساب — يشتغل على الإنترنيت
+      </div>
+      <button class="btn ghost" onclick="closeCallModal()">تراجع</button>
     </div>
   </div>
 
@@ -2486,7 +2501,39 @@ async function startTrip() {
   } catch (e) {}
 }
 
-function callCustomer(){ if(customerPhone) location.href=`tel:${customerPhone}`; else toast('رقم الزبون غير متوفر'); }
+/* ===== الاتصال بالزبون =====
+   خيارين: اتصال عادي أو واتساب — لأن السائق ممكن يكون بلا رصيد
+   وعنده إنترنيت، فما نخليه عاجز عن الوصول للزبون. */
+
+// الواتساب يريد صيغة دولية: 07701234567 → 9647701234567
+function toIntlIraq(phone) {
+  let n = String(phone || '').replace(/\D/g, '');
+  if (n.startsWith('00')) n = n.slice(2);
+  if (n.startsWith('964')) return n;
+  if (n.startsWith('0')) return '964' + n.slice(1);
+  if (n.length === 10) return '964' + n;     // كتبه بلا صفر
+  return n;
+}
+
+function callCustomer() {
+  if (!customerPhone) return toast('رقم الزبون غير متوفر');
+  document.getElementById('call-phone').textContent = customerPhone;
+  document.getElementById('call-modal').classList.add('show');
+}
+function closeCallModal() { document.getElementById('call-modal').classList.remove('show'); }
+
+function callByPhone() {
+  closeCallModal();
+  location.href = 'tel:' + customerPhone;
+}
+
+function callByWhatsapp() {
+  closeCallModal();
+  const n = toIntlIraq(customerPhone);
+  if (!n) return toast('رقم الزبون مو صحيح');
+  const msg = `مرحبا، أنا ${driver?.name || 'سائق'} من جايك — وصلت لطلبك`;
+  window.open(`https://wa.me/${n}?text=${encodeURIComponent(msg)}`, '_blank');
+}
 
 // ============ إلغاء السائق بسبب عدم حضور الزبون ============
 let selectedNoShowReason = null;
