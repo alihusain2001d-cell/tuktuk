@@ -30,10 +30,15 @@ self.addEventListener('notificationclick', (event) => {
   const url = d.url || '/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      // لو التطبيق مفتوح بالخلفية: ركّز عليه وخبّره يعرض الطلب بشاشة كاملة
+      const forDriver = url.includes('/driver');
+      // لو التطبيق مفتوح بالخلفية: نرجع له نفسه ونخبره يتأكد من حالة الرحلة.
+      // قبل كان هذا للسائق بس — إشعار الزبون كان يفتح نافذة جديدة، وبالآيفون
+      // تنفتح أحياناً بسفاري (مو مسجّل دخول بيها) فما يطلع المبلغ والتقييم.
       for (const c of list) {
-        if (c.url.includes('/driver') && 'focus' in c) {
-          c.postMessage({ type: 'ride:show', rideId: d.rideId || null });
+        const isDriver = c.url.includes('/driver');
+        const isCustomer = c.url.includes('/index.html') || c.url.includes('/ride');
+        if ((forDriver ? isDriver : isCustomer) && 'focus' in c) {
+          c.postMessage({ type: forDriver ? 'ride:show' : 'ride:check', rideId: d.rideId || null });
           return c.focus();
         }
       }

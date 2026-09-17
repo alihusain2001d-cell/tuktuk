@@ -1311,6 +1311,7 @@ app.post('/api/complete', async (req, res) => {
         ? `الأجرة: ${paidByCustomer.toLocaleString()} د.ع (${pricing.km} كم)`
         : 'شكراً لاستخدامك جايك',
       url: '/index.html',
+      rideId: ride.id,
     });
     activeRides.delete(ride.id);
     res.json({ ok: true, fare: paidByCustomer, estFare: ride.estFare,

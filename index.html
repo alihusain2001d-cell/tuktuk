@@ -2121,18 +2121,40 @@ function connectWS() {
 }
 
 // رجع للتطبيق من الخلفية: الاتصال يمكن ميت بصمت (خصوصاً الآيفون)، فنسأل السيرفر مباشرة
+/* الزبون رجع للتطبيق: من الخلفية، من ضغطة إشعار، أو من الذاكرة (iOS يرجّع الصفحة
+   بدون ما يعيد تحميلها). بكل الحالات نسأل السيرفر مباشرة — الاتصال يمكن ميت بصمت. */
+let lastReturnCheck = 0;
+function checkOnReturn() {
+  if (!user || Date.now() - lastReturnCheck < 1500) return;   // الأحداث تجي سوا — فحص واحد يكفي
+  lastReturnCheck = Date.now();
+  if (currentRide) resyncRideStatus();
+  else resumeActiveRide();
+}
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') { stopMyLocation(); return; }
-  if (currentRide) resyncRideStatus();
-  else if (user) resumeActiveRide();
+  checkOnReturn();
   if (mapR || mapD || mapS || mapT) startMyLocation();
 });
+window.addEventListener('pageshow', (e) => { if (e.persisted) checkOnReturn(); });
+window.addEventListener('focus', checkOnReturn);
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'ride:check') { lastReturnCheck = 0; checkOnReturn(); }
+  });
+}
 
 // شبكة أمان: لو انقطع الاتصال وبعدين رجع (شبكة الموبايل أو السيرفر أعاد التشغيل)، نتأكد ما فاتنا تحديث بالرحلة
 async function resyncRideStatus() {
   if (!currentRide) return;
   try {
     const res = await fetch(`/api/ride/${currentRide}/status`);
+    if (res.status === 404) {
+      // مو بالذاكرة (السيرفر أعاد التشغيل مثلاً) — القاعدة تعرف إذا خلصت
+      const staleRide = currentRide;
+      const found = await resumeActiveRide();
+      if (!found && currentRide === staleRide && !document.getElementById('flow-rate').classList.contains('active')) resetAll();
+      return;
+    }
     if (!res.ok) return;
     const s = await res.json();
     if (s.status === 'done') { if (!rateShown(s.rideId)) onDone(s, true); return; }
@@ -2482,7 +2504,6 @@ function onDone(data, quiet) {
   if (data && data.rideId && currentRide && data.rideId !== currentRide) return;
   // نفس الرحلة وصلت مرتين (الاتصال رجع + فحص الحالة) — شاشة التقييم مفتوحة أصلاً
   if (document.getElementById('flow-rate').classList.contains('active') && lastRideId === currentRide) return;
-  markRateShown(currentRide);
   lastPricing = (data && data.pricing) || null;
   // نخزن المبلغ دائماً — مو بس لما تنحسب الأجرة بالنهاية
   lastFare = data ? { fare: data.fare, estFare: data.estFare } : null;
@@ -2567,6 +2588,9 @@ async function submitRating() {
 function skipRating() { closeRateScreen(); }
 
 function closeRateScreen() {
+  /* نسجّل إنه شافه هنا — مو لحظة ما ينفتح. الشاشة ممكن تنفتح والتطبيق
+     بالخلفية وما شافها أحد، وبعدين ما جانت ترجع تطلع أبداً. */
+  markRateShown(lastRideId);
   document.getElementById('flow-rate').classList.remove('active');
   lastRideId = null;
   resetAll();
