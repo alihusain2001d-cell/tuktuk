@@ -135,6 +135,36 @@
     border:4px solid #fff; box-shadow:0 3px 10px rgba(0,0,0,.28); }
   .center-pin .cp-stick { width:3px; height:16px; background:#1A1A1A; margin:-2px auto 0; border-radius:2px; }
   .center-pin.lift { transform:translate(-50%,-118%); }
+  /* لون الدبوس يطابق النقطة اللي ديحددها: أخضر انطلاق، أحمر وصول */
+  .center-pin.from .cp-head { background:var(--go); }
+  .center-pin.to .cp-head { background:var(--stop); border-radius:8px; }
+
+  /* حقل العنوان بخطوات الرحلة */
+  .step-field { display:flex; align-items:center; gap:12px; background:var(--paper); border:1.5px solid var(--line);
+    border-radius:14px; padding:14px; margin-bottom:14px; cursor:pointer; }
+  .step-field .sf-text { flex:1; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .step-field .sf-text.empty { color:var(--muted); font-weight:500; }
+  .step-field .sf-ico { font-size:16px; opacity:.6; }
+  .link-btn { display:block; width:100%; background:none; border:none; color:var(--muted); font-family:inherit;
+    font-size:13px; padding:12px 0 0; cursor:pointer; text-decoration:underline; }
+
+  /* بطاقة السعر — نوع واحد: تكتك */
+  .tuk-card { display:flex; align-items:center; gap:12px; border:2px solid var(--brand); background:var(--gold-light);
+    border-radius:14px; padding:12px 14px; margin-bottom:14px; }
+  .tuk-card .tk-ico { font-size:30px; }
+  .tuk-card .tk-body { flex:1; }
+  .tuk-card .tk-body b { font-size:15px; }
+  .tuk-card .fp-km { font-size:12px; color:var(--muted); margin-top:2px; }
+  .tuk-card .fp-amount { font-size:18px; font-weight:800; color:var(--ink); white-space:nowrap; }
+
+  /* علامات الانطلاق والوصول بشاشة التأكيد */
+  .plan-mark { position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; pointer-events:none; }
+  .plan-mark .pm-pill { display:flex; align-items:center; gap:6px; background:#fff; border-radius:18px; padding:5px 10px 5px 8px;
+    box-shadow:0 2px 8px rgba(0,0,0,.2); font-size:12.5px; font-weight:700; white-space:nowrap; color:var(--ink); }
+  .plan-mark .pm-dot { width:12px; height:12px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.1); }
+  .plan-mark.from .pm-dot { background:var(--go); }
+  .plan-mark.to .pm-dot { background:var(--stop); border-radius:3px; }
+  .plan-mark .pm-stick { width:2px; height:12px; background:#1A1A1A; }
   /* ظل زغير بالنقطة المحددة بالضبط */
   .pin-dot { position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
     background:rgba(0,0,0,.35); border-radius:50%; z-index:599; pointer-events:none; }
@@ -552,37 +582,52 @@
   <!-- ============ شاشة طلب رحلة ============ -->
   <div class="flow-screen" id="flow-ride">
     <div class="flow-head">
-      <div class="back" onclick="exitFlow()">→</div>
-      <h2>اطلب رحلة 🚗</h2>
+      <div class="back" onclick="rideBack()">→</div>
+      <h2 id="r-head-title">وين أنت؟</h2>
     </div>
     <div class="map-wrap">
       <div id="map"></div>
-      <div class="pin-dot"></div>
-      <div class="center-pin" id="pin-r"><div class="cp-head"></div><div class="cp-stick"></div></div>
+      <div class="pin-dot" id="pin-dot-r"></div>
+      <div class="center-pin from" id="pin-r"><div class="cp-head"></div><div class="cp-stick"></div></div>
       <button class="locate-btn" onclick="locateMe('r')">◎</button>
-      <button class="pin-confirm" id="confirm-r" onclick="confirmPin('r')">✓ ثبّت نقطة الوصول هنا</button>
     </div>
 
     <div class="sheet" id="ride-sheet">
       <div class="grip"></div>
-      <div class="trip-points">
-        <div class="tp-row" onclick="openSearch('pickup','r')">
-          <div class="tp-dot from"></div>
-          <div class="tp-text"><b>نقطة الانطلاق</b><div class="val empty" id="r-pickup">نحدد موقعك تلقائياً...</div></div>
-          <div class="tp-edit">✎</div>
+
+      <!-- الخطوة ١ و٢: الزبون يحرك الخريطة تحت الدبوس، والعنوان يتحدث لحاله -->
+      <div id="r-choose">
+        <div class="step-field" onclick="openSearch(rideStep,'r')">
+          <div class="tp-dot from" id="r-step-dot"></div>
+          <div class="sf-text empty" id="r-step-text">نحدد موقعك...</div>
+          <div class="sf-ico">🔍</div>
         </div>
-        <div class="tp-row" onclick="openSearch('destination','r')">
-          <div class="tp-dot to"></div>
-          <div class="tp-text"><b>نقطة الوصول</b><div class="val empty" id="r-dest">حرّك الخريطة وثبّت، أو ابحث</div></div>
-          <div class="tp-edit">✎</div>
+        <button class="btn" id="r-step-btn" onclick="confirmRideStep()">تأكيد نقطة الانطلاق</button>
+        <button class="link-btn hidden" id="r-skip-dest" onclick="skipDestination()">ما أعرف الوجهة بالضبط — تنحسب على المسافة</button>
+      </div>
+
+      <!-- الخطوة ٣: النقطتين والسعر -->
+      <div id="r-review" class="hidden">
+        <div class="trip-points">
+          <div class="tp-row" onclick="setRideStep('pickup')">
+            <div class="tp-dot from"></div>
+            <div class="tp-text"><b>الانطلاق</b><div class="val" id="r-pickup">—</div></div>
+            <div class="tp-edit">✎</div>
+          </div>
+          <div class="tp-row" onclick="setRideStep('destination')">
+            <div class="tp-dot to"></div>
+            <div class="tp-text"><b>الوصول</b><div class="val" id="r-dest">—</div></div>
+            <div class="tp-edit">✎</div>
+          </div>
         </div>
+        <div class="reward-banner hidden" id="r-reward-banner" style="cursor:default">🎁 عندك مكافأة — راح تنطبق تلقائياً على هذي الرحلة</div>
+        <div class="tuk-card" id="r-fare-box">
+          <div class="tk-ico">🛺</div>
+          <div class="tk-body"><b>تكتك</b><div class="fp-km" id="r-fare-km">—</div></div>
+          <div class="fp-amount" id="r-fare-amount">—</div>
+        </div>
+        <button class="btn" id="r-book-btn" onclick="bookRide()">اطلب تكتك 🛺</button>
       </div>
-      <div class="reward-banner hidden" id="r-reward-banner" style="cursor:default">🎁 عندك مكافأة — راح تنطبق تلقائياً على هذي الرحلة</div>
-      <div class="fare-preview hidden" id="r-fare-box">
-        <div><div class="fp-label">الأجرة التقديرية</div><div class="fp-km" id="r-fare-km">— كم</div></div>
-        <div class="fp-amount" id="r-fare-amount">—</div>
-      </div>
-      <button class="btn" id="r-book-btn" onclick="bookRide()">اطلب رحلة 🚗</button>
     </div>
   </div>
 
@@ -1467,10 +1512,10 @@ function startFlow(type) {
   if (type === 'ride') {
     document.getElementById('flow-ride').classList.add('active');
     resetRideUI();
-    tapTarget = 'destination'; // الضغط على الخريطة يحدد الوصول
     checkRideReward();
     setTimeout(() => {
       if (!mapR) mapR = makeMap('map','r'); else mapR.invalidateSize();
+      setRideStep('pickup');
       autoLocatePickup('r');
     }, 60);
   } else {
@@ -1508,14 +1553,116 @@ function autoLocatePickup(flow) {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      pickup = { lat, lng, label: 'موقعي الحالي' };
-      m.setView([lat, lng], 17);
-      updatePlanUI();
-      drawPlanMarkers();
+      // بس نودي الخريطة لموقعه — هو يأكد، ويكدر يحرّك الدبوس لباب البيت بالضبط
+      if (currentType === 'ride' && rideStep === 'pickup' && !pickup) m.setView([lat, lng], 17);
     },
-    () => { /* لو ما سمح بالموقع، يحدده يدوياً */ },
+    () => { if (currentType === 'ride' && rideStep === 'pickup') refreshPinPreview(); },
     { enableHighAccuracy:true, timeout:8000 }
   );
+}
+
+/* ===== طلب الرحلة خطوة بخطوة =====
+   ١ وين أنت (انطلاق) ← ٢ وين رايح (وصول) ← ٣ تأكيد وسعر.
+   بكل خطوة شي واحد يسويه الزبون — أبسط من شاشة وحدة بيها كلشي. */
+let rideStep = 'pickup';
+let pinPreview = null;               // { lat, lng, label } — المكان تحت الدبوس هسه
+let previewTimer = null, previewReq = 0;
+
+const STEP_TITLES = { pickup: 'وين أنت؟', destination: 'وين رايح؟', review: 'تأكيد الرحلة' };
+
+function setRideStep(step) {
+  rideStep = step;
+  const choosing = step !== 'review';
+  document.getElementById('r-head-title').textContent = STEP_TITLES[step];
+  document.getElementById('r-choose').classList.toggle('hidden', !choosing);
+  document.getElementById('r-review').classList.toggle('hidden', choosing);
+  const pin = document.getElementById('pin-r');
+  pin.classList.toggle('hidden', !choosing);
+  pin.classList.toggle('from', step === 'pickup');
+  pin.classList.toggle('to', step === 'destination');
+  document.getElementById('pin-dot-r').classList.toggle('hidden', !choosing);
+
+  if (choosing) {
+    document.getElementById('r-step-dot').className = 'tp-dot ' + (step === 'pickup' ? 'from' : 'to');
+    document.getElementById('r-step-btn').textContent = step === 'pickup' ? 'تأكيد نقطة الانطلاق' : 'تأكيد نقطة الوصول';
+    document.getElementById('r-skip-dest').classList.toggle('hidden', step !== 'destination');
+    // رجع يعدّل نقطة محددة؟ نوديه عليها. وإلا الوصول يبدي من مكان الانطلاق
+    const existing = step === 'pickup' ? pickup : destination;
+    pinPreview = existing ? { ...existing } : null;
+    showPinLabel(existing ? existing.label : null);
+    if (mapR) {
+      if (existing) mapR.setView([existing.lat, existing.lng], 17);
+      else if (step === 'destination' && pickup) mapR.setView([pickup.lat, pickup.lng], 16);
+      else refreshPinPreview();
+    }
+  } else {
+    updatePlanUI();
+  }
+  // اللوحة تحت تغيّر طولها بين الخطوات — نحدّث حجم الخريطة قبل ما نوسّطها على الرحلة
+  if (mapR) mapR.invalidateSize();
+  if (currentType === 'ride') drawPlanMarkers();
+}
+
+function showPinLabel(label) {
+  const el = document.getElementById('r-step-text');
+  if (label) { el.textContent = label; el.classList.remove('empty'); return; }
+  el.textContent = rideStep === 'pickup' ? 'حرّك الخريطة لمكانك' : 'حرّك الخريطة لمكان وصولك';
+  el.classList.add('empty');
+}
+
+// اسم المكان تحت الدبوس — ننتظر شوية بعد ما يوقف تحريك حتى ما نستهلك طلبات على الفاضي
+function refreshPinPreview() {
+  if (!mapR || currentType !== 'ride' || rideStep === 'review') return;
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const c = mapR.getCenter();
+    // نفس المكان المحدد (مثلاً من البحث: "البيت")؟ نخلي اسمه
+    if (pinPreview && haversine(pinPreview.lat, pinPreview.lng, c.lat, c.lng) < 0.02) { showPinLabel(pinPreview.label); return; }
+    const myReq = ++previewReq, step = rideStep;
+    pinPreview = { lat: c.lat, lng: c.lng, label: 'موقع محدد على الخريطة' };
+    showPinLabel('نجيب اسم المكان...');
+    try {
+      const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
+      if (myReq !== previewReq || step !== rideStep) return;
+      if (r && r.name) pinPreview.label = r.name;
+    } catch (e) {}
+    if (myReq === previewReq && step === rideStep) showPinLabel(pinPreview.label);
+  }, 600);
+}
+
+function confirmRideStep() {
+  if (!mapR) return;
+  const c = mapR.getCenter();
+  const known = pinPreview && haversine(pinPreview.lat, pinPreview.lng, c.lat, c.lng) < 0.02;
+  const place = { lat: c.lat, lng: c.lng, label: known ? pinPreview.label : 'موقع محدد على الخريطة' };
+  if (rideStep === 'pickup') {
+    pickup = place;
+    setRideStep(destination ? 'review' : 'destination');
+  } else {
+    // الخريطة تبدي من مكان الانطلاق — لو ضغط تأكيد بدون ما يحركها، الوصول يصير نفس الانطلاق
+    if (pickup && haversine(pickup.lat, pickup.lng, c.lat, c.lng) < 0.05) {
+      return toast('حرّك الخريطة لحد ما الدبوس يصير على مكان وصولك');
+    }
+    destination = place;
+    setRideStep('review');
+  }
+  // ضغط تأكيد قبل ما يوصل الاسم — نكمّله بالخلفية
+  if (!known || place.label === 'موقع محدد على الخريطة') {
+    fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json())
+      .then(r => { if (r && r.name) { place.label = r.name; updatePlanUI(); } }).catch(() => {});
+  }
+}
+
+// الزبون ما يعرف وين بالضبط — السائق يوصله والأجرة تنحسب على الكيلومترات
+function skipDestination() {
+  destination = null;
+  setRideStep('review');
+}
+
+function rideBack() {
+  if (rideStep === 'review') setRideStep('destination');
+  else if (rideStep === 'destination') setRideStep('pickup');
+  else exitFlow();
 }
 
 function exitFlow() {
@@ -1619,6 +1766,7 @@ function makeMap(elId, flow) {
   setTimeout(() => drawMyDot(m), 0);
   m.on('movestart', () => document.getElementById(pinId)?.classList.add('lift'));
   m.on('moveend', () => document.getElementById(pinId)?.classList.remove('lift'));
+  if (elId === 'map') m.on('moveend', refreshPinPreview);
   return m;
 }
 
@@ -1718,8 +1866,6 @@ function locateMe(which) {
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
       m.setView([lat, lng], 17);
-      // زر الموقع يحدد نقطة الانطلاق على موقعي (بالرحلة)
-      if (currentType === 'ride') { pickup = { lat, lng, label:'موقعي الحالي' }; updatePlanUI(); drawPlanMarkers(); }
     },
     () => toast('ما كدرنا نحدد موقعك، اضغط على الخريطة يدوياً'),
     { enableHighAccuracy:true, timeout:8000 }
@@ -1807,6 +1953,10 @@ function selectPlace(place) {
   if (searchMode === 'favorite') { saveFavoritePlace(place); return; }
   assignPoint(place);
   closeSearch();
+  if (searchFlow === 'r' && currentType === 'ride') {
+    setRideStep(searchMode === 'pickup' && !destination ? 'destination' : 'review');
+    return;
+  }
   const m = searchFlow === 'r' ? mapR : mapD;
   m.setView([place.lat, place.lng], 17);
   drawPlanMarkers();
@@ -1824,13 +1974,15 @@ function pickFromMap() {
   tapTarget = searchMode; updateConfirmLabel(); // الضغط الجاي على الخريطة يحدد هالنقطة
   closeSearch();
   const label = { pickup:'نقطة الانطلاق', destination:currentType==='delivery'?'عنوان التوصيل':'نقطة الوصول', store:'موقع المحل' }[searchMode];
-  toast(`اضغط على الخريطة لتحديد ${label}`);
+  toast(`حرّك الخريطة لحد ما الدبوس يصير على ${label}`);
 }
 
 // ============ تحديث واجهة التخطيط ============
 function updatePlanUI() {
   if (currentType === 'ride') {
-    setVal('r-pickup', pickup); setVal('r-dest', destination);
+    setVal('r-pickup', pickup);
+    if (destination) setVal('r-dest', destination);
+    else setEmpty('r-dest', 'بدون وجهة — تنحسب على المسافة');
     updateFare('r', pickup, destination);
   } else {
     setVal('d-store', store);
@@ -1846,6 +1998,16 @@ function setVal(id, place) {
 
 function updateFare(prefix, a, b) {
   const box = document.getElementById(prefix+'-fare-box');
+  if (prefix === 'r' && a && !b) {
+    // بدون وجهة: ما نعرف السعر مسبقاً — نبين شلون ينحسب
+    const f = fareSettings || {};
+    document.getElementById('r-fare-km').textContent = 'تنحسب على المسافة بنهاية الرحلة';
+    document.getElementById('r-fare-amount').textContent = f.mode === 'fixed'
+      ? (f.fixed_price || 0).toLocaleString() + ' د.ع'
+      : (f.per_km ? (f.per_km).toLocaleString() + ' د.ع/كم' : '—');
+    box.classList.remove('hidden');
+    return;
+  }
   if (a && b) {
     const km = haversine(a.lat, a.lng, b.lat, b.lng);
     const fare = calcFare(km);
@@ -1912,20 +2074,27 @@ function drawPlanMarkers() {
     return;
   }
 
-  // الرحلة: انطلاق + وصول + خط
-  if (pickup) { if (pkMarker) m.removeLayer(pkMarker); pkMarker = L.marker([pickup.lat,pickup.lng],{icon:green,interactive:false}).addTo(m); }
-  if (destination) { if (dsMarker) m.removeLayer(dsMarker); dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m); }
+  // الرحلة — حسب الخطوة
+  if (pkMarker) { m.removeLayer(pkMarker); pkMarker = null; }
+  if (dsMarker) { m.removeLayer(dsMarker); dsMarker = null; }
+  if (routeLine) { m.removeLayer(routeLine); routeLine = null; }
+  const myReq = ++planRouteReq;
+  const mark = (pt, cls, text) => L.marker([pt.lat, pt.lng], { interactive:false, icon: L.divIcon({ className:'', iconSize:[0,0],
+    html:`<div class="plan-mark ${cls}"><div class="pm-pill"><span class="pm-dot"></span>${text}</div><div class="pm-stick"></div></div>` }) }).addTo(m);
+  if (rideStep === 'pickup') return;                     // الدبوس بنص الخريطة هو النقطة
+  if (pickup) pkMarker = mark(pickup, 'from', 'الانطلاق');
+  if (rideStep === 'destination') return;
+  if (destination) dsMarker = mark(destination, 'to', 'الوصول');
+  if (!destination && pickup) { m.setView([pickup.lat, pickup.lng], 16); return; }
   if (pickup && destination) {
-    const myReq = ++planRouteReq;
-    if (routeLine) { m.removeLayer(routeLine); routeLine = null; }
     // خط مستقيم فوري كمعاينة سريعة، ونستبدله بالمسار الحقيقي أول ما يوصل
     routeLine = L.polyline([[pickup.lat,pickup.lng],[destination.lat,destination.lng]], { color:'#1652F0', weight:4, opacity:.5, dashArray:'2,9', lineCap:'round' }).addTo(m);
-    m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
+    m.fitBounds(routeLine.getBounds(), { paddingTopLeft:[60,90], paddingBottomRight:[60,40], maxZoom:16 });
     fetchRoute(pickup, destination).then(route => {
       if (!route || myReq !== planRouteReq || !m) return; // تغيّرت النقاط وإحنا ننتظر
       if (routeLine) m.removeLayer(routeLine);
       routeLine = L.polyline(route.coords, { color:'#1652F0', weight:4, opacity:.7, lineCap:'round' }).addTo(m);
-      m.fitBounds(routeLine.getBounds(), { padding:[70,70], maxZoom:16 });
+      m.fitBounds(routeLine.getBounds(), { paddingTopLeft:[60,90], paddingBottomRight:[60,40], maxZoom:16 });
     });
   }
 }
@@ -2061,7 +2230,7 @@ async function bookRide() {
   if (!pickup) return toast('حدد نقطة الانطلاق أول');
   const btn = document.getElementById('r-book-btn');
   btn.disabled = true; btn.textContent = 'نرسل الطلب...';
-  await sendBooking({ orderType:'ride', pickup, destination }, () => { btn.disabled=false; btn.textContent='اطلب رحلة 🚗'; });
+  await sendBooking({ orderType:'ride', pickup, destination }, () => { btn.disabled=false; btn.textContent='اطلب تكتك 🛺'; });
 }
 
 async function bookDelivery() {
@@ -2103,7 +2272,7 @@ function goSearching(type, notified) {
   document.getElementById('flow-searching').classList.add('active');
   document.getElementById('searching-title').textContent = type === 'delivery' ? 'نبحثلك عن سواق للتوصيل 🛒' : 'نبحثلك عن أقرب سائق 🚗';
   document.getElementById('searching-h').textContent = type === 'delivery' ? 'نبحثلك عن سواق يجيب طلبك...' : 'نبحثلك عن أقرب سائق...';
-  document.getElementById('searching-sub').textContent = notified > 0 ? `أرسلنا طلبك لـ ${notified} سواق` : 'ننتظر سواق يفتح التطبيق...';
+  document.getElementById('searching-sub').textContent = notified > 0 ? `أرسلنا طلبك لـ ${notified} سواق` : 'ننتظر سائق يوافق على طلبك...';
   setTimeout(() => { if (!mapS) mapS = makeMap('map-s',null); else mapS.invalidateSize(); }, 60);
 
   /* بعد ٣ دقائق بلا سائق نصارحه — بدل ما يبقى يباوع على نفس الرسالة وما يعرف
@@ -2492,10 +2661,10 @@ function resetAll() {
 }
 
 function resetRideUI() {
-  const b = document.getElementById('r-book-btn'); b.disabled=false; b.textContent='اطلب رحلة 🚗';
-  setEmpty('r-pickup','نحدد موقعك تلقائياً...'); setEmpty('r-dest','اضغط على الخريطة أو ابحث');
-  document.getElementById('r-fare-box').classList.add('hidden');
+  const b = document.getElementById('r-book-btn'); b.disabled=false; b.textContent='اطلب تكتك 🛺';
   document.getElementById('r-reward-banner').classList.add('hidden');
+  pinPreview = null;
+  setRideStep('pickup');
 }
 function resetDeliveryUI() {
   const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='أرسل الطلب للسواق 🛒';
