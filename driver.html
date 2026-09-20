@@ -1755,8 +1755,9 @@ document.addEventListener('click', function once() {
 
 let userRotatedAt = 0;   // آخر مرة دار السائق الخريطة بإيده
 /* السائق يسحب الخريطة حتى يشوف الطريق كدامه — وإذا رجعناها على موقعه فوراً
-   ما يلحق يشوف شي. ننطيه ١٠ ثواني بعد آخر لمسة قبل ما نتابعه من جديد. */
-const FOLLOW_HOLD_MS = 10000;
+   ما يلحق يشوف شي. ننطيه ٢٠ ثانية بعد آخر لمسة، وإذا راد يرجع أسرع
+   يضغط زر موقعي (◎). */
+const FOLLOW_HOLD_MS = 20000;
 let userMovedAt = 0;
 function followingPaused() { return Date.now() - userMovedAt < FOLLOW_HOLD_MS; }
 
