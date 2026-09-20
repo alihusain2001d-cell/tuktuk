@@ -2594,13 +2594,20 @@ function showActiveRide(out, r) {
     destMarker = emojiMarker('🔴', r.destination.lat, r.destination.lng);
   }
   drawRoute();
+  clearInterval(routeTimer);
+  routeTimer = setInterval(() => { if (activeRide) drawRoute(); }, 10000);
 }
+let routeTimer = null;
 
 // مسار حقيقي على الطرق عبر OSRM (مجاني، بدون مفتاح API)
+/* محرك المسارات خدمة مجانية خارجية — أحياناً بطيئة أو ما ترد أبداً.
+   بلا مهلة، الـawait يبقى معلّق للأبد وما ينرسم أي خط. */
 async function fetchRoute(from, to) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: ctrl.signal });
     const data = await res.json();
     if (data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
     const route = data.routes[0];
@@ -2609,7 +2616,7 @@ async function fetchRoute(from, to) {
       km: route.distance / 1000,
       minutes: route.duration / 60,
     };
-  } catch (e) { return null; }
+  } catch (e) { return null; } finally { clearTimeout(timer); }
 }
 
 let lastRouteFetch = 0;
@@ -2657,13 +2664,14 @@ async function drawRoute() {
   const now = Date.now();
   if (routeLine && now - lastRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
   lastRouteFetch = now;
+
+  /* خط مستقيم فوراً — السائق لازم يشوف الاتجاه حتى لو محرك المسارات بطيء
+     أو مقطوع عن شبكته. نبدله بالمسار الحقيقي أول ما يوصل. */
+  setRoute([[myPos.lat, myPos.lng], [target.lat, target.lng]]);
+  routeLine = true;
   const route = await fetchRoute(myPos, target);
-  if (!activeRide) return; // الرحلة خلصت وإحنا ننتظر الرد
-  if (route) {
-    setRoute(route.coords); routeLine = true;
-  } else {
-    setRoute([[myPos.lat,myPos.lng],[target.lat,target.lng]]); routeLine = true;
-  }
+  if (!activeRide || currentTarget() !== target) return;   // خلصت أو تغيّرت المرحلة وإحنا ننتظر
+  if (route) setRoute(route.coords);
   // متل خرائط الملاحة: نضل مقرّبين على موقع السائق (مو نكبّر لنشوف المسار كله)، ونتابع بدون ما نغيّر تكبيره اليدوي
   const NAV_ZOOM = 17;
   if (!routeFitDone) {
@@ -2807,6 +2815,7 @@ function closeFinalFare() { document.getElementById('final-fare-modal').classLis
 
 function endActive() {
   activeRide = null; customerPhone='';
+  clearInterval(routeTimer); routeTimer = null;
   toggleMapFull(false);                                    // ارجع للوضع العادي
   document.getElementById('map-mini').classList.remove('show');
   if (pickupMarker) { pickupMarker.remove(); pickupMarker=null; }

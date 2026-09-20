@@ -2081,10 +2081,14 @@ function updateFare(prefix, a, b) {
 }
 
 // مسار حقيقي على الطرق عبر OSRM (مجاني، بدون مفتاح API)
+/* محرك المسارات خدمة مجانية خارجية — أحياناً بطيئة أو ما ترد أبداً.
+   بلا مهلة، الـawait يبقى معلّق للأبد وما ينرسم أي خط. */
 async function fetchRoute(from, to) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: ctrl.signal });
     const data = await res.json();
     if (data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
     const route = data.routes[0];
@@ -2093,7 +2097,7 @@ async function fetchRoute(from, to) {
       km: route.distance / 1000,
       minutes: route.duration / 60,
     };
-  } catch (e) { return null; }
+  } catch (e) { return null; } finally { clearTimeout(timer); }
 }
 
 let planRouteReq = 0;
@@ -2544,13 +2548,15 @@ async function drawDriverRoute(dlat, dlng) {
   const now = Date.now();
   if (routeLine && now - lastDriverRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
   lastDriverRouteFetch = now;
+
+  // خط مستقيم فوراً، والمسار الحقيقي يبدله أول ما يوصل
+  if (routeLine) mapT.removeLayer(routeLine);
+  routeLine = L.polyline([[dlat,dlng],[target.lat,target.lng]], { color:'#FFC107', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(mapT);
   const route = await fetchRoute({lat:dlat,lng:dlng}, target);
   if (currentType !== 'ride' && currentType !== 'delivery') return; // خرج من شاشة التتبع وإحنا ننتظر
-  if (routeLine) mapT.removeLayer(routeLine);
   if (route) {
+    if (routeLine) mapT.removeLayer(routeLine);
     routeLine = L.polyline(route.coords, { color:'#FFC107', weight:5, opacity:.9, lineCap:'round' }).addTo(mapT);
-  } else {
-    routeLine = L.polyline([[dlat,dlng],[target.lat,target.lng]], { color:'#FFC107', weight:5, opacity:.9, dashArray:'2,10', lineCap:'round' }).addTo(mapT);
   }
   mapT.fitBounds(routeLine.getBounds(), { padding:[60,60], maxZoom:16 });
 }
