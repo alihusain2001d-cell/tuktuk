@@ -160,7 +160,10 @@
   .tuk-card .fp-amount { font-size:18px; font-weight:800; color:var(--ink); white-space:nowrap; }
 
   /* علامات الانطلاق والوصول بشاشة التأكيد */
-  .plan-mark { position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; pointer-events:none; }
+  /* بدون position:absolute — بصفحة عربية (RTL) العنصر المطلق ينحسب من الحافة
+     اليمنى فتنزاح العلامة يسار عن نقطتها الحقيقية. بالوضع العادي عرض الحاوية
+     صفر، فالأولاد ينتصفون بالضبط على النقطة. */
+  .plan-mark { transform:translate(0,-100%); display:flex; flex-direction:column; align-items:center; pointer-events:none; }
   .plan-mark .pm-pill { display:flex; align-items:center; gap:6px; background:#fff; border-radius:18px; padding:5px 10px 5px 8px;
     box-shadow:0 2px 8px rgba(0,0,0,.2); font-size:12.5px; font-weight:700; white-space:nowrap; color:var(--ink); }
   .plan-mark .pm-dot { width:12px; height:12px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px rgba(0,0,0,.1); }
