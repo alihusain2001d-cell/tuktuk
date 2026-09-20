@@ -1655,7 +1655,7 @@ function setMyHeading(deg, source) {
   if (meMarker) meMarker.setRotation(myHeading);
   /* بوضع الملاحة ندير الخريطة وياه مثل ويز — إلا إذا السائق
      دارها بإيده قبل شوي، نخليه يشوف اللي يريده. */
-  if (map && activeRide && Date.now() - userRotatedAt > 8000) {
+  if (map && activeRide && Date.now() - userRotatedAt > FOLLOW_HOLD_MS && !followingPaused()) {
     map.easeTo({ bearing: myHeading, duration: 500 });
   }
 }
@@ -1754,6 +1754,11 @@ document.addEventListener('click', function once() {
 }, { once: true });
 
 let userRotatedAt = 0;   // آخر مرة دار السائق الخريطة بإيده
+/* السائق يسحب الخريطة حتى يشوف الطريق كدامه — وإذا رجعناها على موقعه فوراً
+   ما يلحق يشوف شي. ننطيه ١٠ ثواني بعد آخر لمسة قبل ما نتابعه من جديد. */
+const FOLLOW_HOLD_MS = 10000;
+let userMovedAt = 0;
+function followingPaused() { return Date.now() - userMovedAt < FOLLOW_HOLD_MS; }
 
 function initMap() {
   map = new maplibregl.Map({
@@ -1787,7 +1792,14 @@ function initMap() {
   });
 
   // نعرف إذا السائق دارها بنفسه حتى ما نزاحمه
-  map.on('rotatestart', () => { userRotatedAt = Date.now(); });
+  // بس اللمسات الحقيقية — تحريكنا للخريطة بالكود ما يوقف المتابعة
+  ['dragstart', 'zoomstart', 'rotatestart', 'pitchstart'].forEach(ev => {
+    map.on(ev, (e) => {
+      if (!e || !e.originalEvent) return;
+      userMovedAt = Date.now();
+      if (ev === 'rotatestart') userRotatedAt = Date.now();
+    });
+  });
 
   meMarker = new maplibregl.Marker({ element: meEl(), rotationAlignment: 'map' })
     .setLngLat([myPos.lng, myPos.lat]).addTo(map);
@@ -1820,6 +1832,7 @@ function centerOnMe() {
     return;
   }
   mapEase(myPos.lat, myPos.lng, { zoom: Math.max(map.getZoom(), 17), duration: 500 });
+  userMovedAt = 0;       // ضغط زر "رجّعني" — يعني يريد المتابعة ترجع هسه
   routeFitDone = true;   // المتابعة تكمل من هنا بدل ما تصفّر تكبيره
 }
 
@@ -2704,10 +2717,10 @@ async function drawRoute() {
   if (!routeFitDone) {
     mapEase(myPos.lat, myPos.lng, { zoom: NAV_ZOOM, duration: 600 });
     routeFitDone = true;
-  } else {
+  } else if (!followingPaused()) {
     // نتابع موقعه، وندير الخريطة باتجاهه إلا إذا دارها هو قبل شوي
     const opts = { duration: 600 };
-    if (Date.now() - userRotatedAt > 8000) opts.bearing = myHeading;
+    if (Date.now() - userRotatedAt > FOLLOW_HOLD_MS) opts.bearing = myHeading;
     mapEase(myPos.lat, myPos.lng, opts);
   }
 }
