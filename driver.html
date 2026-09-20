@@ -399,7 +399,7 @@
   .inc-leg .t { flex:1; min-width:0; }
   .inc-leg .t .lbl { font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:2px; }
   .inc-leg .t .val { font-size:16px; font-weight:700; line-height:1.35; }
-  .route-preview { position:fixed; inset:0; z-index:4000; background:var(--paper); display:none; flex-direction:column; }
+  .route-preview { position:fixed; inset:0; z-index:4500; background:var(--paper); display:none; flex-direction:column; }
   .route-preview.show { display:flex; }
   .route-preview .rp-head { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.08); z-index:2; }
   .route-preview .rp-close { background:none; border:none; font-size:20px; cursor:pointer; font-family:inherit; }
@@ -409,6 +409,7 @@
   .route-preview .rp-legend { display:flex; flex-direction:column; gap:7px; font-size:13.5px; font-weight:600; margin-bottom:8px; }
   .route-preview .rp-legend span { display:flex; align-items:center; gap:8px; }
   .route-preview .rp-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+  .route-preview .rp-dot.me { background:#2BA9E0; }
   .route-preview .rp-dot.from { background:var(--go); }
   .route-preview .rp-dot.to { background:var(--stop); border-radius:3px; }
   .route-preview .rp-info { font-size:12.5px; color:var(--muted); margin-bottom:12px; }
@@ -640,6 +641,7 @@
     <div id="preview-map"></div>
     <div class="rp-foot">
       <div class="rp-legend">
+        <span><i class="rp-dot me"></i> <span id="rp-me">إنت هنا</span></span>
         <span><i class="rp-dot from"></i> <span id="rp-from">—</span></span>
         <span><i class="rp-dot to"></i> <span id="rp-to">—</span></span>
       </div>
@@ -2152,10 +2154,11 @@ function openRoutePreview(r) {
   document.getElementById('rp-to').textContent = (isDel ? 'توصّله لـ: ' : 'توصّله لـ: ') +
     ((to && to.label) || (to ? 'نقطة على الخريطة' : 'الوجهة غير محددة'));
   const bits = [];
-  if (hasFix && from && from.lat) bits.push(`يبعد عنك ${haversine(myPos.lat, myPos.lng, from.lat, from.lng).toFixed(1)} كم`);
+  if (hasFix && from && from.lat) bits.push(`منك للزبون ${haversine(myPos.lat, myPos.lng, from.lat, from.lng).toFixed(1)} كم`);
   if (r.estKm) bits.push(`طول الرحلة ${r.estKm} كم`);
   if (r.estFare) bits.push(`أجرتك ${r.estFare.toLocaleString()} د.ع`);
   document.getElementById('rp-info').textContent = bits.join(' • ');
+  document.getElementById('rp-me').textContent = hasFix ? 'إنت هنا' : 'موقعك غير معروف — شغّل الـGPS';
   document.getElementById('rp-accept').textContent = isDel ? 'أرسل عرضي 💬' : 'اقبل الطلب ✅';
 
   document.getElementById('route-preview').classList.add('show');
@@ -2168,43 +2171,67 @@ function openRoutePreview(r) {
     previewMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     previewMap.on('style.load', () => {
       mapForceArabic(previewMap); mapRecolor(previewMap);
-      previewMap.addSource('prev-route', { type: 'geojson', data: { type:'Feature', geometry:{ type:'LineString', coordinates: [] } } });
+      const empty = () => ({ type:'Feature', geometry:{ type:'LineString', coordinates: [] } });
+      // خط منك للزبون (مقطّع) وخط رحلة الزبون (كامل)
+      previewMap.addSource('prev-me', { type:'geojson', data: empty() });
+      previewMap.addLayer({ id:'prev-me', type:'line', source:'prev-me',
+        layout:{ 'line-join':'round', 'line-cap':'round' },
+        paint:{ 'line-color':'#2BA9E0', 'line-width':4, 'line-dasharray':[2, 1.6] } });
+      previewMap.addSource('prev-route', { type: 'geojson', data: empty() });
       previewMap.addLayer({ id:'prev-route', type:'line', source:'prev-route',
-        layout:{ 'line-join':'round', 'line-cap':'round' }, paint:{ 'line-color':'#2BA9E0', 'line-width':5 } });
+        layout:{ 'line-join':'round', 'line-cap':'round' }, paint:{ 'line-color':'#12A150', 'line-width':5 } });
       drawPreview(from, to);
     });
   } else {
     setTimeout(() => previewMap.resize(), 60);
     // لو النمط لسه ما خلص تحميل (شبكة بطيئة)، نرسم أول ما يجهز
-    if (previewMap.isStyleLoaded()) drawPreview(from, to);
+    if (previewMap.getSource('prev-route')) drawPreview(from, to);
     else previewMap.once('style.load', () => drawPreview(from, to));
   }
 }
 
+/* خطين: من السائق لنقطة الزبون (مقطّع)، ومن نقطة الزبون لوجهته (كامل).
+   هيچ يعرف كم يبعد عنه الزبون، ووين راح يوديه، قبل ما يقبل. */
 function drawPreview(from, to) {
-  if (!previewMap || !previewMap.isStyleLoaded()) return;
+  /* ما نفحص isStyleLoaded: ترجع false وهي تحمّل البلاطات حتى بعد ما يجهز النمط،
+     فكان الرسم ينلغي. وجود الطبقات هو الشرط الصحيح. */
+  if (!previewMap || !previewMap.getSource('prev-route')) return;
   previewMarkers.forEach(m => m.remove());
   previewMarkers = [];
-  const pin = (color, emoji) => {
+  const me = hasFix ? myPos : null;
+
+  const pin = (color, size) => {
     const el = document.createElement('div');
-    el.style.cssText = 'display:flex;flex-direction:column;align-items:center';
-    el.innerHTML = `<div style="background:${color};width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:11px">${emoji}</div>`;
+    el.innerHTML = `<div style="background:${color};width:${size}px;height:${size}px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)"></div>`;
     return el;
   };
-  if (from && from.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#12A150', '') }).setLngLat([from.lng, from.lat]).addTo(previewMap));
-  if (to && to.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#E5484D', '') }).setLngLat([to.lng, to.lat]).addTo(previewMap));
+  if (me) previewMarkers.push(new maplibregl.Marker({ element: pin('#2BA9E0', 16) }).setLngLat([me.lng, me.lat]).addTo(previewMap));
+  if (from && from.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#12A150', 20) }).setLngLat([from.lng, from.lat]).addTo(previewMap));
+  if (to && to.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#E5484D', 20) }).setLngLat([to.lng, to.lat]).addTo(previewMap));
 
-  if (from && to && to.lat) {
-    const b = new maplibregl.LngLatBounds([from.lng, from.lat], [from.lng, from.lat]).extend([to.lng, to.lat]);
+  // نوسّع الخريطة على كل النقاط اللي نعرفها
+  const pts = [me, from, to && to.lat ? to : null].filter(Boolean);
+  if (pts.length > 1) {
+    const b = new maplibregl.LngLatBounds([pts[0].lng, pts[0].lat], [pts[0].lng, pts[0].lat]);
+    pts.slice(1).forEach(x => b.extend([x.lng, x.lat]));
     previewMap.fitBounds(b, { padding: 70, maxZoom: 16, duration: 0 });
-    fetchRoute(from, to).then(route => {
-      const src = previewMap.getSource('prev-route');
-      if (!route || !src) return;
-      src.setData({ type:'Feature', geometry:{ type:'LineString', coordinates: route.coords.map(c => [c[1], c[0]]) } });
-    });
-  } else if (from && from.lat) {
-    previewMap.jumpTo({ center: [from.lng, from.lat], zoom: 16 });
+  } else if (pts.length === 1) {
+    previewMap.jumpTo({ center: [pts[0].lng, pts[0].lat], zoom: 16 });
   }
+
+  const line = (srcId, a, b2, dashed) => {
+    const src = previewMap.getSource(srcId);
+    if (!src || !a || !b2 || !b2.lat) return;
+    // خط مستقيم فوراً، والمسار الحقيقي يبدله أول ما يوصل
+    src.setData({ type:'Feature', geometry:{ type:'LineString', coordinates: [[a.lng, a.lat], [b2.lng, b2.lat]] } });
+    fetchRoute(a, b2).then(route => {
+      const s2 = previewMap.getSource(srcId);
+      if (!route || !s2) return;
+      s2.setData({ type:'Feature', geometry:{ type:'LineString', coordinates: route.coords.map(c => [c[1], c[0]]) } });
+    });
+  };
+  line('prev-me', me, from, true);
+  line('prev-route', from, to, false);
 }
 
 function closeRoutePreview() {
