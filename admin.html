@@ -262,6 +262,7 @@
       <div class="nav-item" data-tab="pending" onclick="switchTab('pending')"><span class="ni-ico">🆕</span><span>سواق جدد بانتظار الموافقة</span><span class="ni-badge" id="pending-approval-count">0</span></div>
       <div class="nav-item" data-tab="need" onclick="switchTab('need')"><span class="ni-ico">⚠️</span><span>محتاجين تفعيل</span><span class="ni-badge" id="need-count">0</span></div>
       <div class="nav-item" data-tab="rewards" onclick="switchTab('rewards')"><span class="ni-ico">🎁</span><span>المكافآت</span><span class="ni-badge" id="rewards-count">0</span></div>
+      <div class="nav-item" data-tab="statement" onclick="switchTab('statement')"><span class="ni-ico">🧾</span><span>كشف حساب السائق</span></div>
       <div class="nav-item" data-tab="subs" onclick="switchTab('subs')"><span class="ni-ico">🧾</span><span>آخر التفعيلات</span><span class="ni-badge" id="subs-count">0</span></div>
       <div class="nav-item" data-tab="complaints" onclick="switchTab('complaints')"><span class="ni-ico">😕</span><span>الملاحظات والشكاوى</span><span class="ni-badge" id="complaints-count">0</span></div>
       <div class="nav-divider"></div>
@@ -407,7 +408,11 @@
     </div>
     <div id="rewards-auto-list" style="margin-bottom:22px"></div>
 
-    <div class="section-title">💸 مستحقات السواق من المكافآت <span class="count" id="payouts-count">0</span></div>
+  </div>
+
+  <!-- ===== كشف حساب السائق ===== -->
+  <div class="view" id="view-statement">
+    <div class="section-title">🧾 كشف حساب السائق <span class="count" id="payouts-count">0</span></div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <div style="flex:1"><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:4px">من تاريخ</label>
         <input type="date" id="rs-from" style="width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;font-family:inherit;font-size:13px"></div>
@@ -715,6 +720,7 @@ function switchTab(name) {
   if (name === 'rides') loadRides();
   if (name === 'customers') loadCustomers();
   if (name === 'rewards') renderRewardsView();
+  if (name === 'statement') renderStatementView();
 }
 
 function openSidebar() {
@@ -1619,8 +1625,13 @@ document.addEventListener('click', function(e) {
   if (p && !p.contains(e.target)) document.getElementById('rs-driver-list').classList.remove('open');
 });
 
+// تبويب المكافآت: زبائن بس
 function renderRewardsView() {
   renderRewardsAutoList();
+}
+
+// تبويب كشف حساب السائق: تفعيلات، مدفوعات، ومستحقات المكافآت
+function renderStatementView() {
   if (!document.getElementById('rs-to').value) {
     const to = new Date(), from = new Date(to.getTime() - 30*86400000);
     document.getElementById('rs-to').value = to.toISOString().slice(0,10);
