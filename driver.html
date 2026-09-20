@@ -1983,7 +1983,12 @@ function startWatchingPosition() {
       } else if (prev && haversine(prev.lat, prev.lng, myPos.lat, myPos.lng) > 0.008) {
         setMyHeading(bearingBetween(prev, myPos), 'gps');
       }
-      if (map && !activeRide) mapJump(myPos.lat, myPos.lng, 17);
+      /* بلا رحلة: نتابع موقعه بعد — بس نحترم إنه لامس الخريطة، ونحافظ على
+         تكبيره. قبل كان يقفز لموقعه بزوم ١٧ مع كل قراءة GPS (كل ثانية تقريباً)،
+         فما يلحق يشوف ولا يقرّب. */
+      if (map && !activeRide && !followingPaused()) {
+        mapJump(myPos.lat, myPos.lng, firstFix ? 17 : map.getZoom());
+      }
       if (activeRide) drawRoute();
       if ((first || firstFix) && isOnline) goOnline();
     },
