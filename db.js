@@ -141,6 +141,7 @@ async function init() {
       );
     `);
     // ترقية الأعمدة الجديدة
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_loc_at TIMESTAMPTZ;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS store_name TEXT;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_price INTEGER;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_note TEXT;`);
@@ -335,10 +336,11 @@ async function getDriverByPhone(phone) {
 async function updateDriverLocation(id, lat, lng) {
   if (!HAS_DB) {
     const d = mem.drivers.get(id);
-    if (d) { d.last_lat = lat; d.last_lng = lng; }
+    if (d) { d.last_lat = lat; d.last_lng = lng; d.last_loc_at = new Date(); }
     return;
   }
-  await pool.query('UPDATE drivers SET last_lat=$2, last_lng=$3 WHERE id=$1', [id, lat, lng]);
+  // الوقت مهم: موقع من قبل ساعة ما ينفع نقوله للزبون إنه موقع السائق الحين
+  await pool.query('UPDATE drivers SET last_lat=$2, last_lng=$3, last_loc_at=NOW() WHERE id=$1', [id, lat, lng]);
 }
 
 // ============ إشعارات المتصفح (Web Push) — السواق ============

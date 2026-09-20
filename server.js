@@ -198,16 +198,18 @@ wss.on('connection', (ws) => {
           }
           ws._role = 'driver';
           ws._driverId = data.driverId;
+          const known = validLoc(data.lat, data.lng);
           onlineDrivers.set(data.driverId, {
-            socketId, lat: data.lat, lng: data.lng,
+            socketId, lat: known ? data.lat : null, lng: known ? data.lng : null,
             name: data.name, phone: data.phone, car: data.car,
           });
-          await db.updateDriverLocation(data.driverId, data.lat, data.lng);
+          if (known) await db.updateDriverLocation(data.driverId, data.lat, data.lng);
           ws.send(JSON.stringify({ type: 'driver:confirmed', data: { online: true, access } }));
           break;
         }
 
         case 'driver:location': {
+          if (!validLoc(data && data.lat, data && data.lng)) break;   // موقع مو حقيقي — نتجاهله
           const d = onlineDrivers.get(ws._driverId);
           if (d) { d.lat = data.lat; d.lng = data.lng; }
           for (const ride of activeRides.values()) {
@@ -300,6 +302,15 @@ async function sendOTP(phone, code) {
     console.error('خطأ بالاتصال مع OTPIQ:', e.message);
     return false;
   }
+}
+
+/* إحداثيات حقيقية؟ (مو null ولا نص فاضي ولا برّه المدى)
+   ملاحظة: Number(null) يطلع صفر، فلو ما فحصنا null بنفسه يصير موقع السائق
+   المجهول نقطة (0,0) بوسط المحيط — والوقت المتوقع يطلع بالآلاف. */
+function validLoc(lat, lng) {
+  if (lat == null || lng == null || lat === '' || lng === '') return false;
+  const a = Number(lat), b = Number(lng);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a) <= 90 && Math.abs(b) <= 180;
 }
 
 function normalizePhone(p) {
@@ -811,13 +822,14 @@ app.get('/api/reverse', async (req, res) => {
     const landmark = out.name || a.amenity || a.shop || a.building || a.tourism || a.leisure;
     const road = a.road || a.pedestrian || a.footway;
     const hood = a.neighbourhood || a.suburb || a.quarter;
-    let name = null;
+    const area = hood || a.city_district || a.village || a.town || a.city || a.county;
+    let name = null, approx = false;
     if (landmark && road) name = `${landmark}، ${road}`;
     else if (landmark) name = landmark;
     else if (road && hood) name = `${road}، ${hood}`;
     else if (road) name = road;
-    else if (hood) name = hood;
-    res.json({ name });
+    else if (area) { name = `قرب ${area}`; approx = true; }   // أحسن من "موقع محدد على الخريطة"
+    res.json({ name, approx });
   } catch (e) {
     res.json({ name: null });   // ما نكسر التحديد لو فشل العنوان
   }
@@ -853,7 +865,7 @@ app.get('/api/static-map', async (req, res) => {
   try {
     if (!LOCATIONIQ_API_KEY) return res.status(404).end();
     const from = (req.query.from || '').split(',').map(Number);
-    const to = (req.query.to || '').split(',').map(Number);
+    const to = req.query.to ? req.query.to.split(',').map(Number) : from;   // بلا وجهة: نقطة وحدة
     if (from.length !== 2 || to.length !== 2 || from.some(Number.isNaN) || to.some(Number.isNaN)) {
       return res.status(400).end();
     }
@@ -886,8 +898,7 @@ app.post('/api/book', requireCustomer, async (req, res) => {
 
     /* نتأكد إن الإحداثيات أرقام حقيقية بمدى معقول — قبل كان نص مثل "abc"
        يعبر الفحص ويوصل للقاعدة وينهار بـ٥٠٠ بدل رسالة واضحة. */
-    const validPoint = pt => pt && Number.isFinite(Number(pt.lat)) && Number.isFinite(Number(pt.lng))
-      && Math.abs(Number(pt.lat)) <= 90 && Math.abs(Number(pt.lng)) <= 180;
+    const validPoint = pt => !!pt && validLoc(pt.lat, pt.lng);
     if (!validPoint(pickup)) return res.status(400).json({ error: 'موقع الانطلاق غير صحيح' });
     if (destination && destination.lat != null && !validPoint(destination)) {
       return res.status(400).json({ error: 'موقع الوصول غير صحيح' });
@@ -1030,18 +1041,27 @@ app.post('/api/accept', requireDriver, async (req, res) => {
        أول ما يرجع الاتصال. */
     const dRec = await db.getDriver(driverId);
     if (!dRec) return res.status(404).json({ error: 'السائق غير معروف' });
+    /* الموقع: الحي أولاً. وإذا انقطع اتصاله ناخذ آخر موقع بالقاعدة بس إذا حديث —
+       موقع من قبل ساعة يطلع للزبون وكأنه مكان السائق الحين ويطلع "يبعد كذا" غلط. */
     const online = onlineDrivers.get(driverId);
-    const driver = online || {
+    const LOC_FRESH_MS = 10 * 60 * 1000;
+    const dbFresh = dRec.last_loc_at && (Date.now() - new Date(dRec.last_loc_at).getTime()) < LOC_FRESH_MS;
+    const driver = {
       name: dRec.name, phone: dRec.phone, car: dRec.car,
-      lat: dRec.last_lat, lng: dRec.last_lng,
+      lat: null, lng: null,
+      ...(online || {}),
     };
+    if (!validLoc(driver.lat, driver.lng) && dbFresh && validLoc(dRec.last_lat, dRec.last_lng)) {
+      driver.lat = dRec.last_lat; driver.lng = dRec.last_lng;
+    }
 
     ride.status = 'accepted';
     ride.driverId = driverId;
+    ride.acceptedAt = Date.now();
     await db.updateRideStatus(rideId, 'accepted', driverId);
 
     // ما نعرف موقعه؟ نرجّع صفر — الزبون يشوف الوقت أول ما يوصل موقع السائق
-    const hasPos = driver.lat != null && driver.lng != null;
+    const hasPos = validLoc(driver.lat, driver.lng);
     const etaMin = hasPos
       ? Math.max(1, Math.round((haversine(driver.lat, driver.lng, ride.pickup.lat, ride.pickup.lng) / 25) * 60))
       : 0;
@@ -1049,7 +1069,7 @@ app.post('/api/accept', requireDriver, async (req, res) => {
     sendTo(ride.customerSocketId, 'ride:accepted', {
       driver: {
         name: driver.name, phone: driver.phone, car: driver.car,
-        lat: driver.lat, lng: driver.lng,
+        lat: hasPos ? driver.lat : null, lng: hasPos ? driver.lng : null,
         photo: dRec ? dRec.photo_self : null,
         carPhoto: dRec ? dRec.photo_car : null,
       },
@@ -1137,6 +1157,7 @@ app.post('/api/offer/accept', async (req, res) => {
     if (ride.status !== 'offered') return res.status(409).json({ error: 'ماكو عرض معلّق' });
 
     ride.status = 'accepted';
+    ride.acceptedAt = Date.now();
     ride.estFare = ride.offerPrice;
     /* بدون هذا السطر يبقى customerPaid = ٠ من وقت الحجز (التوصيل ما إله سعر
        تلقائي)، فبنهاية الطلب ينقال للزبون إن المبلغ صفر ويطلعله "مجانية". */
@@ -1217,6 +1238,7 @@ app.post('/api/start-trip', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     if (!authDriver(req, res, ride.driverId)) return;
     ride.status = 'started';
+    ride.startedAt = Date.now();
     await db.updateRideStatus(ride.id, 'started');
     sendTo(ride.customerSocketId, 'ride:started', {});
     res.json({ ok: true });
@@ -1251,6 +1273,18 @@ app.post('/api/complete', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     // بس السائق المكلّف — وإلا الزبون يكدر ينهي الرحلة بنص الطريق ويدفع أقل
     if (!authDriver(req, res, ride.driverId)) return;
+    res.json({ ok: true, ...(await finishRide(ride)) });
+  } catch (e) {
+    console.error('خطأ بالإنهاء:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
+
+/* إنهاء الرحلة بمكان واحد — يستعمله السائق، والزبون لو السائق نساها مفتوحة،
+   والتنظيف التلقائي. keepFare: ما نعيد حساب الأجرة على المسافة (ما نزيد على
+   الزبون فلوس برحلة انتهت وهو ما يعرف شنو صار بيها). */
+async function finishRide(ride, { keepFare = false, doneBy = 'driver' } = {}) {
+  {
     ride.status = 'done';
 
     /* التسعير النهائي على الكيلومترات الفعلية:
@@ -1262,7 +1296,7 @@ app.post('/api/complete', async (req, res) => {
     let pricing = null;
     const drivenKm = Math.round((ride.trackedKm || 0) * 10) / 10;
 
-    if (!ride.offerPrice) {                   // طلبات التوصيل سعرها متفق عليه مسبقاً
+    if (!ride.offerPrice && !keepFare) {      // طلبات التوصيل سعرها متفق عليه مسبقاً
       const f = await db.getFareSettings();
       const perKm = f.per_km || 0;
 
@@ -1313,14 +1347,79 @@ app.post('/api/complete', async (req, res) => {
       url: '/index.html',
       rideId: ride.id,
     });
+    // السائق لازم يعرف إن الرحلة انسكرت من غيره، وإلا يبقى عنده طلب مفتوح ما ياخذ غيره
+    if (doneBy !== 'driver' && ride.driverId) {
+      const d = onlineDrivers.get(ride.driverId);
+      if (d) sendTo(d.socketId, 'ride:closed', { rideId: ride.id, by: doneBy });
+      pushToDriver(ride.driverId, { title: 'انسكرت الرحلة', body: 'الرحلة انتهت — تكدر تستلم طلب جديد', url: '/driver.html' });
+    }
     activeRides.delete(ride.id);
-    res.json({ ok: true, fare: paidByCustomer, estFare: ride.estFare,
-               km: ride.estKm, pricing, rewardPayout });
+    return { fare: paidByCustomer, estFare: ride.estFare, km: ride.estKm, pricing, rewardPayout };
+  }
+}
+
+/* ===== رحلة السائق نساها مفتوحة =====
+   صار فعلاً: السائق وصّل الزبون وما ضغط "إنهاء الرحلة"، فبقى حساب الزبون
+   معلّق ما يكدر ينهي ولا يطلب رحلة ثانية. هسه إله مخرج بعد ربع ساعة،
+   وبالسعر المتفق عليه — ما نزيد عليه شي. */
+const CUSTOMER_CLOSE_AFTER_MS = Number(process.env.CUSTOMER_CLOSE_MS) || 15 * 60 * 1000;
+
+app.post('/api/ride/:id/customer-close', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.params.id);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    if (!(await authCustomer(req, res, ride.customer?.phone))) return;
+    if (!['accepted', 'arrived', 'started'].includes(ride.status)) {
+      return res.status(409).json({ error: 'ما تكدر تنهي هذي الرحلة' });
+    }
+    const since = ride.startedAt || ride.acceptedAt || ride.createdAt || Date.now();
+    const waitedMin = Math.round((Date.now() - since) / 60000);
+    if (Date.now() - since < CUSTOMER_CLOSE_AFTER_MS) {
+      return res.status(409).json({ error: 'لسه بدري — إذا خلصت الرحلة خلي السائق ينهيها', waitedMin });
+    }
+    const out = await finishRide(ride, { keepFare: true, doneBy: 'customer' });
+    res.json({ ok: true, ...out });
   } catch (e) {
-    console.error('خطأ بالإنهاء:', e.message);
+    console.error('خطأ بإنهاء الزبون:', e.message);
     res.status(500).json({ error: 'خطأ' });
   }
 });
+
+/* تنظيف الرحلات اللي بقت مفتوحة بلا حركة — حتى لو الزبون والسائق نسوها.
+   بدونه تبقى بالقاعدة "بنص الطريق" للأبد، والزبون ما يكدر يطلب غيرها. */
+const STUCK_WAITING_MS = Number(process.env.STUCK_WAITING_MS) || 2 * 3600 * 1000;   // قبل الركوب: السائق قبل وما وصل
+const STUCK_RIDING_MS = Number(process.env.STUCK_RIDING_MS) || 4 * 3600 * 1000;    // بعد الركوب: أطول رحلة بالمسيب أقل بكثير
+
+setInterval(async () => {
+  const now = Date.now();
+  for (const ride of [...activeRides.values()]) {
+    const since = ride.startedAt || ride.acceptedAt || ride.createdAt || now;
+    const riding = ride.status === 'started';
+    if (!riding && !['accepted', 'arrived'].includes(ride.status)) continue;
+    if (now - since < (riding ? STUCK_RIDING_MS : STUCK_WAITING_MS)) continue;
+
+    try {
+      if (riding) {
+        // ركب فعلاً — ننهيها بالسعر المتفق عليه وتطلعله شاشة التقييم
+        await finishRide(ride, { keepFare: true, doneBy: 'system' });
+        console.log(`🧹 انتهت تلقائياً رحلة ${ride.id} — السائق ما أنهاها`);
+      } else {
+        // ما ركب — نلغيها ونرجّع مكافأته
+        ride.status = 'cancelled';
+        activeRides.delete(ride.id);
+        await db.cancelRideWithReason(ride.id, 'ما اكتملت', 'system');
+        if (ride.rewardId) await db.releaseRewardByRide(ride.id);
+        sendTo(ride.customerSocketId, 'ride:cancelled', { rideId: ride.id, by: 'system', reason: 'ما اكتملت الرحلة' });
+        if (ride.driverId) {
+          const d = onlineDrivers.get(ride.driverId);
+          if (d) sendTo(d.socketId, 'ride:closed', { rideId: ride.id, by: 'system' });
+        }
+        pushToCustomer(ride.customer?.phone, { title: 'انلغت الرحلة', body: 'ما اكتملت الرحلة — تكدر تطلب من جديد', url: '/index.html' });
+        console.log(`🧹 انلغت تلقائياً رحلة ${ride.id} — ما اكتملت`);
+      }
+    } catch (e) { console.error('خطأ بتنظيف رحلة معلّقة:', e.message); }
+  }
+}, Number(process.env.STUCK_SWEEP_MS) || 5 * 60 * 1000);
 
 app.post('/api/cancel', async (req, res) => {
   try {
@@ -1779,6 +1878,7 @@ app.get('/api/customer/:phone/active-ride', requireCustomer, async (req, res) =>
           pickup: ride.pickup, destination: ride.destination, store: ride.store,
           storeName: ride.storeName, itemDesc: ride.itemDesc,
           estFare: ride.estFare, offerPrice: ride.offerPrice, offerNote: ride.offerNote,
+          openMin: Math.round((Date.now() - (ride.startedAt || ride.acceptedAt || ride.createdAt || Date.now())) / 60000),
           driver,
         });
       }

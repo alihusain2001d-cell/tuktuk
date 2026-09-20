@@ -399,6 +399,7 @@
   .inc-leg .t { flex:1; min-width:0; }
   .inc-leg .t .lbl { font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:2px; }
   .inc-leg .t .val { font-size:16px; font-weight:700; line-height:1.35; }
+  .inc-map { width:100%; height:120px; object-fit:cover; border-radius:12px; margin:12px 0 6px; background:var(--paper); }
   .inc-dist { font-size:13px; color:var(--muted); text-align:center; margin-bottom:14px; }
   .inc-item { background:#FFF9E8; border-radius:12px; padding:11px 14px; font-size:14px; margin-bottom:12px; }
   .inc-offer label { font-size:12.5px; color:var(--muted); font-weight:600; display:block; margin-bottom:6px; }
@@ -615,6 +616,7 @@
     <button class="live-badge" id="live-badge" onclick="toggleWorking()"><span class="live-dot"></span> جاهز</button>
   </header>
 
+  <div class="off-banner hidden" id="gps-banner">📍 ما نعرف موقعك — شغّل الـGPS، وإلا الزبون ما يشوفك بالخريطة</div>
   <div class="off-banner hidden" id="off-banner">
     <span>☕ إنت باستراحة — ما توصلك طلبات</span>
     <button onclick="toggleWorking()">رجّعني جاهز</button>
@@ -730,6 +732,8 @@
       </div>
 
       <div class="inc-addr" id="inc-addr"></div>
+      <!-- صورة الطريق: أسماء الأماكن بالمسيب ناقصة، فالسائق يشوف الوين بعينه قبل ما يقبل -->
+      <img class="inc-map hidden" id="inc-map" alt="">
       <div class="inc-dist" id="inc-dist"></div>
       <div class="inc-item hidden" id="inc-item"></div>
 
@@ -992,6 +996,10 @@ function forceRelogin() {
 let phoneToken = null;   // إثبات إن الرقم تأكد بالكود — التسجيل يحتاجه
 let myPos = { lat: MUSAYYIB[0], lng: MUSAYYIB[1] };
 let isOnline = false, activeRide = null, customerPhone = '', locTimer = null;
+/* myPos يبدي على وسط المسيب حتى تنفتح الخريطة بمكان معقول.
+   بس هذا مو موقع السائق الحقيقي — لو أرسلناه، الزبون يشوف السائق بوسط
+   البلدة وهو واقف يمه، وحساب "يبعد عنك" يطلع غلط. فما نرسل شي قبل أول قراءة GPS. */
+let hasFix = false;
 let photos = { self:null, car:null, idf:null, idb:null };
 let offeredRide = null; // العرض المعلّق اللي ننتظر رد الزبون عليه
 let pendingPhone = '', resendTimer = null;
@@ -1746,6 +1754,7 @@ function initMap() {
 
   meMarker = new maplibregl.Marker({ element: meEl(), rotationAlignment: 'map' })
     .setLngLat([myPos.lng, myPos.lat]).addTo(map);
+  if (!hasFix) meMarker.getElement().style.display = 'none';   // ما نبين سهم على مكان ما نعرفه
 
   map.on('click', () => { if (!mapFull) toggleMapFull(true); });
 
@@ -1852,6 +1861,14 @@ function handleWS(type, data) {
     case 'offer:accepted': onOfferAccepted(data); break;
     case 'offer:rejected': onOfferRejected(data); break;
     case 'auth:required': forceRelogin(); break;
+    // الرحلة انسكرت من الزبون أو تلقائياً — ما نخلي السائق عالق بطلب مسكّر
+    case 'ride:closed': {
+      if (activeRide && activeRide.rideId === data.rideId) {
+        toast(data.by === 'customer' ? 'الزبون أنهى الرحلة' : 'انسكرت الرحلة تلقائياً', 5000);
+        endActive();
+      }
+      break;
+    }
     case 'driver:blocked': {
       stopWorking();
       showExpired(data);
@@ -1901,8 +1918,12 @@ function startWatchingPosition() {
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
       const first = !watchId || (myPos.lat === MUSAYYIB[0] && myPos.lng === MUSAYYIB[1]);
-      const prev = myPos;
+      const prev = hasFix ? myPos : null;
       myPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const firstFix = !hasFix;
+      hasFix = true;
+      updateGpsBanner();
+      if (firstFix && meMarker) meMarker.getElement().style.display = '';
       if (meMarker) meMarker.setLngLat([myPos.lng, myPos.lat]);
       // اتجاه السياقة: من الـGPS إذا متوفر، وإلا نحسبه من حركته بين نقطتين.
       // نتجاهل الحركة الزغيرة جداً — تشويش الـGPS يخلي السهم يرجف وهو واقف.
@@ -1913,11 +1934,12 @@ function startWatchingPosition() {
       }
       if (map && !activeRide) mapJump(myPos.lat, myPos.lng, 17);
       if (activeRide) drawRoute();
-      if (first && isOnline) goOnline();
+      if ((first || firstFix) && isOnline) goOnline();
     },
     (err) => {
       /* قبل كنا نسكت عن خطأ الموقع، فالسائق يشوف الخريطة معلقة على المسيب
          وما يعرف ليش. هسه نقوله مرة وحدة شنو المشكلة. */
+      updateGpsBanner();
       if (!geoWarned) {
         geoWarned = true;
         toast(err && err.code === 1
@@ -2031,6 +2053,7 @@ function setLive(on, text) {
   badge.innerHTML = `<span class="live-dot"></span> ${on ? 'جاهز' : 'استراحة'}`;
   document.getElementById('status-text').textContent = text;
   document.getElementById('off-banner').classList.toggle('hidden', on);
+  updateGpsBanner();
   // لما يطفّي، ننضّف الطلبات المعروضة — ما نخليه يقبل طلب وهو مطفي
   if (!on) { pendingRides.clear(); hideIncoming(); renderRequests(); }
 }
@@ -2040,13 +2063,23 @@ function wsSend(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-function goOnline(){ wsSend({ type:'driver:online', data:{ driverId, token:driver.token, name:driver.name, phone:driver.phone, car:driver.car, lat:myPos.lat, lng:myPos.lng } }); }
+function goOnline(){
+  wsSend({ type:'driver:online', data:{ driverId, token:driver.token, name:driver.name, phone:driver.phone, car:driver.car,
+    lat: hasFix ? myPos.lat : null, lng: hasFix ? myPos.lng : null } });
+  updateGpsBanner();
+}
+
+// السائق لازم يعرف إنه ما يبيّن للزبائن — وإلا يظل ينتظر طلبات ما راح توصله
+function updateGpsBanner() {
+  const b = document.getElementById('gps-banner');
+  if (b) b.classList.toggle('hidden', hasFix || !isOnline);
+}
 function goOffline(){ wsSend({ type:'driver:offline', data:{ driverId } }); }
 
 function startLocationUpdates() {
   stopLocationUpdates();
   locTimer = setInterval(() => {
-    if (!isOnline) return;
+    if (!isOnline || !hasFix) return;   // ما نرسل موقع ما قسناه
     wsSend({ type:'driver:location', data:{ lat:myPos.lat, lng:myPos.lng } });
   }, 2000);
 }
@@ -2082,7 +2115,19 @@ function showIncoming(rideId) {
   document.getElementById('inc-icon').textContent = isDel ? '🛒' : '🚗';
   document.getElementById('inc-type').textContent = isDel ? 'طلب توصيل بضاعة' : 'طلب رحلة';
   document.getElementById('inc-customer').textContent = r.customer?.name || 'زبون';
-  document.getElementById('inc-dist').textContent = `📍 يبعد عنك ${dist.toFixed(1)} كم`;
+  document.getElementById('inc-dist').textContent = hasFix
+    ? `📍 يبعد عنك ${dist.toFixed(1)} كم` + (r.estKm ? ` • طول الرحلة ${r.estKm} كم` : '')
+    : (r.estKm ? `📍 طول الرحلة ${r.estKm} كم` : '');
+
+  // صورة الطريق: من وين لوين
+  const mapEl = document.getElementById('inc-map');
+  const a = isDel ? (r.store || r.pickup) : r.pickup;
+  const b = isDel ? r.pickup : r.destination;
+  if (a && a.lat) {
+    mapEl.src = `/api/static-map?from=${a.lat},${a.lng}` + (b && b.lat ? `&to=${b.lat},${b.lng}` : '');
+    mapEl.classList.remove('hidden');
+    mapEl.onerror = () => mapEl.classList.add('hidden');
+  } else mapEl.classList.add('hidden');
 
   // العنوان — أهم شي بالشاشة، بخط كبير
   document.getElementById('inc-addr').innerHTML = isDel

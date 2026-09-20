@@ -754,6 +754,8 @@
         <button class="btn go" onclick="callDriver()">📞 اتصل</button>
         <button class="btn ghost" id="cancel-ride-btn" onclick="cancelRide()">إلغاء</button>
       </div>
+      <!-- مخرج لو السائق وصّلك وما ضغط "إنهاء" — بدونه يبقى حسابك معلّق -->
+      <button class="link-btn hidden" id="close-ride-btn" onclick="closeStuckRide()">الرحلة خلصت والسائق ما أنهاها؟ أنهِها إنت</button>
     </div>
   </div>
 
@@ -2337,7 +2339,7 @@ async function resumeActiveRide() {
       if (ride.driver) onOfferReceived({ rideId: ride.rideId, price: ride.offerPrice, note: ride.offerNote, etaMin: 0, driver: ride.driver });
       else goSearching(ride.type, 0);
     } else if (['accepted', 'arrived', 'started'].includes(ride.status)) {
-      onDriverAccepted({ driver: ride.driver || {}, etaMin: 0 });
+      onDriverAccepted({ driver: ride.driver || {}, etaMin: 0, openMin: ride.openMin || 0 });
       if (ride.status === 'arrived') onArrived();
       else if (ride.status === 'started') onTripStarted();
     }
@@ -2376,8 +2378,41 @@ function viewDriverPhoto(which) {
 }
 function closePhotoViewer() { document.getElementById('photo-viewer').classList.remove('show'); }
 
+/* ===== رحلة بقت مفتوحة =====
+   صار إن السائق وصّل وما ضغط "إنهاء الرحلة"، فالزبون ما يكدر ينهي ولا يطلب غيرها.
+   بعد ربع ساعة نطلعله زر ينهيها بنفسه — بالسعر المتفق عليه. */
+const CLOSE_BTN_AFTER_MS = 15 * 60 * 1000;
+let rideOpenSince = 0, closeBtnTimer = null;
+
+function watchStuckRide(openMin) {
+  rideOpenSince = Date.now() - (openMin || 0) * 60000;
+  clearInterval(closeBtnTimer);
+  const check = () => {
+    const btn = document.getElementById('close-ride-btn');
+    if (!currentRide) { btn.classList.add('hidden'); clearInterval(closeBtnTimer); return; }
+    btn.classList.toggle('hidden', Date.now() - rideOpenSince < CLOSE_BTN_AFTER_MS);
+  };
+  check();
+  closeBtnTimer = setInterval(check, 30000);
+}
+
+async function closeStuckRide() {
+  if (!currentRide) return;
+  if (!confirm('تنهي الرحلة بالسعر المتفق عليه؟')) return;
+  const btn = document.getElementById('close-ride-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/ride/${currentRide}/customer-close`, { method: 'POST' });
+    const out = await res.json();
+    if (!res.ok) { toast(out.error || 'صار خطأ'); return; }
+    onDone({ ...out, rideId: currentRide });
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
+  finally { btn.disabled = false; }
+}
+
 function onDriverAccepted(data) {
   clearTimeout(searchHintTimer);
+  watchStuckRide(data.openMin || 0);
   driverHeadingToDestination = false; // رحلة جديدة (أو استرجاع رحلة) — نبدأ من مرحلة التوجه لنقطة الالتقاء
   document.getElementById('flow-searching').classList.remove('active');
   document.getElementById('flow-offer').classList.remove('active');
@@ -2389,7 +2424,7 @@ function onDriverAccepted(data) {
   document.getElementById('dv-car').textContent = d.car || 'مركبة';
   currentDriverPhotos = { self: d.photo || null, car: d.carPhoto || null, name: d.name || '' };
   renderDriverPhotos();
-  document.getElementById('dv-eta').textContent = data.etaMin;
+  document.getElementById('dv-eta').textContent = data.etaMin || '—';
   document.getElementById('driver-status').textContent = currentType === 'delivery' ? 'السائق رايح يجيب طلبك' : 'السائق بالطريق إلك';
   document.getElementById('cancel-ride-btn').classList.remove('hidden');
   setTimeout(() => {
@@ -2501,6 +2536,8 @@ function markRateShown(rideId) {
 }
 
 function onDone(data, quiet) {
+  clearInterval(closeBtnTimer);
+  document.getElementById('close-ride-btn').classList.add('hidden');
   if (data && data.rideId && currentRide && data.rideId !== currentRide) return;
   // نفس الرحلة وصلت مرتين (الاتصال رجع + فحص الحالة) — شاشة التقييم مفتوحة أصلاً
   if (document.getElementById('flow-rate').classList.contains('active') && lastRideId === currentRide) return;
