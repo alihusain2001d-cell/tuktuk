@@ -344,6 +344,17 @@ async function authCustomer(req, res, phone) {
   if (!c) res.status(401).json({ error: 'سجّل دخولك مرة ثانية', authRequired: true });
   return c;
 }
+// أي زبون مسجّل دخول — للمسارات اللي ما تخص حساب معيّن
+function requireAnyCustomer(req, res, next) {
+  const t = String(req.headers['x-customer-token'] || '');
+  const dot = t.lastIndexOf('.');
+  if (dot > 0) {
+    const sig = Buffer.from(t.slice(dot + 1)), expected = Buffer.from(signCustomer(t.slice(0, dot)));
+    if (sig.length === expected.length && crypto.timingSafeEqual(sig, expected)) return next();
+  }
+  res.status(401).json({ error: 'سجّل دخولك مرة ثانية', authRequired: true });
+}
+
 async function requireCustomer(req, res, next) {
   try {
     if (await authCustomer(req, res, req.params.phone || req.body.phone)) next();
@@ -987,6 +998,27 @@ app.post('/api/book', requireCustomer, async (req, res) => {
 });
 
 // شبكة أمان: يرجع كل الطلبات المعروضة حالياً على السواق (لو فاتت رسالة WebSocket بسبب انقطاع صامت بشبكة الموبايل)
+/* السواق الشغالين القريبين — للزبون حتى يشوف إذا أكو أحد بمنطقته قبل ما يطلب.
+   بلا أسماء ولا أرقام: الزبون يحتاج يعرف "أكو سواق" مو منو هم. */
+app.get('/api/drivers/nearby', requireAnyCustomer, async (req, res) => {
+  try {
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    const around = validLoc(lat, lng);
+    const busyIds = new Set();
+    for (const ride of activeRides.values()) {
+      if (ride.driverId && ['accepted', 'arrived', 'started', 'offered'].includes(ride.status)) busyIds.add(ride.driverId);
+    }
+    const out = [];
+    for (const [id, d] of onlineDrivers) {
+      if (!validLoc(d.lat, d.lng)) continue;                  // ما نعرف موقعه — ما نخترع له مكان
+      if (busyIds.has(id)) continue;                          // عنده طلب — مو متاح
+      if (around && haversine(lat, lng, d.lat, d.lng) > 6) continue;
+      out.push({ lat: d.lat, lng: d.lng });
+    }
+    res.json({ drivers: out });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
 app.get('/api/driver/pending-rides', requireAnyDriver, async (req, res) => {
   try {
     const list = [];
@@ -1649,7 +1681,7 @@ app.get('/api/admin/live', checkAdmin, async (req, res) => {
       // هل عنده رحلة نشطة؟
       let busy = null;
       for (const ride of activeRides.values()) {
-        if (ride.driverId === id && ['accepted','arriving','arrived','offered'].includes(ride.status)) {
+        if (ride.driverId === id && ['accepted','arriving','arrived','started','offered'].includes(ride.status)) {
           busy = { rideId: ride.id, type: ride.type, status: ride.status, customer: ride.customer.name };
           break;
         }
@@ -1658,7 +1690,26 @@ app.get('/api/admin/live', checkAdmin, async (req, res) => {
         id, name: d.name, phone: d.phone, car: d.car,
         lat: d.lat, lng: d.lng,
         photo: rec ? rec.photo_self : null,
-        access, busy,
+        access, busy, connected: true,
+        resting: rec ? rec.available === false : false,
+      });
+    }
+
+    /* سائق سكّر التطبيق أو انقطعت شبكته توّه ما يطلع بالقائمة أعلاه،
+       والإدارة تحتاج تعرف وين كان — فنبينه بلون باهت إذا موقعه من آخر ربع ساعة. */
+    const SEEN_MS = 15 * 60 * 1000;
+    for (const rec of allDriverRows) {
+      if (onlineDrivers.has(rec.id)) continue;
+      const seen = rec.last_loc_at ? new Date(rec.last_loc_at).getTime() : 0;
+      if (!seen || Date.now() - seen > SEEN_MS) continue;
+      if (!validLoc(rec.last_lat, rec.last_lng)) continue;
+      list.push({
+        id: rec.id, name: rec.name, phone: rec.phone, car: rec.car,
+        lat: rec.last_lat, lng: rec.last_lng,
+        photo: rec.photo_self || null,
+        access: db.computeAccess(rec), busy: null, connected: false,
+        resting: rec.available === false,
+        lastSeenMin: Math.round((Date.now() - seen) / 60000),
       });
     }
     res.json({ drivers: list, activeRides: activeRides.size });

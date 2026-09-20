@@ -138,6 +138,7 @@
   /* لون الدبوس يطابق النقطة اللي ديحددها: أخضر انطلاق، أحمر وصول */
   .center-pin.from .cp-head { background:var(--go); }
   .center-pin.to .cp-head { background:var(--stop); border-radius:8px; }
+  .center-pin.store .cp-head { background:var(--brand); }
 
   /* حقل العنوان بخطوات الرحلة */
   .step-field { display:flex; align-items:center; gap:12px; background:var(--paper); border:1.5px solid var(--line);
@@ -145,6 +146,7 @@
   .step-field .sf-text { flex:1; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .step-field .sf-text.empty { color:var(--muted); font-weight:500; }
   .step-field .sf-ico { font-size:16px; opacity:.6; }
+  .nearby-hint { font-size:12.5px; color:var(--muted); text-align:center; margin:-6px 0 12px; }
   .link-btn { display:block; width:100%; background:none; border:none; color:var(--muted); font-family:inherit;
     font-size:13px; padding:12px 0 0; cursor:pointer; text-decoration:underline; }
 
@@ -602,6 +604,7 @@
           <div class="sf-text empty" id="r-step-text">نحدد موقعك...</div>
           <div class="sf-ico">🔍</div>
         </div>
+        <div class="nearby-hint hidden" id="nearby-hint"></div>
         <button class="btn" id="r-step-btn" onclick="confirmRideStep()">تأكيد نقطة الانطلاق</button>
         <button class="link-btn hidden" id="r-skip-dest" onclick="skipDestination()">ما أعرف الوجهة بالضبط — تنحسب على المسافة</button>
       </div>
@@ -634,42 +637,56 @@
   <!-- ============ شاشة توصيل بضاعة ============ -->
   <div class="flow-screen" id="flow-delivery">
     <div class="flow-head">
-      <div class="back" onclick="exitFlow()">→</div>
-      <h2>توصيل بضاعة 🛒</h2>
+      <div class="back" onclick="flowBack()">→</div>
+      <h2 id="d-head-title">وين المحل؟</h2>
     </div>
     <div class="map-wrap">
       <div id="map-d"></div>
-      <div class="pin-dot"></div>
-      <div class="center-pin" id="pin-d"><div class="cp-head"></div><div class="cp-stick"></div></div>
+      <div class="pin-dot" id="pin-dot-d"></div>
+      <div class="center-pin store" id="pin-d"><div class="cp-head"></div><div class="cp-stick"></div></div>
       <button class="locate-btn" onclick="locateMe('d')">◎</button>
-      <button class="pin-confirm" id="confirm-d" onclick="confirmPin('d')">✓ ثبّت مكان التوصيل هنا</button>
     </div>
 
     <div class="sheet" id="delivery-sheet">
       <div class="grip"></div>
-      <div class="item-field">
-        <label>من أي محل؟</label>
-        <input type="text" id="d-store-name" placeholder="مثال: مطعم الشام، صيدلية النور، سوبرماركت الرافدين">
-      </div>
-      <div class="item-field">
-        <label>شنو الطلب؟ (وصف البضاعة)</label>
-        <textarea id="d-item" placeholder="مثال: ٢ سندويش شاورما دجاج + بيبسي كبير"></textarea>
-      </div>
-      <div class="trip-points">
-        <!-- موقع المحل: بدونه السائق ما يطلعله خط سير للمحل ولا يشتغل ويز -->
-        <div class="tp-row" onclick="openSearch('store','d')">
-          <div class="tp-dot store"></div>
-          <div class="tp-text"><b>موقع المحل <span style="font-weight:400;color:var(--muted);font-size:11px">(يساعد السائق)</span></b><div class="val empty" id="d-store">حرّك الخريطة وثبّت، أو ابحث</div></div>
-          <div class="tp-edit">✎</div>
+
+      <!-- الخطوة ١ و٢: يحرك الخريطة تحت الدبوس -->
+      <div id="d-choose">
+        <div class="step-field" onclick="openSearch(curStep(),'d')">
+          <div class="tp-dot store" id="d-step-dot"></div>
+          <div class="sf-text empty" id="d-step-text">حرّك الخريطة لموقع المحل</div>
+          <div class="sf-ico">🔍</div>
         </div>
-        <div class="tp-row" onclick="openSearch('destination','d')">
-          <div class="tp-dot to"></div>
-          <div class="tp-text"><b>وين نوصّل الطلب؟</b><div class="val empty" id="d-dest">نحدد موقعك تلقائياً...</div></div>
-          <div class="tp-edit">✎</div>
-        </div>
+        <div class="nearby-hint hidden"></div>
+        <button class="btn" id="d-step-btn" onclick="confirmStep()">تأكيد موقع المحل</button>
+        <button class="link-btn hidden" id="d-skip" onclick="skipStep()">ما أعرف موقع المحل — بس أكتبلك اسمه</button>
       </div>
-      <div class="note-info">💡 السائق راح يشوف طلبك ويرسلك سعره، وإنت توافق أو ترفض</div>
-      <button class="btn accent" id="d-book-btn" onclick="bookDelivery()">أرسل الطلب للسواق 🛒</button>
+
+      <!-- الخطوة ٣: تفاصيل الطلب -->
+      <div id="d-review" class="hidden">
+        <div class="trip-points">
+          <div class="tp-row" onclick="setStep('store')">
+            <div class="tp-dot store"></div>
+            <div class="tp-text"><b>المحل</b><div class="val empty" id="d-store">ما تحدد موقعه</div></div>
+            <div class="tp-edit">✎</div>
+          </div>
+          <div class="tp-row" onclick="setStep('destination')">
+            <div class="tp-dot to"></div>
+            <div class="tp-text"><b>نوصّله لـ</b><div class="val" id="d-dest">—</div></div>
+            <div class="tp-edit">✎</div>
+          </div>
+        </div>
+        <div class="item-field">
+          <label>اسم المحل</label>
+          <input type="text" id="d-store-name" placeholder="مثال: مطعم الشام، صيدلية النور">
+        </div>
+        <div class="item-field">
+          <label>شنو الطلب؟ (وصف البضاعة)</label>
+          <textarea id="d-item" placeholder="مثال: ٢ سندويش شاورما دجاج + بيبسي كبير"></textarea>
+        </div>
+        <div class="note-info">💡 السائق راح يشوف طلبك ويرسلك سعره، وإنت توافق أو ترفض</div>
+        <button class="btn accent" id="d-book-btn" onclick="bookDelivery()">أرسل الطلب للسواق 🛒</button>
+      </div>
     </div>
   </div>
 
@@ -885,7 +902,6 @@ let driverMarker, routeLine, pkMarker, dsMarker, stMarker, shopMarker; // shopMa
 // نقاط
 let pickup = null, destination = null, store = null;
 let searchMode = null, searchFlow = null;
-let tapTarget = 'destination'; // أي نقطة يحددها الضغط على الخريطة
 let deliveryInfo = { storeName:'', itemDesc:'' }; // تفاصيل طلب التوصيل الحالي
 
 // ============ تسجيل الدخول ============
@@ -1519,14 +1535,16 @@ function startFlow(type) {
       if (!mapR) mapR = makeMap('map','r'); else mapR.invalidateSize();
       setRideStep('pickup');
       autoLocatePickup('r');
+      startNearbyDrivers();
     }, 60);
   } else {
     document.getElementById('flow-delivery').classList.add('active');
     resetDeliveryUI();
-    tapTarget = 'destination'; // بالتوصيل: الضغط يحدد مكان التوصيل
     setTimeout(() => {
       if (!mapD) mapD = makeMap('map-d','d'); else mapD.invalidateSize();
+      setStep('store', 'delivery');
       autoLocateDest('d');
+      startNearbyDrivers();
     }, 60);
   }
 }
@@ -1538,10 +1556,10 @@ function autoLocateDest(flow) {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       const lat = pos.coords.latitude, lng = pos.coords.longitude;
-      destination = { lat, lng, label: 'موقعي الحالي' };
-      m.setView([lat, lng], 17);
+      // موقعه = مكان التوصيل غالباً، بس ما نثبته — الخريطة بس تبدي عنده
+      if (!destination) destination = { lat, lng, label: 'موقعي الحالي' };
+      if (curStep() === 'store' && !store) m.setView([lat, lng], 17);
       updatePlanUI();
-      drawPlanMarkers();
     },
     () => {},
     { enableHighAccuracy:true, timeout:8000 }
@@ -1563,90 +1581,128 @@ function autoLocatePickup(flow) {
   );
 }
 
-/* ===== طلب الرحلة خطوة بخطوة =====
-   ١ وين أنت (انطلاق) ← ٢ وين رايح (وصول) ← ٣ تأكيد وسعر.
+/* ===== الطلب خطوة بخطوة =====
+   الرحلة:  وين أنت ← وين رايح ← تأكيد وسعر
+   التوصيل: وين المحل ← وين نوصّله ← تفاصيل الطلب
    بكل خطوة شي واحد يسويه الزبون — أبسط من شاشة وحدة بيها كلشي. */
-let rideStep = 'pickup';
+let rideStep = 'pickup', delStep = 'store';
 let pinPreview = null;               // { lat, lng, label } — المكان تحت الدبوس هسه
 let previewTimer = null, previewReq = 0;
 
-const STEP_TITLES = { pickup: 'وين أنت؟', destination: 'وين رايح؟', review: 'تأكيد الرحلة' };
+const STEP_TITLES = {
+  ride: { pickup: 'وين أنت؟', destination: 'وين رايح؟', review: 'تأكيد الرحلة' },
+  delivery: { store: 'وين المحل؟', destination: 'وين نوصّل الطلب؟', review: 'تفاصيل الطلب' },
+};
+const STEP_BTN = {
+  pickup: 'تأكيد نقطة الانطلاق',
+  store: 'تأكيد موقع المحل',
+  destination: { ride: 'تأكيد نقطة الوصول', delivery: 'تأكيد مكان التوصيل' },
+};
+const STEP_HINT = {
+  pickup: 'حرّك الخريطة لمكانك',
+  store: 'حرّك الخريطة لموقع المحل',
+  destination: { ride: 'حرّك الخريطة لمكان وصولك', delivery: 'حرّك الخريطة لمكان التوصيل' },
+};
 
-function setRideStep(step) {
-  rideStep = step;
-  const choosing = step !== 'review';
-  document.getElementById('r-head-title').textContent = STEP_TITLES[step];
-  document.getElementById('r-choose').classList.toggle('hidden', !choosing);
-  document.getElementById('r-review').classList.toggle('hidden', choosing);
-  const pin = document.getElementById('pin-r');
+function curStep() { return currentType === 'ride' ? rideStep : delStep; }
+function curPre(flow) { return (flow || currentType) === 'ride' ? 'r' : 'd'; }
+function curMap(flow) { return (flow || currentType) === 'ride' ? mapR : mapD; }
+function stepPoint(step) { return step === 'pickup' ? pickup : step === 'store' ? store : destination; }
+function stepText(t, step, flow) { const v = t[step]; return typeof v === 'string' ? v : v[flow]; }
+
+function setStep(step, flow) {
+  flow = flow || currentType;
+  if (flow === 'ride') rideStep = step; else delStep = step;
+  const pre = curPre(flow), m = curMap(flow), choosing = step !== 'review';
+
+  document.getElementById(pre + '-head-title').textContent = STEP_TITLES[flow][step];
+  document.getElementById(pre + '-choose').classList.toggle('hidden', !choosing);
+  document.getElementById(pre + '-review').classList.toggle('hidden', choosing);
+  const dotClass = step === 'pickup' ? 'from' : step === 'store' ? 'store' : 'to';
+  const pin = document.getElementById('pin-' + pre);
   pin.classList.toggle('hidden', !choosing);
-  pin.classList.toggle('from', step === 'pickup');
-  pin.classList.toggle('to', step === 'destination');
-  document.getElementById('pin-dot-r').classList.toggle('hidden', !choosing);
+  pin.classList.remove('from', 'to', 'store');
+  pin.classList.add(dotClass);
+  document.getElementById('pin-dot-' + pre).classList.toggle('hidden', !choosing);
 
   if (choosing) {
-    document.getElementById('r-step-dot').className = 'tp-dot ' + (step === 'pickup' ? 'from' : 'to');
-    document.getElementById('r-step-btn').textContent = step === 'pickup' ? 'تأكيد نقطة الانطلاق' : 'تأكيد نقطة الوصول';
-    document.getElementById('r-skip-dest').classList.toggle('hidden', step !== 'destination');
-    // رجع يعدّل نقطة محددة؟ نوديه عليها. وإلا الوصول يبدي من مكان الانطلاق
-    const existing = step === 'pickup' ? pickup : destination;
-    pinPreview = existing ? { ...existing } : null;
-    showPinLabel(existing ? existing.label : null);
-    if (mapR) {
-      if (existing) mapR.setView([existing.lat, existing.lng], 17);
-      else if (step === 'destination' && pickup) mapR.setView([pickup.lat, pickup.lng], 16);
-      else refreshPinPreview();
+    document.getElementById(pre + '-step-dot').className = 'tp-dot ' + dotClass;
+    document.getElementById(pre + '-step-btn').textContent = stepText(STEP_BTN, step, flow);
+    // "ما أعرف" — الرحلة بلا وجهة، والتوصيل بلا موقع محل
+    const skip = document.getElementById(pre + '-skip');
+    if (skip) skip.classList.toggle('hidden', !(flow === 'ride' ? step === 'destination' : step === 'store'));
+
+    if (flow === currentType) {
+      // رجع يعدّل نقطة محددة؟ نوديه عليها. وإلا نبدي من النقطة اللي قبلها
+      const existing = stepPoint(step);
+      const prev = flow === 'ride' ? pickup : store;
+      pinPreview = existing ? { ...existing } : null;
+      showPinLabel(existing ? existing.label : null);
+      if (m) {
+        if (existing) m.setView([existing.lat, existing.lng], 17);
+        else if (step === 'destination' && prev) m.setView([prev.lat, prev.lng], 16);
+        else refreshPinPreview();
+      }
     }
-  } else {
+  } else if (flow === currentType) {
     updatePlanUI();
   }
-  // اللوحة تحت تغيّر طولها بين الخطوات — نحدّث حجم الخريطة قبل ما نوسّطها على الرحلة
-  if (mapR) mapR.invalidateSize();
-  if (currentType === 'ride') drawPlanMarkers();
+  // اللوحة تحت تغيّر طولها بين الخطوات — نحدّث حجم الخريطة قبل ما نوسّطها
+  if (m) m.invalidateSize();
+  if (flow === currentType) drawPlanMarkers();
 }
 
 function showPinLabel(label) {
-  const el = document.getElementById('r-step-text');
+  const el = document.getElementById(curPre() + '-step-text');
+  if (!el) return;
   if (label) { el.textContent = label; el.classList.remove('empty'); return; }
-  el.textContent = rideStep === 'pickup' ? 'حرّك الخريطة لمكانك' : 'حرّك الخريطة لمكان وصولك';
+  el.textContent = stepText(STEP_HINT, curStep(), currentType);
   el.classList.add('empty');
 }
 
 // اسم المكان تحت الدبوس — ننتظر شوية بعد ما يوقف تحريك حتى ما نستهلك طلبات على الفاضي
 function refreshPinPreview() {
-  if (!mapR || currentType !== 'ride' || rideStep === 'review') return;
+  const m = curMap();
+  if (!m || curStep() === 'review') return;
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
-    const c = mapR.getCenter();
+    const c = m.getCenter();
     // نفس المكان المحدد (مثلاً من البحث: "البيت")؟ نخلي اسمه
     if (pinPreview && haversine(pinPreview.lat, pinPreview.lng, c.lat, c.lng) < 0.02) { showPinLabel(pinPreview.label); return; }
-    const myReq = ++previewReq, step = rideStep;
+    const myReq = ++previewReq, step = curStep();
     pinPreview = { lat: c.lat, lng: c.lng, label: 'موقع محدد على الخريطة' };
     showPinLabel('نجيب اسم المكان...');
     try {
       const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
-      if (myReq !== previewReq || step !== rideStep) return;
+      if (myReq !== previewReq || step !== curStep()) return;
       if (r && r.name) pinPreview.label = r.name;
     } catch (e) {}
-    if (myReq === previewReq && step === rideStep) showPinLabel(pinPreview.label);
+    if (myReq === previewReq && step === curStep()) showPinLabel(pinPreview.label);
   }, 600);
 }
 
-function confirmRideStep() {
-  if (!mapR) return;
-  const c = mapR.getCenter();
+function confirmStep() {
+  const m = curMap();
+  if (!m) return;
+  const c = m.getCenter();
   const known = pinPreview && haversine(pinPreview.lat, pinPreview.lng, c.lat, c.lng) < 0.02;
   const place = { lat: c.lat, lng: c.lng, label: known ? pinPreview.label : 'موقع محدد على الخريطة' };
-  if (rideStep === 'pickup') {
-    pickup = place;
-    setRideStep(destination ? 'review' : 'destination');
+  const step = curStep();
+
+  if (step === 'pickup' || step === 'store') {
+    if (step === 'pickup') pickup = place; else store = place;
+    setStep(destination ? 'review' : 'destination');
   } else {
-    // الخريطة تبدي من مكان الانطلاق — لو ضغط تأكيد بدون ما يحركها، الوصول يصير نفس الانطلاق
-    if (pickup && haversine(pickup.lat, pickup.lng, c.lat, c.lng) < 0.05) {
-      return toast('حرّك الخريطة لحد ما الدبوس يصير على مكان وصولك');
+    /* الخريطة تبدي من النقطة الأولى — لو ضغط تأكيد بدون ما يحركها
+       تصير نقطة الوصول نفس نقطة الانطلاق (رحلة صفر كم). */
+    const prev = currentType === 'ride' ? pickup : store;
+    if (prev && haversine(prev.lat, prev.lng, c.lat, c.lng) < 0.05) {
+      return toast(currentType === 'ride'
+        ? 'حرّك الخريطة لحد ما الدبوس يصير على مكان وصولك'
+        : 'هذا نفس موقع المحل — حرّك الخريطة لمكان التوصيل');
     }
     destination = place;
-    setRideStep('review');
+    setStep('review');
   }
   // ضغط تأكيد قبل ما يوصل الاسم — نكمّله بالخلفية
   if (!known || place.label === 'موقع محدد على الخريطة') {
@@ -1655,19 +1711,30 @@ function confirmRideStep() {
   }
 }
 
-// الزبون ما يعرف وين بالضبط — السائق يوصله والأجرة تنحسب على الكيلومترات
-function skipDestination() {
-  destination = null;
-  setRideStep('review');
+/* "ما أعرف":
+   بالرحلة — بلا وجهة، والأجرة تنحسب على الكيلومترات.
+   بالتوصيل — بلا موقع محل، والسائق يلگاه بالاسم (بس ما يطلعله خط سير إله). */
+function skipStep() {
+  if (currentType === 'ride') { destination = null; setStep('review'); return; }
+  store = null;
+  setStep(destination ? 'review' : 'destination');
 }
 
-function rideBack() {
-  if (rideStep === 'review') setRideStep('destination');
-  else if (rideStep === 'destination') setRideStep('pickup');
+function flowBack() {
+  const step = curStep(), first = currentType === 'ride' ? 'pickup' : 'store';
+  if (step === 'review') setStep('destination');
+  else if (step === 'destination') setStep(first);
   else exitFlow();
 }
 
+// أسماء قديمة يستعملها باقي الكود
+function setRideStep(step) { setStep(step, 'ride'); }
+function confirmRideStep() { confirmStep(); }
+function skipDestination() { skipStep(); }
+function rideBack() { flowBack(); }
+
 function exitFlow() {
+  stopNearbyDrivers();
   document.getElementById('flow-ride').classList.remove('active');
   document.getElementById('flow-delivery').classList.remove('active');
 }
@@ -1808,55 +1875,39 @@ function drawMyDot(m) {
   d.halo.setLatLng(ll).setRadius(Math.min(myPos.acc, 150));   // دقة الـGPS — نحدها حتى ما تغطي الخريطة
 }
 
-// عند الضغط على الخريطة
-function onMapTap(lat, lng, flow) {
-  const place = { lat, lng, label: 'موقع محدد على الخريطة' };
-  if (currentType === 'ride') {
-    if (tapTarget === 'pickup') pickup = place;
-    else destination = place;
-  } else {
-    // بالتوصيل: الدبوس يحدد المحل أو مكان التوصيل — حسب الصف اللي ضغطه
-    if (tapTarget === 'store') store = place;
-    else destination = place;
-  }
-  updatePlanUI();
-  drawPlanMarkers();
-}
+/* ===== السواق القريبين =====
+   الزبون يشوف إذا أكو تكتك بمنطقته قبل ما يطلب — بلا أسماء، بس مواقع. */
+let nearbyMarkers = [], nearbyTimer = null;
 
-/* تثبيت النقطة تحت الدبوس.
-   نحطها فوراً باسم مؤقت حتى يبين السعر بسرعة،
-   وبعدين نبدل الاسم باسم المكان الحقيقي أول ما يوصل. */
-async function confirmPin(which) {
-  const m = which === 'r' ? mapR : mapD;
-  if (!m) return;
+async function refreshNearbyDrivers() {
+  const m = document.querySelector('.flow-screen.active') ? activeMap() : null;
+  if (!m || !user) return;
   const c = m.getCenter();
-  const btn = document.getElementById('confirm-' + which);
-  const target = (currentType === 'ride') ? tapTarget : (tapTarget === 'store' ? 'store' : 'destination');
-  onMapTap(c.lat, c.lng, which === 'r' ? 'ride' : 'delivery');
-
-  btn.disabled = true;
-  const original = btn.textContent;
-  btn.textContent = '✓ تثبّتت';
   try {
-    const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
-    // نتأكد إن الزبون ما غيّر النقطة وإحنا ننتظر الاسم
-    const place = target === 'pickup' ? pickup : (target === 'store' ? store : destination);
-    if (r && r.name && place && place.lat === c.lat && place.lng === c.lng) {
-      place.label = r.name;
-      updatePlanUI();
-    }
-  } catch (e) { /* نبقى على الاسم المؤقت */ }
-  setTimeout(() => { btn.disabled = false; updateConfirmLabel(); }, 700);
+    const out = await fetch(`/api/drivers/nearby?lat=${c.lat}&lng=${c.lng}`).then(r => r.json());
+    const list = (out && out.drivers) || [];
+    nearbyMarkers.forEach(x => m.removeLayer(x));
+    nearbyMarkers = list.map(d => L.marker([d.lat, d.lng], {
+      interactive: false, zIndexOffset: -200,
+      icon: L.divIcon({ className: '', iconSize: [0, 0],
+        html: '<div style="font-size:22px;transform:translate(-50%,-60%);filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))">\u{1F6FA}</div>' }),
+    }).addTo(m));
+    const txt = list.length ? `\u{1F6FA} ${list.length} سائق جاهز قريب منك` : 'ماكو سائق جاهز قريب منك هسه';
+    document.querySelectorAll('.nearby-hint').forEach(h => { h.textContent = txt; h.classList.remove('hidden'); });
+  } catch (e) {}
 }
 
-// نص الزر يتبع شنو النقطة اللي ديحددها هسه
-function updateConfirmLabel() {
-  const r = document.getElementById('confirm-r');
-  if (r) r.textContent = tapTarget === 'pickup' ? '✓ ثبّت نقطة الانطلاق هنا' : '✓ ثبّت نقطة الوصول هنا';
-  const d = document.getElementById('confirm-d');
-  if (d) d.textContent = tapTarget === 'store' ? '✓ ثبّت موقع المحل هنا' : '✓ ثبّت مكان التوصيل هنا';
+function startNearbyDrivers() {
+  stopNearbyDrivers();
+  refreshNearbyDrivers();
+  nearbyTimer = setInterval(refreshNearbyDrivers, 12000);
 }
-
+function stopNearbyDrivers() {
+  clearInterval(nearbyTimer); nearbyTimer = null;
+  const m = activeMap();
+  if (m) nearbyMarkers.forEach(x => m.removeLayer(x));
+  nearbyMarkers = [];
+}
 function activeMap() { return currentType === 'ride' ? mapR : mapD; }
 
 function locateMe(which) {
@@ -1877,7 +1928,6 @@ function locateMe(which) {
 // ============ البحث عن مكان ============
 function openSearch(mode, flow) {
   searchMode = mode; searchFlow = flow;
-  tapTarget = mode; updateConfirmLabel(); // لو رجع وضغط الخريطة، يحدد هالنقطة
   document.getElementById('search-input').value = '';
   const hint = mode === 'store' ? 'اكتب اسم المحل أو المطعم<br>مثال: مطعم فلان، صيدلية، سوبرماركت' : 'اكتب اسم منطقة أو مكان بالمسيب<br>مثال: مستشفى المسيب، حي العسكري، الجسر';
   document.getElementById('search-results').innerHTML = `<div class="sr-hint">${hint}</div>`;
@@ -1955,8 +2005,8 @@ function selectPlace(place) {
   if (searchMode === 'favorite') { saveFavoritePlace(place); return; }
   assignPoint(place);
   closeSearch();
-  if (searchFlow === 'r' && currentType === 'ride') {
-    setRideStep(searchMode === 'pickup' && !destination ? 'destination' : 'review');
+  if (curStep() !== 'review' && (searchFlow === 'r' || searchFlow === 'd')) {
+    setStep(searchMode !== 'destination' && !destination ? 'destination' : 'review');
     return;
   }
   const m = searchFlow === 'r' ? mapR : mapD;
@@ -1972,11 +2022,10 @@ function assignPoint(place) {
 }
 
 // تحديد من الخريطة — بس نسكّر البحث والزبون يضغط على الخريطة مباشرة
+// يرجّعه للخريطة حتى يحرّكها تحت الدبوس بدل البحث
 function pickFromMap() {
-  tapTarget = searchMode; updateConfirmLabel(); // الضغط الجاي على الخريطة يحدد هالنقطة
   closeSearch();
-  const label = { pickup:'نقطة الانطلاق', destination:currentType==='delivery'?'عنوان التوصيل':'نقطة الوصول', store:'موقع المحل' }[searchMode];
-  toast(`حرّك الخريطة لحد ما الدبوس يصير على ${label}`);
+  setStep(searchMode === 'pickup' ? 'pickup' : searchMode === 'store' ? 'store' : 'destination');
 }
 
 // ============ تحديث واجهة التخطيط ============
@@ -1987,7 +2036,8 @@ function updatePlanUI() {
     else setEmpty('r-dest', 'بدون وجهة — تنحسب على المسافة');
     updateFare('r', pickup, destination);
   } else {
-    setVal('d-store', store);
+    if (store) setVal('d-store', store);
+    else setEmpty('d-store', 'ما تحدد موقعه — بالاسم بس');
     setVal('d-dest', destination);
     // التوصيل: ماكو سعر تلقائي — السائق يعرض
   }
@@ -2056,13 +2106,14 @@ function drawPlanMarkers() {
 
   if (currentType === 'delivery') {
     const shop = L.divIcon({ className:'', html:'<div style="font-size:26px;transform:translate(-50%,-90%)">🏪</div>', iconSize:[0,0] });
+    if (dsMarker) { m.removeLayer(dsMarker); dsMarker = null; }
+    if (shopMarker) { m.removeLayer(shopMarker); shopMarker = null; }
+    if (routeLine) { m.removeLayer(routeLine); routeLine = null; }
+    if (delStep === 'store') return;                 // الدبوس بنص الخريطة هو المحل
+    if (store) shopMarker = L.marker([store.lat,store.lng],{icon:shop,interactive:false}).addTo(m);
+    if (delStep === 'destination') return;
     if (destination) {
-      if (dsMarker) m.removeLayer(dsMarker);
       dsMarker = L.marker([destination.lat,destination.lng],{icon:red,interactive:false}).addTo(m);
-    }
-    if (store) {
-      if (shopMarker) m.removeLayer(shopMarker);
-      shopMarker = L.marker([store.lat,store.lng],{icon:shop,interactive:false}).addTo(m);
     }
     if (store && destination) {
       // خط من المحل للزبون — الزبون يشوف المسافة ويتأكد إنه حدد المحل الصح
@@ -2258,6 +2309,7 @@ async function bookRide() {
 }
 
 async function bookDelivery() {
+  if (!destination) { setStep('destination'); return toast('حدد مكان التوصيل أول'); }
   const storeName = document.getElementById('d-store-name').value.trim();
   const item = document.getElementById('d-item').value.trim();
   if (!storeName) return toast('اكتب اسم المحل');
@@ -2273,6 +2325,7 @@ async function bookDelivery() {
 }
 
 async function sendBooking(payload, onErr) {
+  stopNearbyDrivers();
   try {
     const res = await fetch('/api/book', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -2729,8 +2782,10 @@ function resetRideUI() {
 }
 function resetDeliveryUI() {
   const b = document.getElementById('d-book-btn'); b.disabled=false; b.textContent='أرسل الطلب للسواق 🛒';
-  setEmpty('d-dest','نحدد موقعك تلقائياً...');
-  setEmpty('d-store','حرّك الخريطة وثبّت، أو ابحث');
+  setEmpty('d-dest','—');
+  setEmpty('d-store','ما تحدد موقعه');
+  pinPreview = null;
+  setStep('store', 'delivery');
   const sn = document.getElementById('d-store-name'); if (sn) sn.value='';
   const item = document.getElementById('d-item'); if (item) item.value='';
 }

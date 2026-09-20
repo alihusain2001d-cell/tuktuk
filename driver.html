@@ -399,7 +399,22 @@
   .inc-leg .t { flex:1; min-width:0; }
   .inc-leg .t .lbl { font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:2px; }
   .inc-leg .t .val { font-size:16px; font-weight:700; line-height:1.35; }
-  .inc-map { width:100%; height:120px; object-fit:cover; border-radius:12px; margin:12px 0 6px; background:var(--paper); }
+  .route-preview { position:fixed; inset:0; z-index:4000; background:var(--paper); display:none; flex-direction:column; }
+  .route-preview.show { display:flex; }
+  .route-preview .rp-head { display:flex; align-items:center; gap:12px; padding:12px 16px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.08); z-index:2; }
+  .route-preview .rp-close { background:none; border:none; font-size:20px; cursor:pointer; font-family:inherit; }
+  .route-preview .rp-title { font-size:16px; font-weight:700; }
+  .route-preview #preview-map { flex:1; min-height:0; }
+  .route-preview .rp-foot { background:#fff; padding:14px 16px calc(14px + env(safe-area-inset-bottom)); box-shadow:0 -4px 16px rgba(0,0,0,.1); }
+  .route-preview .rp-legend { display:flex; flex-direction:column; gap:7px; font-size:13.5px; font-weight:600; margin-bottom:8px; }
+  .route-preview .rp-legend span { display:flex; align-items:center; gap:8px; }
+  .route-preview .rp-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+  .route-preview .rp-dot.from { background:var(--go); }
+  .route-preview .rp-dot.to { background:var(--stop); border-radius:3px; }
+  .route-preview .rp-info { font-size:12.5px; color:var(--muted); margin-bottom:12px; }
+  .route-preview .rp-actions { display:flex; gap:10px; }
+  .route-preview .rp-actions .btn { flex:1; }
+  .inc-map { width:100%; cursor:pointer; height:120px; object-fit:cover; border-radius:12px; margin:12px 0 6px; background:var(--paper); }
   .inc-dist { font-size:13px; color:var(--muted); text-align:center; margin-bottom:14px; }
   .inc-item { background:#FFF9E8; border-radius:12px; padding:11px 14px; font-size:14px; margin-bottom:12px; }
   .inc-offer label { font-size:12.5px; color:var(--muted); font-weight:600; display:block; margin-bottom:6px; }
@@ -615,6 +630,26 @@
     </div>
     <button class="live-badge" id="live-badge" onclick="toggleWorking()"><span class="live-dot"></span> جاهز</button>
   </header>
+
+  <!-- خريطة الطلب: السائق يقرّب ويشوف خط السير قبل ما يقبل -->
+  <div class="route-preview" id="route-preview">
+    <div class="rp-head">
+      <button class="rp-close" onclick="closeRoutePreview()">✕</button>
+      <div class="rp-title" id="rp-title">طريق الطلب</div>
+    </div>
+    <div id="preview-map"></div>
+    <div class="rp-foot">
+      <div class="rp-legend">
+        <span><i class="rp-dot from"></i> <span id="rp-from">—</span></span>
+        <span><i class="rp-dot to"></i> <span id="rp-to">—</span></span>
+      </div>
+      <div class="rp-info" id="rp-info">—</div>
+      <div class="rp-actions">
+        <button class="btn ghost" onclick="closeRoutePreview()">رجوع</button>
+        <button class="btn go" id="rp-accept" onclick="acceptFromPreview()">اقبل الطلب ✅</button>
+      </div>
+    </div>
+  </div>
 
   <div class="off-banner hidden" id="gps-banner">📍 ما نعرف موقعك — شغّل الـGPS، وإلا الزبون ما يشوفك بالخريطة</div>
   <div class="off-banner hidden" id="off-banner">
@@ -2099,6 +2134,95 @@ function onNewRide(data) {
 let incomingId = null, incTimer = null, incLeft = 0;
 const INCOMING_SECONDS = 45;
 
+/* ===== خريطة الطلب قبل القبول =====
+   الصورة الثابتة تنطي فكرة سريعة، بس السائق يحتاج يقرّب ويشوف الأزقة
+   بالضبط قبل ما يقرر — خصوصاً إن أسماء الأماكن بالمسيب ناقصة. */
+let previewMap = null, previewRideId = null, previewMarkers = [];
+
+function openRoutePreview(r) {
+  if (!r) return;
+  previewRideId = r.rideId;
+  const isDel = r.type === 'delivery';
+  const from = isDel ? (r.store || r.pickup) : r.pickup;
+  const to = isDel ? r.pickup : r.destination;
+
+  document.getElementById('rp-title').textContent = isDel ? 'طريق التوصيل 🛒' : 'طريق الرحلة 🚗';
+  document.getElementById('rp-from').textContent = (isDel ? 'تجيب من: ' : 'تاخذه من: ') +
+    ((isDel ? (r.storeName || (r.store && r.store.label)) : r.pickup.label) || 'نقطة على الخريطة');
+  document.getElementById('rp-to').textContent = (isDel ? 'توصّله لـ: ' : 'توصّله لـ: ') +
+    ((to && to.label) || (to ? 'نقطة على الخريطة' : 'الوجهة غير محددة'));
+  const bits = [];
+  if (hasFix && from && from.lat) bits.push(`يبعد عنك ${haversine(myPos.lat, myPos.lng, from.lat, from.lng).toFixed(1)} كم`);
+  if (r.estKm) bits.push(`طول الرحلة ${r.estKm} كم`);
+  if (r.estFare) bits.push(`أجرتك ${r.estFare.toLocaleString()} د.ع`);
+  document.getElementById('rp-info').textContent = bits.join(' • ');
+  document.getElementById('rp-accept').textContent = isDel ? 'أرسل عرضي 💬' : 'اقبل الطلب ✅';
+
+  document.getElementById('route-preview').classList.add('show');
+
+  if (!previewMap) {
+    previewMap = new maplibregl.Map({
+      container: 'preview-map', style: VECTOR_STYLE,
+      center: [from.lng, from.lat], zoom: 15, attributionControl: false, pitchWithRotate: false,
+    });
+    previewMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    previewMap.on('style.load', () => {
+      mapForceArabic(previewMap); mapRecolor(previewMap);
+      previewMap.addSource('prev-route', { type: 'geojson', data: { type:'Feature', geometry:{ type:'LineString', coordinates: [] } } });
+      previewMap.addLayer({ id:'prev-route', type:'line', source:'prev-route',
+        layout:{ 'line-join':'round', 'line-cap':'round' }, paint:{ 'line-color':'#2BA9E0', 'line-width':5 } });
+      drawPreview(from, to);
+    });
+  } else {
+    setTimeout(() => previewMap.resize(), 60);
+    // لو النمط لسه ما خلص تحميل (شبكة بطيئة)، نرسم أول ما يجهز
+    if (previewMap.isStyleLoaded()) drawPreview(from, to);
+    else previewMap.once('style.load', () => drawPreview(from, to));
+  }
+}
+
+function drawPreview(from, to) {
+  if (!previewMap || !previewMap.isStyleLoaded()) return;
+  previewMarkers.forEach(m => m.remove());
+  previewMarkers = [];
+  const pin = (color, emoji) => {
+    const el = document.createElement('div');
+    el.style.cssText = 'display:flex;flex-direction:column;align-items:center';
+    el.innerHTML = `<div style="background:${color};width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:11px">${emoji}</div>`;
+    return el;
+  };
+  if (from && from.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#12A150', '') }).setLngLat([from.lng, from.lat]).addTo(previewMap));
+  if (to && to.lat) previewMarkers.push(new maplibregl.Marker({ element: pin('#E5484D', '') }).setLngLat([to.lng, to.lat]).addTo(previewMap));
+
+  if (from && to && to.lat) {
+    const b = new maplibregl.LngLatBounds([from.lng, from.lat], [from.lng, from.lat]).extend([to.lng, to.lat]);
+    previewMap.fitBounds(b, { padding: 70, maxZoom: 16, duration: 0 });
+    fetchRoute(from, to).then(route => {
+      const src = previewMap.getSource('prev-route');
+      if (!route || !src) return;
+      src.setData({ type:'Feature', geometry:{ type:'LineString', coordinates: route.coords.map(c => [c[1], c[0]]) } });
+    });
+  } else if (from && from.lat) {
+    previewMap.jumpTo({ center: [from.lng, from.lat], zoom: 16 });
+  }
+}
+
+function closeRoutePreview() {
+  document.getElementById('route-preview').classList.remove('show');
+  previewRideId = null;
+}
+
+// يقبل من داخل الخريطة — ما نخليه يرجع ويدور على الزر والوقت يركض
+function acceptFromPreview() {
+  const id = previewRideId;
+  const r = id ? pendingRides.get(id) : null;
+  closeRoutePreview();
+  if (!r) return;
+  if (incomingId !== id) { incomingId = null; showIncoming(id); }
+  // التوصيل يحتاج يكتب سعره بالبطاقة — نرجعه لها بدل ما نرسل عرض فاضي
+  if (r.type !== 'delivery') acceptIncoming();
+}
+
 function showIncoming(rideId) {
   const r = pendingRides.get(rideId);
   if (!r || activeRide || offeredRide || !isOnline) return;
@@ -2127,6 +2251,7 @@ function showIncoming(rideId) {
     mapEl.src = `/api/static-map?from=${a.lat},${a.lng}` + (b && b.lat ? `&to=${b.lat},${b.lng}` : '');
     mapEl.classList.remove('hidden');
     mapEl.onerror = () => mapEl.classList.add('hidden');
+    mapEl.onclick = () => openRoutePreview(r);
   } else mapEl.classList.add('hidden');
 
   // العنوان — أهم شي بالشاشة، بخط كبير

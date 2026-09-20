@@ -156,6 +156,8 @@
   .lg-dot { width:9px; height:9px; border-radius:50%; }
   .lg-dot.free { background:var(--go); }
   .lg-dot.busy { background:var(--warn); }
+  .lg-dot.resting { background:var(--sky); }
+  .lg-dot.off { background:var(--muted); opacity:.55; }
 
   /* ===== الرحلات ===== */
   .ride-row { background:#fff; border:1px solid var(--line); border-radius:13px; padding:12px 14px; margin-bottom:9px; display:flex; align-items:center; gap:11px; }
@@ -316,8 +318,10 @@
   <!-- ===== الخريطة ===== -->
   <div class="view" id="view-map">
     <div class="map-legend">
-      <span><i class="lg-dot free"></i> فاضي</span>
+      <span><i class="lg-dot free"></i> فاضي وجاهز</span>
       <span><i class="lg-dot busy"></i> عنده طلب</span>
+      <span><i class="lg-dot resting"></i> باستراحة</span>
+      <span><i class="lg-dot off"></i> انقطع اتصاله</span>
       <span id="map-count" style="margin-right:auto;color:var(--muted)">—</span>
     </div>
     <div id="live-map"></div>
@@ -1290,17 +1294,25 @@ async function loadLive() {
     liveMarkers.forEach(m => liveMap.removeLayer(m));
     liveMarkers = [];
 
-    document.getElementById('map-count').textContent = `${data.drivers.length} سائق متصل · ${data.activeRides} طلب نشط`;
+    const conn = data.drivers.filter(d => d.connected !== false).length;
+    document.getElementById('map-count').textContent =
+      `${conn} سائق متصل · ${data.drivers.length - conn} انقطع توّه · ${data.activeRides} طلب نشط`;
 
     data.drivers.forEach(d => {
-      if (!d.lat || !d.lng) return;
+      if (d.lat == null || d.lng == null) return;
       const busy = !!d.busy;
-      const color = busy ? '#F5A623' : '#12A150';
+      /* أربع حالات تفرق بالإدارة: عنده طلب، فاضي وجاهز، باستراحة،
+         وانقطع اتصاله (نبينه باهت بآخر مكان شفناه بيه). */
+      const state = busy ? { c:'#F5A623', t:'🔶 عنده طلب: ' + busy.customer }
+        : d.connected === false ? { c:'#8A8270', t:`⚫ انقطع اتصاله — آخر ظهور قبل ${d.lastSeenMin || 0} د` }
+        : d.resting ? { c:'#2BA9E0', t:'☕ باستراحة' }
+        : { c:'#12A150', t:'🟢 فاضي وجاهز' };
+      const faded = d.connected === false ? 'opacity:.55;' : '';
       const icon = L.divIcon({
         className:'',
-        html:`<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center">
-                <div style="background:${color};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;margin-bottom:2px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${d.name}</div>
-                <div style="font-size:26px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))">🚗</div>
+        html:`<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;${faded}">
+                <div style="background:${state.c};color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;white-space:nowrap;margin-bottom:2px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${d.name}</div>
+                <div style="font-size:26px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))">🛺</div>
               </div>`,
         iconSize:[0,0],
       });
@@ -1309,7 +1321,7 @@ async function loadLive() {
         <b style="font-size:14px">${d.name}</b><br>
         <span style="color:#666;font-size:12px">${d.phone}</span><br>
         <span style="color:#666;font-size:12px">${d.car||'—'}</span><br>
-        <span style="font-size:12px;color:${color};font-weight:700">${busy ? '🔶 عنده طلب: '+d.busy.customer : '🟢 فاضي'}</span>
+        <span style="font-size:12px;color:${state.c};font-weight:700">${state.t}</span>
       </div>`);
       liveMarkers.push(m);
     });
