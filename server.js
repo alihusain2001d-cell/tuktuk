@@ -851,20 +851,44 @@ app.get('/api/geocode', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json([]);
 
-    // LocationIQ متوافق بنفس شكل رد Nominatim تماماً — نفس الرابط بس مع مفتاح ودومين مختلف
-    const url = LOCATIONIQ_API_KEY
-      ? `https://us1.locationiq.com/v1/search?key=${LOCATIONIQ_API_KEY}&format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=8&accept-language=ar&viewbox=44.15,32.85,44.42,32.70&bounded=0`
-      : `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=8&accept-language=ar&viewbox=44.15,32.85,44.42,32.70&bounded=0`;
+    /* أسماء مثل "حي المعلمين" موجودة بكل محافظة، وقبل كنا نرسل الصندوق
+       كتفضيل بس (bounded=0) فيطلع حي المعلمين ببغداد أو مكان بأمريكا.
+       هسه نحصر البحث بمنطقتنا، ونفلتر أي نتيجة أبعد من ٤٠ كم عن المسيب. */
+    /* ٢٥ كم تغطي المسيب وما حولها. أبعد من هيچ يعني محافظة ثانية —
+       والتكتك ما يوديه، فما ينفع نعرضه أصلاً. */
+    const MAX_KM = 25;
+    const VIEWBOX = '43.95,33.10,44.65,32.45';   // المسيب وما حولها
+    const base = LOCATIONIQ_API_KEY
+      ? `https://us1.locationiq.com/v1/search?key=${LOCATIONIQ_API_KEY}&`
+      : 'https://nominatim.openstreetmap.org/search?';
+    const url = base + `format=json&q=${encodeURIComponent(q)}&countrycodes=iq&limit=10&accept-language=ar` +
+      `&viewbox=${VIEWBOX}&bounded=1`;
     const gRes = await fetch(url, { headers: { 'Accept-Language': 'ar', 'User-Agent': 'JayakApp/1.0' } });
     const out = await gRes.json();
     if (!gRes.ok || !Array.isArray(out)) {
       console.error('فشل البحث عن المواقع:', out?.error || gRes.status);
       return res.json([]);
     }
-    res.json(out.map(r => {
-      const parts = (r.display_name || '').split(',');
-      return { name: parts[0] || q, address: parts.slice(1, 4).join('،'), lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
-    }));
+    const cLat = 32.7789, cLng = 44.2892;   // مركز المسيب
+    // نرتب حسب قربها من المكان اللي الزبون يباوع عليه بالخريطة، مو من وسط البلدة
+    const near = validLoc(req.query.lat, req.query.lng)
+      ? { lat: Number(req.query.lat), lng: Number(req.query.lng) } : { lat: cLat, lng: cLng };
+    const results = out
+      .map(r => {
+        const lat = parseFloat(r.lat), lng = parseFloat(r.lon);
+        const parts = (r.display_name || '').split(',');
+        return {
+          name: parts[0] || q, address: parts.slice(1, 4).join('،'),
+          lat, lng,
+          km: Math.round(haversine(near.lat, near.lng, lat, lng) * 10) / 10,
+          fromTown: haversine(cLat, cLng, lat, lng),
+        };
+      })
+      .filter(r => validLoc(r.lat, r.lng) && r.fromTown <= MAX_KM)
+      .sort((a, b) => a.km - b.km)      // الأقرب إله أول
+      .slice(0, 8)
+      .map(({ fromTown, ...r }) => r);
+    res.json(results);
   } catch (e) {
     console.error('خطأ بالبحث عن المواقع:', e.message);
     res.status(500).json({ error: 'صار خطأ بالبحث' });
@@ -929,6 +953,26 @@ app.post('/api/book', requireCustomer, async (req, res) => {
     }
 
     const type = orderType === 'delivery' ? 'delivery' : 'ride';
+
+    /* الإدارة توقف خدمة التوصيل — نمنعها بالسيرفر مو بس نخفي الزر،
+       وإلا أي أحد يكدر يرسل الطلب مباشرة. */
+    if (type === 'delivery') {
+      const svc = await db.getServiceSettings();
+      if (svc.delivery_enabled === false) {
+        return res.status(403).json({ error: 'خدمة توصيل البضائع متوقفة مؤقتاً', serviceOff: true });
+      }
+    }
+
+    /* طلب واحد بالمرة: الزبون يخلّص طلبه قبل ما يطلب غيره.
+       بدونها يبقى عنده طلبين والسائقين ينحيّرون. */
+    const cleanPhone = normalizePhone(phone);
+    for (const r of activeRides.values()) {
+      if (normalizePhone(r.customer?.phone) === cleanPhone &&
+          ['searching', 'offered', 'accepted', 'arrived', 'started'].includes(r.status)) {
+        return res.status(409).json({ error: 'عندك طلب جاري — خلّصه أو ألغه قبل ما تطلب غيره', activeRide: true });
+      }
+    }
+
     const rideId = uid();
     let estKm = 0, estFare = 0;
     // الرحلة العادية: أجرة تلقائية بالمسافة
@@ -1491,6 +1535,21 @@ app.post('/api/cancel', async (req, res) => {
 });
 
 // إعدادات الأجرة (عامة — يحتاجها تطبيق الزبون لعرض تقدير السعر قبل الحجز)
+// الزبون يحتاجها حتى يعرف إذا خدمة التوصيل شغّالة
+app.get('/api/service-settings', async (req, res) => {
+  try {
+    const s = await db.getServiceSettings();
+    res.json({ deliveryEnabled: s.delivery_enabled !== false });
+  } catch (e) { res.json({ deliveryEnabled: true }); }
+});
+
+app.post('/api/admin/service-settings', checkAdmin, async (req, res) => {
+  try {
+    const s = await db.setServiceSettings({ deliveryEnabled: req.body.deliveryEnabled !== false });
+    res.json({ ok: true, deliveryEnabled: s.delivery_enabled !== false });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
 app.get('/api/fare-settings', async (req, res) => {
   try { res.json(await db.getFareSettings()); }
   catch (e) { res.status(500).json({ error: 'خطأ' }); }

@@ -203,6 +203,17 @@ async function init() {
     await pool.query(`INSERT INTO reward_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
     await pool.query(`ALTER TABLE reward_settings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;`);
 
+    /* تشغيل/إيقاف الخدمات من لوحة التحكم — مثلاً توصيل البضائع يتوقف
+       لحد ما يصير عدنا سواق كافين إله. */
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS service_settings (
+        id               INTEGER PRIMARY KEY DEFAULT 1,
+        delivery_enabled BOOLEAN NOT NULL DEFAULT true,
+        CHECK (id = 1)
+      );
+    `);
+    await pool.query(`INSERT INTO service_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;`);
+
     // إعدادات الأجرة (حسب الكيلومتر أو سعر ثابت)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS fare_settings (
@@ -1110,6 +1121,19 @@ async function getDriverPaidTotal(driverId) {
 }
 
 // ============ مكافآت الولاء ============
+async function getServiceSettings() {
+  if (!HAS_DB) return mem.serviceSettings || (mem.serviceSettings = { delivery_enabled: true });
+  const res = await pool.query('SELECT * FROM service_settings WHERE id=1');
+  return res.rows[0] || { delivery_enabled: true };
+}
+
+async function setServiceSettings({ deliveryEnabled }) {
+  if (!HAS_DB) { mem.serviceSettings = { delivery_enabled: !!deliveryEnabled }; return mem.serviceSettings; }
+  const res = await pool.query(
+    'UPDATE service_settings SET delivery_enabled=$1 WHERE id=1 RETURNING *', [!!deliveryEnabled]);
+  return res.rows[0];
+}
+
 async function getRewardSettings() {
   if (!HAS_DB) {
     return mem.rewardSettings || (mem.rewardSettings = { trips_threshold: 10, reward_type: 'free_ride', reward_value: 0, enabled: true });
@@ -1574,7 +1598,7 @@ module.exports = {
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,
-  getRewardSettings, setRewardSettings, getPendingReward, grantManualReward,
+  getRewardSettings, setRewardSettings, getServiceSettings, setServiceSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout, getRewardStatement,
   payDriverRewardsInFull, getDriverFullStatement,

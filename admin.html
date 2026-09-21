@@ -465,6 +465,15 @@
       <button class="btn ghost" onclick="event.stopPropagation();openFareSettingsModal()">تعديل</button>
     </div>
 
+    <div class="sub-row">
+      <div class="sr-ico">🛒</div>
+      <div class="sr-body">
+        <h4>خدمة توصيل البضائع</h4>
+        <p id="delivery-svc-sub">نحمّل...</p>
+      </div>
+      <button class="btn ghost" id="delivery-svc-btn" onclick="toggleDeliveryService()">—</button>
+    </div>
+
     <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
       <div class="sr-ico">📞</div>
       <div class="sr-body">
@@ -721,6 +730,7 @@ function switchTab(name) {
   if (name === 'customers') loadCustomers();
   if (name === 'rewards') renderRewardsView();
   if (name === 'statement') renderStatementView();
+  if (name === 'settings') renderDeliveryService();
 }
 
 function openSidebar() {
@@ -1693,6 +1703,30 @@ async function renderFareRuleSub() {
 }
 
 // ============ روابط التواصل ============
+/* تشغيل/إيقاف خدمة التوصيل — لما تتوقف يشوف الزبون "قريباً" بمكانها */
+let deliverySvcOn = true;
+async function renderDeliveryService() {
+  try {
+    const s = await fetch('/api/service-settings').then(r => r.json());
+    deliverySvcOn = s.deliveryEnabled !== false;
+  } catch (e) { return; }
+  document.getElementById('delivery-svc-sub').textContent = deliverySvcOn
+    ? '✅ شغّالة — الزبون يكدر يطلب توصيل بضاعة'
+    : '⏸️ متوقفة — تطلع "قريباً" عند الزبون';
+  document.getElementById('delivery-svc-btn').textContent = deliverySvcOn ? 'إيقاف' : 'تشغيل';
+}
+
+async function toggleDeliveryService() {
+  const next = !deliverySvcOn;
+  if (!confirm(next ? 'تشغّل خدمة توصيل البضائع؟' : 'توقف خدمة توصيل البضائع؟ الزبون راح يشوف "قريباً".')) return;
+  try {
+    const res = await api('/api/admin/service-settings', { method:'POST', body: JSON.stringify({ deliveryEnabled: next }) });
+    if (!res.ok) return toast('صار خطأ');
+    toast(next ? 'انفتحت خدمة التوصيل ✅' : 'انوقفت خدمة التوصيل ⏸️');
+    renderDeliveryService();
+  } catch (e) { toast('صار خطأ'); }
+}
+
 async function openContactSettingsModal() {
   document.getElementById('contact-settings-modal').classList.add('show');
   try {
