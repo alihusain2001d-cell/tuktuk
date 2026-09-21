@@ -323,7 +323,7 @@
       <span><i class="lg-dot free"></i> فاضي وجاهز</span>
       <span><i class="lg-dot busy"></i> عنده طلب</span>
       <span><i class="lg-dot resting"></i> باستراحة</span>
-      <span><i class="lg-dot off"></i> انقطع اتصاله</span>
+      <span><i class="lg-dot off"></i> تطبيقه مسكّر (آخر موقع)</span>
       <span id="map-count" style="margin-right:auto;color:var(--muted)">—</span>
     </div>
     <div id="live-map"></div>
@@ -1398,15 +1398,19 @@ async function loadLive() {
 
     const conn = data.drivers.filter(d => d.connected !== false).length;
     document.getElementById('map-count').textContent =
-      `${conn} سائق متصل · ${data.drivers.length - conn} انقطع توّه · ${data.activeRides} طلب نشط`;
+      `${conn} سائق متصل · ${data.drivers.length - conn} تطبيقه مسكّر · ${data.activeRides} طلب نشط`;
 
     data.drivers.forEach(d => {
       if (d.lat == null || d.lng == null) return;
       const busy = !!d.busy;
       /* أربع حالات تفرق بالإدارة: عنده طلب، فاضي وجاهز، باستراحة،
          وانقطع اتصاله (نبينه باهت بآخر مكان شفناه بيه). */
+      const ago = m => m < 60 ? `${m} دقيقة` : `${Math.round(m/60)} ساعة`;
       const state = busy ? { c:'#F5A623', t:'🔶 عنده طلب: ' + busy.customer }
-        : d.connected === false ? { c:'#8A8270', t:`⚫ انقطع اتصاله — آخر ظهور قبل ${d.lastSeenMin || 0} د` }
+        : d.connected === false
+          ? { c: d.resting ? '#8A8270' : '#7A9E3A',
+              t: (d.resting ? '☕ باستراحة' : '🟡 جاهز — بس تطبيقه مسكّر') +
+                 ` · آخر موقع قبل ${ago(d.lastSeenMin || 0)}` }
         : d.resting ? { c:'#2BA9E0', t:'☕ باستراحة' }
         : { c:'#12A150', t:'🟢 فاضي وجاهز' };
       const faded = d.connected === false ? 'opacity:.55;' : '';

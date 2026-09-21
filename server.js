@@ -1052,12 +1052,25 @@ app.get('/api/drivers/nearby', requireAnyCustomer, async (req, res) => {
     for (const ride of activeRides.values()) {
       if (ride.driverId && ['accepted', 'arrived', 'started', 'offered'].includes(ride.status)) busyIds.add(ride.driverId);
     }
-    const out = [];
-    for (const [id, d] of onlineDrivers) {
-      if (!validLoc(d.lat, d.lng)) continue;                  // ما نعرف موقعه — ما نخترع له مكان
-      if (busyIds.has(id)) continue;                          // عنده طلب — مو متاح
-      if (around && haversine(lat, lng, d.lat, d.lng) > 6) continue;
-      out.push({ lat: d.lat, lng: d.lng });
+    const out = [], seenIds = new Set();
+    const add = (id, la, ln) => {
+      if (seenIds.has(id) || busyIds.has(id)) return;         // عنده طلب — مو متاح
+      if (!validLoc(la, ln)) return;                          // ما نعرف موقعه — ما نخترع له مكان
+      if (around && haversine(lat, lng, la, ln) > 6) return;
+      seenIds.add(id);
+      out.push({ lat: la, lng: ln });
+    };
+    for (const [id, d] of onlineDrivers) add(id, d.lat, d.lng);
+
+    /* السائق الجاهز اللي سكّر التطبيق توّه: الطلب يوصله بالإشعارات، فنبينه
+       للزبون بآخر موقع إذا عمره أقل من ٢٠ دقيقة — أحسن من "ماكو سواق". */
+    const RECENT_MS = 20 * 60 * 1000;
+    for (const rec of await db.getAllDrivers()) {
+      if (rec.available === false) continue;
+      if (!db.computeAccess(rec).allowed) continue;
+      const seen = rec.last_loc_at ? new Date(rec.last_loc_at).getTime() : 0;
+      if (!seen || Date.now() - seen > RECENT_MS) continue;
+      add(rec.id, rec.last_lat, rec.last_lng);
     }
     res.json({ drivers: out });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
@@ -1754,14 +1767,17 @@ app.get('/api/admin/live', checkAdmin, async (req, res) => {
       });
     }
 
-    /* سائق سكّر التطبيق أو انقطعت شبكته توّه ما يطلع بالقائمة أعلاه،
-       والإدارة تحتاج تعرف وين كان — فنبينه بلون باهت إذا موقعه من آخر ربع ساعة. */
-    const SEEN_MS = 15 * 60 * 1000;
+    /* التطبيق ويب: أول ما السائق يسكّره يوقف يرسل موقعه، حتى لو هو جاهز
+       ويستلم الطلبات بالإشعارات. فبدل ما يختفي من الخريطة، نبينه بآخر
+       موقع نعرفه ووقته — والإدارة تحكم إذا الموقع بعده ينفع.
+       (التتبع الحقيقي بالخلفية يحتاج تطبيق أصلي.) */
+    const SEEN_MS = 12 * 3600 * 1000;
     for (const rec of allDriverRows) {
       if (onlineDrivers.has(rec.id)) continue;
       const seen = rec.last_loc_at ? new Date(rec.last_loc_at).getTime() : 0;
       if (!seen || Date.now() - seen > SEEN_MS) continue;
       if (!validLoc(rec.last_lat, rec.last_lng)) continue;
+      if (!db.computeAccess(rec).allowed) continue;   // اشتراكه منتهي — مو سائق شغّال
       list.push({
         id: rec.id, name: rec.name, phone: rec.phone, car: rec.car,
         lat: rec.last_lat, lng: rec.last_lng,
