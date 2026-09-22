@@ -2221,7 +2221,7 @@ let lastReturnCheck = 0;
 function checkOnReturn() {
   if (!user || Date.now() - lastReturnCheck < 1500) return;   // الأحداث تجي سوا — فحص واحد يكفي
   lastReturnCheck = Date.now();
-  if (currentRide) resyncRideStatus();
+  if (currentRide) { resyncRideStatus(); pollDriverPosition(); }
   else resumeActiveRide();
 }
 document.addEventListener('visibilitychange', () => {
@@ -2258,7 +2258,11 @@ async function resyncRideStatus() {
 }
 function handleWS(type, data) {
   switch(type) {
-    case 'welcome': socketId = data.socketId; break;
+    case 'welcome':
+      socketId = data.socketId;
+      // عنده طلب جاري؟ نربط الاتصال الجديد بيه حتى توصله تحركات السائق
+      if (currentRide) attachSocketToRide();
+      break;
     case 'offer:new': onOfferReceived(data); break;
     case 'ride:accepted': onDriverAccepted(data); break;
     case 'driver:moved': onDriverMoved(data); break;
@@ -2272,6 +2276,7 @@ function handleWS(type, data) {
 // السائق ألغى الرحلة (مثلاً وصل وما لقاك) — نبلغك ونرجعك للصفحة الرئيسية
 function onDriverCancelled(data) {
   if (!currentRide || data.rideId !== currentRide) return;
+  stopDriverTracking();
   clearTimeout(searchHintTimer);
   // النظام ألغاه لأن ماكو سائق — مو "السائق ألغى"، هذا كان يخلط على الزبون
   toast(data.by === 'system'
@@ -2528,6 +2533,7 @@ function onDriverAccepted(data) {
     if (d.lat && d.lng) { placeDriver(d.lat, d.lng); drawDriverRoute(d.lat, d.lng); }
   }, 60);
   toast(`${d.name} قبل طلبك! 🎉`);
+  startDriverTracking();
 }
 
 /* علامة السائق عند الزبون — سهم يلف باتجاه سير السائق.
@@ -2568,6 +2574,36 @@ function placeDriver(lat, lng) {
 }
 
 function onDriverMoved(data) { if (mapT) { placeDriver(data.lat, data.lng); drawDriverRoute(data.lat, data.lng); } }
+
+/* ===== تتبع السائق وهو جاي =====
+   الرسائل اللحظية وحدها ما تكفي: الاتصال ينقطع بصمت، والتطبيق يروح
+   للخلفية، والسيرفر ممكن يعيد التشغيل — فنسأل السيرفر كل ٨ ثواني بعد. */
+let trackTimer = null;
+
+function attachSocketToRide() {
+  if (ws && ws.readyState === WebSocket.OPEN && currentRide) {
+    ws.send(JSON.stringify({ type: 'customer:hello', data: { rideId: currentRide } }));
+  }
+}
+
+async function pollDriverPosition() {
+  if (!currentRide) return stopDriverTracking();
+  try {
+    const res = await fetch(`/api/ride/${currentRide}/driver-position?socketId=${encodeURIComponent(socketId || '')}`);
+    if (!res.ok) return;
+    const p = await res.json();
+    if (p.lat != null && mapT) { placeDriver(p.lat, p.lng); drawDriverRoute(p.lat, p.lng); }
+    if (p.etaMin) document.getElementById('dv-eta').textContent = p.etaMin;
+  } catch (e) {}
+}
+
+function startDriverTracking() {
+  stopDriverTracking();
+  attachSocketToRide();
+  pollDriverPosition();
+  trackTimer = setInterval(pollDriverPosition, 8000);
+}
+function stopDriverTracking() { clearInterval(trackTimer); trackTimer = null; }
 
 let lastDriverRouteFetch = 0;
 
@@ -2634,6 +2670,7 @@ function markRateShown(rideId) {
 }
 
 function onDone(data, quiet) {
+  stopDriverTracking();
   clearInterval(closeBtnTimer);
   document.getElementById('close-ride-btn').classList.add('hidden');
   if (data && data.rideId && currentRide && data.rideId !== currentRide) return;

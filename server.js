@@ -1947,6 +1947,36 @@ app.get('/api/stats', async (req, res) => {
 });
 
 // حالة الطلب — يستخدمها السائق كشبكة أمان لو انقطع الاتصال
+/* موقع السائق لصاحب الطلب — شبكة أمان للتتبع.
+   الرسائل اللحظية ممكن تفوت (شبكة تقطعت، التطبيق كان بالخلفية، السيرفر
+   أعاد التشغيل)، فالزبون يسأل كل شوية ويبقى يشوف السائق يتحرك. */
+app.get('/api/ride/:id/driver-position', async (req, res) => {
+  try {
+    const ride = activeRides.get(req.params.id);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    if (!(await authCustomer(req, res, ride.customer?.phone))) return;
+    if (req.query.socketId) ride.customerSocketId = req.query.socketId;   // نربط اتصاله الجديد بالطلب
+
+    const online = ride.driverId ? onlineDrivers.get(ride.driverId) : null;
+    let lat = online && validLoc(online.lat, online.lng) ? online.lat : null;
+    let lng = online && validLoc(online.lat, online.lng) ? online.lng : null;
+    if (lat == null && ride.driverId) {
+      // تطبيق السائق مسكّر توّه — نعطي آخر موقف إذا حديث
+      const rec = await db.getDriver(ride.driverId);
+      const seen = rec && rec.last_loc_at ? new Date(rec.last_loc_at).getTime() : 0;
+      if (seen && Date.now() - seen < 10 * 60 * 1000 && validLoc(rec.last_lat, rec.last_lng)) {
+        lat = rec.last_lat; lng = rec.last_lng;
+      }
+    }
+    const target = ride.status === 'started'
+      ? (ride.type === 'delivery' ? ride.pickup : ride.destination)
+      : (ride.type === 'delivery' ? (ride.store || ride.pickup) : ride.pickup);
+    const etaMin = lat != null && target
+      ? Math.max(1, Math.round((haversine(lat, lng, target.lat, target.lng) / 25) * 60)) : 0;
+    res.json({ status: ride.status, lat, lng, etaMin });
+  } catch (e) { res.status(500).json({ error: 'خطأ' }); }
+});
+
 app.get('/api/ride/:id/status', (req, res) => {
   const ride = activeRides.get(req.params.id);
   if (!ride) {
