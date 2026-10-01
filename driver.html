@@ -682,6 +682,7 @@
 
       <div class="dr-sep"></div>
       <div class="dr-item danger" onclick="logout()"><span class="di-ico">🚪</span><span>تسجيل خروج</span></div>
+      <div class="dr-item danger" onclick="deleteMyAccount()"><span class="di-ico">🗑️</span><span>حذف حسابي</span></div>
     </nav>
   </div>
 
@@ -1428,6 +1429,21 @@ async function toggleWorking() {
     });
   } catch (e) { /* الحالة بالتطبيق تغيّرت، والسيرفر يتزامن بأول تحديث */ }
   toast(turningOn ? '✅ صرت جاهز — راح توصلك الطلبات' : '☕ صرت باستراحة — ما توصلك طلبات');
+}
+
+/* حذف الحساب من داخل التطبيق — متطلب إلزامي بمتجر جوجل وآبل */
+async function deleteMyAccount() {
+  if (!confirm('تحذف حسابك نهائياً؟ ما تكدر ترجعه.')) return;
+  if (!confirm('متأكد؟ راح تنشال بياناتك وصورك، وما راح توصلك طلبات بعد.')) return;
+  try {
+    const res = await fetch(`/api/driver/${driverId}`, { method: 'DELETE' });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'ما كدرنا نحذف الحساب', 5000);
+    localStorage.removeItem('jayak_driver');
+    localStorage.removeItem('jayak_driver_id');
+    toast('انحذف حسابك. نشكرك على شغلك وية جايك 🙏', 5000);
+    setTimeout(() => location.reload(), 2000);
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
 
 function logout() {

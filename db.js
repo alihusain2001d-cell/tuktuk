@@ -93,6 +93,7 @@ async function init() {
     await pool.query(`UPDATE drivers SET approved=true WHERE approved=false AND (sub_ends_at IS NOT NULL OR trial_ends_at IS NOT NULL);`);
     // ترقية: اشتراك إشعارات المتصفح (Web Push) — يوصل الطلب للسائق حتى لو التطبيق مقفل بالخلفية
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS push_subscription JSONB;`);
+    await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;`);
     // ترقية: زر شغّال/مطفي — السائق يوقف استلام الطلبات بدون ما يسجّل خروج.
     // محفوظ بالقاعدة مو بالذاكرة، لأن الإشعار لازم يحترم الحالة حتى والتطبيق مسكّر.
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS available BOOLEAN NOT NULL DEFAULT true;`);
@@ -145,6 +146,15 @@ async function init() {
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS store_name TEXT;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_price INTEGER;`);
     await pool.query(`ALTER TABLE rides ADD COLUMN IF NOT EXISTS offer_note TEXT;`);
+    /* البحث برقم الموبايل يصير على رقم منظّف (بلا صفر أو فراغات)، فبدون فهرس
+       على نفس التعبير تنقرا كل صفوف الجدول بكل طلب — وهذا يصير بكل مكالمة API.
+       الفهارس هاي تخلي الاستعلام يمسك صف واحد مباشرة. */
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_customers_phone_norm ON customers ((regexp_replace(phone, '\D', '', 'g')));`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_phone_norm ON rides ((regexp_replace(customer_phone, '\D', '', 'g')));`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_drivers_phone_norm ON drivers ((regexp_replace(phone, '\D', '', 'g')));`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_places_phone_norm ON saved_places ((regexp_replace(phone, '\D', '', 'g')));`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_cr_phone_norm ON customer_rewards ((regexp_replace(phone, '\D', '', 'g')));`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_done_at ON rides(done_at DESC);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_driver ON rides(driver_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_rides_status ON rides(status);`);
 
@@ -320,6 +330,26 @@ async function getDriver(id) {
   return res.rows[0] || null;
 }
 
+/* صور السائق (شخصية، مركبة، بطاقة) محفوظة كنص base64 داخل الجدول — الصورة
+   الوحدة ممكن تكون ١٠٠ كيلوبايت وأكثر. أي استعلام يجيب كل الأعمدة يسحب
+   ميغابايتات بلا داعي، وهذا كان يصير كل ١٢ ثانية بخريطة الزبون ومع كل طلب
+   جديد. فنجيب الأعمدة اللي نحتاجها بس. */
+const DRIVER_LITE = `id, name, phone, car, status, approved, banned, ban_reason,
+  trial_ends_at, sub_ends_at, created_at, last_lat, last_lng, last_loc_at, available`;
+
+async function getDriversLite() {
+  if (!HAS_DB) return [...mem.drivers.values()];
+  const res = await pool.query(`SELECT ${DRIVER_LITE} FROM drivers`);
+  return res.rows;
+}
+
+// قائمة لوحة التحكم: بيها الصورة الشخصية للعرض، بلا صور المستمسكات الثقيلة
+async function getDriversForList() {
+  if (!HAS_DB) return [...mem.drivers.values()];
+  const res = await pool.query(`SELECT ${DRIVER_LITE}, photo_self FROM drivers ORDER BY created_at DESC`);
+  return res.rows;
+}
+
 async function getAllDrivers() {
   if (!HAS_DB) return [...mem.drivers.values()];
   const res = await pool.query('SELECT * FROM drivers ORDER BY created_at DESC');
@@ -368,7 +398,8 @@ async function clearDriverPushSubscription(id) {
 async function getDriversForPush() {
   const ok = d => d.available !== false && computeAccess(d).allowed;
   if (!HAS_DB) return [...mem.drivers.values()].filter(d => d.push_subscription && ok(d));
-  const res = await pool.query('SELECT * FROM drivers WHERE push_subscription IS NOT NULL');
+  const res = await pool.query(
+    `SELECT ${DRIVER_LITE}, push_subscription FROM drivers WHERE push_subscription IS NOT NULL`);
   return res.rows.filter(ok);
 }
 
@@ -545,6 +576,55 @@ async function approveDriver(id, trialDays = 1) {
 }
 
 // حذف سائق (مع رحلاته)
+/* ===== حذف الحساب =====
+   متجر جوجل وآبل يلزمون إن المستخدم يكدر يحذف حسابه من داخل التطبيق.
+   نشيل كل شي شخصي، ونخلي سطور الرحلات بلا اسم ولا رقم — لأنها حسابات
+   مالية تخص السائق والإدارة وما تنشال. */
+async function deleteCustomerAccount(phone) {
+  const clean = cleanPhone(phone);
+  if (!HAS_DB) {
+    mem.customers.delete(clean);
+    mem.places = (mem.places || []).filter(x => cleanPhone(x.phone) !== clean);
+    mem.rewards = (mem.rewards || []).filter(x => cleanPhone(x.phone) !== clean);
+    for (const r of mem.rides.values()) {
+      if (cleanPhone(r.customer?.phone) === clean) r.customer = { name: 'حساب محذوف', phone: '' };
+    }
+    return true;
+  }
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`DELETE FROM saved_places WHERE regexp_replace(phone, '\D', '', 'g') = $1`, [clean]);
+    await c.query(`DELETE FROM customer_rewards WHERE regexp_replace(phone, '\D', '', 'g') = $1`, [clean]);
+    await c.query(
+      `UPDATE rides SET customer_name='حساب محذوف', customer_phone='' WHERE regexp_replace(customer_phone, '\D', '', 'g') = $1`,
+      [clean]);
+    await c.query(`DELETE FROM customers WHERE regexp_replace(phone, '\D', '', 'g') = $1`, [clean]);
+    await c.query('COMMIT');
+    return true;
+  } catch (e) {
+    await c.query('ROLLBACK');
+    throw e;
+  } finally { c.release(); }
+}
+
+/* السائق: نشيل بياناته وصوره ونوقف حسابه، ونخلي سجل رحلاته ومستحقاته
+   للمحاسبة — بس بلا اسم ولا رقم ولا صور. */
+async function deleteDriverAccount(id) {
+  if (!HAS_DB) {
+    const d = mem.drivers.get(id);
+    if (d) Object.assign(d, { name: 'حساب محذوف', phone: '', car: null, photo_self: null, photo_car: null,
+      photo_id_front: null, photo_id_back: null, push_subscription: null, banned: true, available: false });
+    return true;
+  }
+  await pool.query(`
+    UPDATE drivers SET name='حساب محذوف', phone='', car=NULL,
+      photo_self=NULL, photo_car=NULL, photo_id_front=NULL, photo_id_back=NULL,
+      push_subscription=NULL, banned=true, available=false, deleted_at=NOW()
+    WHERE id=$1`, [id]);
+  return true;
+}
+
 async function deleteDriver(id) {
   if (!HAS_DB) { mem.drivers.delete(id); return true; }
   await pool.query('UPDATE rides SET driver_id=NULL WHERE driver_id=$1', [id]);
@@ -1587,7 +1667,8 @@ async function setContactSettings({ whatsapp, facebook, instagram, telegram }) {
 
 module.exports = {
   HAS_DB, init, ping, getUnratedDoneRide,
-  upsertDriver, getDriver, getAllDrivers, getDriverByPhone, updateDriverLocation,
+  upsertDriver, getDriver, getAllDrivers, getDriversLite, getDriversForList, getDriverByPhone, updateDriverLocation,
+  deleteCustomerAccount, deleteDriverAccount,
   getDriverAccess, setDriverSubscription, setDriverStatus, revokeDriverSubscription, deleteDriver,
   banDriver, unbanDriver, approveDriver,
   upsertCustomer, getAllCustomers, getCustomerByPhone, getCustomerTripCount, getCustomerTrips,

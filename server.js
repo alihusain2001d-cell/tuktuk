@@ -10,12 +10,21 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const compression = require('compression');
 const webpush = require('web-push');
 const db = require('./db');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+
+/* الصفحات كبيرة (الخريطة والشاشات كلها بملف واحد) — الضغط ينزّل حجمها
+   لأقل من الثلث، يعني فتح أسرع للزبون ومصرف شبكة أقل علينا. */
+/* السيرفر خلف بروكسي Railway، فبدون هذي كل الطلبات تطلع من نفس الـIP
+   وحدود الحماية تحجب كل الناس سوا بدل المسيء وحده. */
+app.set('trust proxy', 1);
+
+app.use(compression());
 
 app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
@@ -36,8 +45,29 @@ function cleanInput(v) {
 }
 app.use((req, res, next) => { if (req.body && typeof req.body === 'object') cleanInput(req.body); next(); });
 
+/* قائمة السواق تنطلب كل ٥-١٢ ثانية (خريطة الزبون وخريطة اللوحة)، وهي
+   نفسها ما تتغير بهالسرعة — فنخزنها ثواني قليلة بدل ما نتعب القاعدة. */
+let driversCache = { at: 0, rows: [] };
+async function cachedDriversLite() {
+  if (Date.now() - driversCache.at < 5000) return driversCache.rows;
+  const rows = await db.getDriversLite();
+  driversCache = { at: Date.now(), rows };
+  return rows;
+}
+// أي تغيير بحساب سائق يلغي الذاكرة المؤقتة فوراً
+function clearDriversCache() { driversCache.at = 0; }
+
 // ============ مفتاح لوحة التحكم ============
 const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
+
+/* المفتاح الافتراضي مكتوب بالكود المفتوح، وهو نفسه اللي يوقّع جلسات الزبائن
+   والسواق. لو انرفع بدون ADMIN_KEY، أي أحد يفتح اللوحة ويزوّر الجلسات —
+   فنوقف التشغيل بوضوح بدل ما نشتغل مكشوفين. */
+if (process.env.DATABASE_URL && ADMIN_KEY === '1994') {
+  console.error('⛔ ADMIN_KEY ما منضاف بإعدادات السيرفر — ما نشتغل بالمفتاح الافتراضي.');
+  console.error('   أضف ADMIN_KEY (ويفضّل SESSION_SECRET هم) بمتغيرات Railway وأعد النشر.');
+  process.exit(1);
+}
 
 // ============ إشعارات المتصفح (Web Push) ============
 // توصل حتى لو التطبيق مقفل بالخلفية أو الشاشة مقفلة — عكس WebSocket اللي يحتاج التبويب شغّال
@@ -54,10 +84,15 @@ if (PUSH_ENABLED) {
 const LOCATIONIQ_API_KEY = process.env.LOCATIONIQ_API_KEY || '';
 
 // المسارات
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'home.html')));
-app.get('/ride', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/driver', (req, res) => res.sendFile(path.join(__dirname, 'driver.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+const sendPage = (res, file) => {
+  res.setHeader('Cache-Control', 'no-cache');   // التحديث يوصل فوراً لكل الناس
+  res.sendFile(path.join(__dirname, file));
+};
+app.get('/', (req, res) => sendPage(res, 'home.html'));
+app.get('/ride', (req, res) => sendPage(res, 'index.html'));
+app.get('/driver', (req, res) => sendPage(res, 'driver.html'));
+app.get('/admin', (req, res) => sendPage(res, 'admin.html'));
+app.get('/privacy', (req, res) => sendPage(res, 'privacy.html'));   // المتجر يطلب رابط سياسة خصوصية
 // ============================================================
 //  /health — تستعمله Railway حتى تنشر بدون انقطاع:
 //  تنتظر النسخة الجديدة ترد 200 قبل ما تطفي القديمة، فالسواق
@@ -90,7 +125,16 @@ app.get('/health', async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname), { dotfiles: 'allow' })); // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
+/* الصور والأيقونات ما تتغير، فنخلي المتصفح يحتفظ بيها أسبوع — ما يعيد
+   تنزيلها كل فتحة. أما صفحات HTML فما نخزنها أبداً، وإلا السائق أو الزبون
+   يضل على نسخة قديمة بعد كل تحديث ننشره. */
+app.use(express.static(path.join(__dirname), {
+  dotfiles: 'allow',   // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
+  setHeaders(res, filePath) {
+    if (/\.(html|json)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+    else if (/\.(png|jpg|jpeg|svg|ico|webp|woff2?)$/i.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=604800');
+  },
+}));
 
 // ============================================================
 //  الحالة اللحظية (بالذاكرة — طبيعي، هاي مؤقتة)
@@ -248,7 +292,7 @@ wss.on('connection', (ws) => {
         }
 
         // نبضة حياة — تأكيد إنه الاتصال شغّال فعلاً (يفيد بكشف انقطاع صامت بسبب شبكة الموبايل)
-        case 'ping': { ws.send(JSON.stringify({ type: 'pong' })); break; }
+        case 'ping': { ws._alive = true; ws.send(JSON.stringify({ type: 'pong' })); break; }
 
         default: break;
       }
@@ -426,6 +470,49 @@ function checkOtp(phone, code) {
 }
 
 // طلب كود
+/* كل رسالة كود تنكلّف فلوس. بدون حدود، أي أحد يكدر يكتب سكربت يرسل آلاف
+   الأكواد لأرقام عشوائية ويحرق رصيدنا بساعة. فنحد: من نفس الجهاز، ولنفس
+   الرقم باليوم، ومجموع كلي باليوم. */
+/* شركات الموبايل بالعراق تخلي آلاف الزبائن خلف نفس الـIP، فالحد هنا واسع
+   (يوقف السكربتات بس) — الحماية الحقيقية بالحد لكل رقم وبالسقف اليومي. */
+const OTP_MAX_PER_IP_HOUR = Number(process.env.OTP_MAX_PER_IP_HOUR) || 30;
+const OTP_MAX_PER_PHONE_DAY = Number(process.env.OTP_MAX_PER_PHONE_DAY) || 8;
+const OTP_MAX_PER_DAY = Number(process.env.OTP_MAX_PER_DAY) || 400;
+const otpByIp = new Map();      // IP → [أوقات]
+const otpByPhone = new Map();   // رقم → [أوقات]
+let otpToday = { day: new Date().toDateString(), count: 0 };
+
+function otpAllowed(ip, phone) {
+  const now = Date.now();
+  const today = new Date().toDateString();
+  if (otpToday.day !== today) otpToday = { day: today, count: 0 };
+  if (otpToday.count >= OTP_MAX_PER_DAY) return 'الخدمة مزدحمة هسه، حاول بعد شوية';
+
+  const keep = (list, ms) => (list || []).filter(t => now - t < ms);
+  const ipHits = keep(otpByIp.get(ip), 3600 * 1000);
+  if (ipHits.length >= OTP_MAX_PER_IP_HOUR) return 'محاولات كثيرة من نفس الجهاز، حاول بعد ساعة';
+  const phoneHits = keep(otpByPhone.get(phone), 24 * 3600 * 1000);
+  if (phoneHits.length >= OTP_MAX_PER_PHONE_DAY) return 'أرسلنا أكواد كثيرة لهذا الرقم اليوم، جرّب باجر';
+
+  otpByIp.set(ip, [...ipHits, now]);
+  otpByPhone.set(phone, [...phoneHits, now]);
+  otpToday.count++;
+  return null;
+}
+
+// تنظيف دوري حتى الخرائط ما تكبر بالذاكرة
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, list] of otpByIp) {
+    const keep = list.filter(t => now - t < 3600 * 1000);
+    keep.length ? otpByIp.set(k, keep) : otpByIp.delete(k);
+  }
+  for (const [k, list] of otpByPhone) {
+    const keep = list.filter(t => now - t < 24 * 3600 * 1000);
+    keep.length ? otpByPhone.set(k, keep) : otpByPhone.delete(k);
+  }
+}, 30 * 60 * 1000);
+
 app.post('/api/otp/send', async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
@@ -436,6 +523,9 @@ app.post('/api/otp/send', async (req, res) => {
       const wait = Math.ceil((OTP_RESEND_WAIT - (Date.now() - existing.lastSentAt)) / 1000);
       return res.status(429).json({ error: `انتظر ${wait} ثانية قبل إعادة الإرسال`, waitSec: wait });
     }
+
+    const blocked = otpAllowed(req.ip, phone);
+    if (blocked) return res.status(429).json({ error: blocked });
 
     const code = genOTP();
     otpCodes.set(phone, { code, expiresAt: Date.now() + OTP_TTL, attempts: 0, lastSentAt: Date.now() });
@@ -521,6 +611,17 @@ setInterval(() => {
   for (const [phone, rec] of otpCodes) if (now > rec.expiresAt) otpCodes.delete(phone);
 }, 10 * 60 * 1000);
 
+/* شبكة الموبايل تقطع الاتصال بصمت أحياناً: السوكت يضل "مفتوح" بنظر السيرفر
+   والسائق يبقى بقائمة المتصلين وهو مو موجود — فيشوفه الزبون على الخريطة
+   وما يوصله طلب. النبضة تكشفهم وتنظفهم. */
+setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws._alive === false) { try { ws.terminate(); } catch (e) {} return; }
+    ws._alive = false;
+    try { ws.ping(); } catch (e) {}
+  });
+}, 30000);
+
 // ============================================================
 //  API — السائق
 // ============================================================
@@ -602,6 +703,7 @@ app.post('/api/driver/register', async (req, res) => {
       photo_id_back: photoIdBack || null,
       last_lat: lat || null, last_lng: lng || null,
     });
+    clearDriversCache();   // سائق جديد — يبين بالخريطة فوراً
     const access = await db.getDriverAccess(driverId);
     res.json({ ok: true, driver: { id: d.id, name: d.name, status: d.status }, access, token: driverToken(d.id) });
   } catch (e) {
@@ -623,6 +725,7 @@ app.get('/api/driver/:id/access', requireDriver, async (req, res) => {
 app.post('/api/driver/:id/availability', requireDriver, async (req, res) => {
   try {
     const available = await db.setDriverAvailability(req.params.id, !!req.body.available);
+    clearDriversCache();
     if (!available) onlineDrivers.delete(req.params.id); // شيله فوراً من قائمة المتاحين
     res.json({ ok: true, available });
   } catch (e) {
@@ -760,6 +863,45 @@ app.post('/api/customer/:phone/change-phone', requireCustomer, async (req, res) 
 });
 
 // مكافآت الزبون (المتاحة الحين + رحلاته المتبقية للمكافأة الجاية)
+/* حذف الحساب — متطلب إلزامي بمتجر جوجل وآبل.
+   ما نحذف وعنده طلب شغّال، وإلا السائق يبقى برحلة بلا زبون. */
+app.delete('/api/customer/:phone', requireCustomer, async (req, res) => {
+  try {
+    const clean = normalizePhone(req.params.phone);
+    for (const r of activeRides.values()) {
+      if (normalizePhone(r.customer?.phone) === clean &&
+          ['searching', 'offered', 'accepted', 'arrived', 'started'].includes(r.status)) {
+        return res.status(409).json({ error: 'عندك طلب جاري — خلّصه أو ألغه قبل ما تحذف حسابك' });
+      }
+    }
+    await db.deleteCustomerAccount(clean);
+    console.log(`🗑️ انحذف حساب زبون`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('خطأ بحذف حساب الزبون:', e.message);
+    res.status(500).json({ error: 'ما كدرنا نحذف الحساب، حاول مرة ثانية' });
+  }
+});
+
+app.delete('/api/driver/:id', requireDriver, async (req, res) => {
+  try {
+    const id = req.params.id;
+    for (const r of activeRides.values()) {
+      if (r.driverId === id && ['accepted', 'arrived', 'started'].includes(r.status)) {
+        return res.status(409).json({ error: 'عندك طلب شغّال — خلّصه قبل ما تحذف حسابك' });
+      }
+    }
+    await db.deleteDriverAccount(id);
+    onlineDrivers.delete(id);
+    clearDriversCache();
+    console.log(`🗑️ انحذف حساب سائق`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('خطأ بحذف حساب السائق:', e.message);
+    res.status(500).json({ error: 'ما كدرنا نحذف الحساب، حاول مرة ثانية' });
+  }
+});
+
 app.get('/api/customer/:phone/rewards', requireCustomer, async (req, res) => {
   try {
     const [pending, settings, tripCount] = await Promise.all([
@@ -814,10 +956,28 @@ app.delete('/api/customer/:phone/places/:id', requireCustomer, async (req, res) 
 // البحث عن موقع بالاسم — Google Places لو مفعّل، وإلا OpenStreetMap تلقائياً بدون ما ينكسر البحث
 /* من إحداثيات إلى اسم مكان — نحتاجه لما الزبون يحرك الدبوس على الخريطة،
    حتى يشوف اسم المكان بدل "موقع على الخريطة" ويتأكد إنه المكان الصح. */
+/* خدمة الأسماء إلها حصة يومية محدودة، والزبون يحرك الدبوس عشرات المرات.
+   نخزن الجواب حسب الموقع (بدقة ~١١ متر) — نفس البقعة ما نسألها مرتين. */
+const geoCache = new Map();
+const GEO_TTL = 24 * 3600 * 1000, GEO_MAX = 5000;
+function geoGet(key) {
+  const hit = geoCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > GEO_TTL) { geoCache.delete(key); return null; }
+  return hit.val;
+}
+function geoSet(key, val) {
+  if (geoCache.size >= GEO_MAX) geoCache.delete(geoCache.keys().next().value);
+  geoCache.set(key, { at: Date.now(), val });
+}
+
 app.get('/api/reverse', async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);
     if (isNaN(lat) || isNaN(lng)) return res.json({ name: null });
+    const key = `r:${lat.toFixed(4)},${lng.toFixed(4)}`;
+    const cached = geoGet(key);
+    if (cached) return res.json(cached);
 
     const url = LOCATIONIQ_API_KEY
       ? `https://us1.locationiq.com/v1/reverse?key=${LOCATIONIQ_API_KEY}&format=json&lat=${lat}&lon=${lng}&accept-language=ar&zoom=18`
@@ -840,7 +1000,9 @@ app.get('/api/reverse', async (req, res) => {
     else if (road && hood) name = `${road}، ${hood}`;
     else if (road) name = road;
     else if (area) { name = `قرب ${area}`; approx = true; }   // أحسن من "موقع محدد على الخريطة"
-    res.json({ name, approx });
+    const out2 = { name, approx };
+    geoSet(key, out2);
+    res.json(out2);
   } catch (e) {
     res.json({ name: null });   // ما نكسر التحديد لو فشل العنوان
   }
@@ -850,6 +1012,9 @@ app.get('/api/geocode', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     if (q.length < 2) return res.json([]);
+    const qKey = `q:${q}`;
+    const qHit = geoGet(qKey);
+    if (qHit) return res.json(qHit);
 
     /* أسماء مثل "حي المعلمين" موجودة بكل محافظة، وقبل كنا نرسل الصندوق
        كتفضيل بس (bounded=0) فيطلع حي المعلمين ببغداد أو مكان بأمريكا.
@@ -888,10 +1053,13 @@ app.get('/api/geocode', async (req, res) => {
       .sort((a, b) => a.km - b.km)      // الأقرب إله أول
       .slice(0, 8)
       .map(({ fromTown, ...r }) => r);
+    geoSet(qKey, results);
     res.json(results);
   } catch (e) {
+    /* خدمة البحث الخارجية تتأخر أو تنقطع أحياناً. نرجّع قائمة فاضية بدل خطأ،
+       حتى يطلع للزبون "ما لگينا نتائج — حدد على الخريطة" ويكمل طلبه. */
     console.error('خطأ بالبحث عن المواقع:', e.message);
-    res.status(500).json({ error: 'صار خطأ بالبحث' });
+    res.json([]);
   }
 });
 
@@ -1053,6 +1221,7 @@ app.get('/api/drivers/nearby', requireAnyCustomer, async (req, res) => {
       if (ride.driverId && ['accepted', 'arrived', 'started', 'offered'].includes(ride.status)) busyIds.add(ride.driverId);
     }
     const out = [], seenIds = new Set();
+    const driverRows = await cachedDriversLite();
     const add = (id, la, ln) => {
       if (seenIds.has(id) || busyIds.has(id)) return;         // عنده طلب — مو متاح
       if (!validLoc(la, ln)) return;                          // ما نعرف موقعه — ما نخترع له مكان
@@ -1065,7 +1234,7 @@ app.get('/api/drivers/nearby', requireAnyCustomer, async (req, res) => {
     /* السائق الجاهز اللي سكّر التطبيق توّه: الطلب يوصله بالإشعارات، فنبينه
        للزبون بآخر موقع إذا عمره أقل من ٢٠ دقيقة — أحسن من "ماكو سواق". */
     const RECENT_MS = 20 * 60 * 1000;
-    for (const rec of await db.getAllDrivers()) {
+    for (const rec of driverRows) {
       if (rec.available === false) continue;
       if (!db.computeAccess(rec).allowed) continue;
       const seen = rec.last_loc_at ? new Date(rec.last_loc_at).getTime() : 0;
@@ -1586,7 +1755,7 @@ function checkAdmin(req, res, next) {
 app.get('/api/admin/drivers', checkAdmin, async (req, res) => {
   try {
     const [drivers, paidTotals, ratings] = await Promise.all([
-      db.getAllDrivers(), db.getDriverPaidTotalsBulk(), db.getDriverRatingSummariesBulk(),
+      db.getDriversForList(), db.getDriverPaidTotalsBulk(), db.getDriverRatingSummariesBulk(),
     ]);
     const withAccess = drivers.map(d => ({
       ...d,
@@ -1654,6 +1823,7 @@ app.post('/api/admin/driver/:id/subscribe', checkAdmin, async (req, res) => {
     if (!days || days < 1) return res.status(400).json({ error: 'عدد أيام غير صحيح' });
     if (amount < 0) return res.status(400).json({ error: 'المبلغ غير صحيح' });
     const d = await db.setDriverSubscription(req.params.id, days, amount, note);
+    clearDriversCache();
     res.json({ ok: true, driver: d, amount });
   } catch (e) {
     console.error('خطأ بالتفعيل:', e.message);
@@ -1675,6 +1845,7 @@ app.get('/api/admin/subscriptions', checkAdmin, async (req, res) => {
 app.post('/api/admin/driver/:id/status', checkAdmin, async (req, res) => {
   try {
     const d = await db.setDriverStatus(req.params.id, req.body.status);
+    clearDriversCache();
     res.json({ ok: true, driver: d });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1683,6 +1854,7 @@ app.post('/api/admin/driver/:id/status', checkAdmin, async (req, res) => {
 app.post('/api/admin/driver/:id/revoke', checkAdmin, async (req, res) => {
   try {
     const d = await db.revokeDriverSubscription(req.params.id);
+    clearDriversCache();
     // لو متصل، اقطعه فوراً
     const online = onlineDrivers.get(req.params.id);
     if (online) {
@@ -1707,6 +1879,7 @@ app.post('/api/admin/driver/:id/approve', checkAdmin, async (req, res) => {
 app.post('/api/admin/driver/:id/ban', checkAdmin, async (req, res) => {
   try {
     const d = await db.banDriver(req.params.id, (req.body.reason || '').trim());
+    clearDriversCache();
     if (!d) return res.status(404).json({ error: 'ماكو سائق' });
     const online = onlineDrivers.get(req.params.id);
     if (online) {
@@ -1742,7 +1915,7 @@ app.delete('/api/admin/driver/:id', checkAdmin, async (req, res) => {
 // السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
 app.get('/api/admin/live', checkAdmin, async (req, res) => {
   try {
-    const allDriverRows = await db.getAllDrivers();
+    const allDriverRows = await cachedDriversLite();
     const driverMap = {};
     allDriverRows.forEach(r => { driverMap[r.id] = r; });
 
@@ -2123,5 +2296,14 @@ function shutdown(signal) {
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 8000).unref(); // ما ننتظر للأبد
 }
+/* خطأ شارد بدون معالجة كان يطفي السيرفر كله — والزبائن والسواق ينقطعون.
+   نسجّله ونكمل؛ الأخطاء الحقيقية تبين باللوك ونصلحها. */
+process.on('unhandledRejection', (err) => {
+  console.error('⚠️ وعد مرفوض بدون معالجة:', err && err.message ? err.message : err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ خطأ غير متوقع:', err && err.stack ? err.stack : err);
+});
+
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

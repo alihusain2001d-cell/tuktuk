@@ -917,25 +917,38 @@ function driverCard(d) {
   </div>`;
 }
 
+/* صور المستمسكات ثقيلة (كل وحدة مئات الكيلوبايتات)، فما تجي مع قائمة السواق
+   — نجيبها لما تفتح مستمسكات سائق معيّن، ونحتفظ بيها بالذاكرة لو رجعت تفتحها. */
+const docsCache = new Map();
+async function driverDocs(id) {
+  if (docsCache.has(id)) return docsCache.get(id);
+  const d = await api(`/api/admin/driver/${id}/detail`).then(r => r.json());
+  const photos = d && d.driver ? d.driver : {};
+  docsCache.set(id, photos);
+  return photos;
+}
+
 // نافذة المستمسكات
-function openDocs(id) {
-  const d = allDrivers.find(x=>x.id===id);
-  if (!d) return;
+async function openDocs(id) {
+  const base = allDrivers.find(x=>x.id===id);
+  if (!base) return;
+  document.getElementById('docs-title').textContent = base.name;
+  document.getElementById('docs-sub').textContent = `${base.phone} — ${base.car || '—'}`;
+  document.getElementById('docs-grid').innerHTML = '<div class="loading"><div class="spinner"></div>نجيب الصور...</div>';
+  document.getElementById('docs-modal').classList.add('show');
+  const d = { ...base, ...(await driverDocs(id)) };
   const docs = [
     ['self', d.photo_self, 'الصورة الشخصية'],
     ['car', d.photo_car, 'صورة المركبة'],
     ['idf', d.photo_id_front, 'البطاقة — أمامي'],
     ['idb', d.photo_id_back, 'البطاقة — خلفي'],
   ];
-  document.getElementById('docs-title').textContent = d.name;
-  document.getElementById('docs-sub').textContent = `${d.phone} — ${d.car || '—'}`;
   document.getElementById('docs-grid').innerHTML = docs.map(([k, src, label]) => src
     ? `<div class="doc-item" onclick="viewImg('${id}','${k}')">
          <img src="${src}"><div class="doc-label">${label}</div>
        </div>`
     : `<div class="doc-item empty-doc"><div class="doc-none">ماكو صورة</div><div class="doc-label">${label}</div></div>`
   ).join('');
-  document.getElementById('docs-modal').classList.add('show');
 }
 function closeDocs(){ document.getElementById('docs-modal').classList.remove('show'); }
 
@@ -1282,10 +1295,11 @@ function callDriver(phone){ if(phone) location.href = 'tel:'+phone; }
 
 // ============ عارض الصور ============
 const IMG_LABELS = { self:'الصورة الشخصية', car:'صورة المركبة', idf:'البطاقة — الوجه الأمامي', idb:'البطاقة — الوجه الخلفي' };
-function viewImg(id, key) {
-  event.stopPropagation();
-  const d = allDrivers.find(x=>x.id===id);
-  if (!d) return;
+async function viewImg(id, key) {
+  if (typeof event !== 'undefined' && event) event.stopPropagation();
+  const base = allDrivers.find(x=>x.id===id);
+  if (!base) return;
+  const d = { ...base, ...(key === 'self' && base.photo_self ? {} : await driverDocs(id)) };
   const src = { self:d.photo_self, car:d.photo_car, idf:d.photo_id_front, idb:d.photo_id_back }[key];
   if (!src) return toast('ماكو صورة');
   document.getElementById('iv-img').src = src;

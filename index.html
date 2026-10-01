@@ -1352,6 +1352,14 @@ function loadSettings() {
       <input value="${user.phone || ''}" disabled style="direction:ltr;text-align:right;opacity:.6">
     </div>
     <button class="btn ghost" onclick="changePhoneFlow()">غيّر رقم الموبايل</button>
+
+    <div style="margin-top:28px;padding-top:18px;border-top:1px solid var(--line)">
+      <button class="btn ghost" style="color:var(--stop);border-color:#F3C9CA" onclick="deleteMyAccount()">🗑️ حذف حسابي</button>
+      <p style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.7">
+        ينشال اسمك ورقمك ومواقعك المحفوظة ومكافآتك. سجل رحلاتك يبقى بلا اسم ولا رقم للمحاسبة مع السواق.
+        <a href="/privacy" target="_blank" style="color:var(--muted)">سياسة الخصوصية</a>
+      </p>
+    </div>
   `;
 }
 
@@ -1404,6 +1412,20 @@ async function saveName() {
     showApp();
     toast('انحفظ الاسم ✅');
   } catch (e) { toast('صار خطأ'); }
+}
+
+/* حذف الحساب من داخل التطبيق — متطلب إلزامي بمتجر جوجل وآبل */
+async function deleteMyAccount() {
+  if (!confirm('تحذف حسابك نهائياً؟ ما تكدر ترجعه.')) return;
+  if (!confirm('متأكد؟ راح ينشال اسمك ورقمك ومواقعك المحفوظة ومكافآتك.')) return;
+  try {
+    const res = await fetch(`/api/customer/${encodeURIComponent(user.phone)}`, { method: 'DELETE' });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || 'ما كدرنا نحذف الحساب', 5000);
+    localStorage.removeItem('jayak_user');
+    toast('انحذف حسابك. نشكرك على استخدامك جايك 🙏', 5000);
+    setTimeout(() => location.reload(), 2000);
+  } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
 
 async function changePhoneFlow() {
