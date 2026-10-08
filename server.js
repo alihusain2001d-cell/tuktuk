@@ -57,6 +57,19 @@ async function cachedDriversLite() {
 // أي تغيير بحساب سائق يلغي الذاكرة المؤقتة فوراً
 function clearDriversCache() { driversCache.at = 0; }
 
+/* ===== خصم المكافأة =====
+   كان محسوب بمكان واحد (تقدير الرحلة وقت الحجز) بس، فالخصم يضيع:
+   بالتوصيل (سعره يجي من عرض السائق)، وبالرحلة بلا وجهة (سعرها ينحسب
+   بالنهاية). هسه نفس الحساب ينطبق بكل مكان ينتحدد بيه مبلغ. */
+function applyReward(fare, reward) {
+  if (!reward || !fare) return fare;
+  const value = Number(reward.reward_value) || 0;
+  if (reward.reward_type === 'free_ride') return 0;
+  if (reward.reward_type === 'percent') return Math.max(0, Math.round(fare * (1 - value / 100)));
+  if (reward.reward_type === 'amount') return Math.max(0, fare - value);
+  return fare;
+}
+
 // ============ مفتاح لوحة التحكم ============
 const ADMIN_KEY = process.env.ADMIN_KEY || '1994';
 
@@ -911,7 +924,8 @@ app.get('/api/customer/:phone/rewards', requireCustomer, async (req, res) => {
     ]);
     res.json({
       enabled: settings.enabled,
-      pending: settings.enabled && pending ? { type: pending.reward_type, value: pending.reward_value } : null,
+      // الخصم اليدوي يطلع دائماً — حتى لو نظام المكافآت التلقائي مطفي
+      pending: pending ? { type: pending.reward_type, value: pending.reward_value } : null,
       tripsDone: tripCount,
       tripsThreshold: settings.trips_threshold,
     });
@@ -1151,16 +1165,12 @@ app.post('/api/book', requireCustomer, async (req, res) => {
     }
 
     // لو الزبون عنده مكافأة متاحة، تنطبق تلقائياً على الرحلة العادية (مو التوصيل، السعر فيه ما يتحدد إلا بعد عرض السائق)
-    let customerPaid = estFare, reward = null;
-    if (type === 'ride' && phone) {
-      const rewardSettings = await db.getRewardSettings();
-      if (rewardSettings.enabled) reward = await db.getPendingReward(phone);
-      if (reward) {
-        if (reward.reward_type === 'free_ride') customerPaid = 0;
-        else if (reward.reward_type === 'percent') customerPaid = Math.max(0, Math.round(estFare * (1 - reward.reward_value / 100)));
-        else if (reward.reward_type === 'amount') customerPaid = Math.max(0, estFare - reward.reward_value);
-      }
-    }
+    /* المكافأة تنحجز للطلب أياً كان نوعه — حتى التوصيل، لأن سعره يتحدد
+       بعدين بعرض السائق والخصم لازم ينطبق عليه هم.
+       وزر "نظام المكافآت" بالإعدادات يخص المنح التلقائي بس؛ خصم الإدارة
+       اليدوي ينطبق دائماً — وإلا تنطي الزبون خصم وما يستفيد منه. */
+    let reward = phone ? await db.getPendingReward(phone) : null;
+    let customerPaid = applyReward(estFare, reward);
 
     const ride = {
       id: rideId, type,
@@ -1418,8 +1428,10 @@ app.post('/api/offer/accept', async (req, res) => {
     ride.acceptedAt = Date.now();
     ride.estFare = ride.offerPrice;
     /* بدون هذا السطر يبقى customerPaid = ٠ من وقت الحجز (التوصيل ما إله سعر
-       تلقائي)، فبنهاية الطلب ينقال للزبون إن المبلغ صفر ويطلعله "مجانية". */
-    ride.customerPaid = ride.offerPrice;
+       تلقائي)، فبنهاية الطلب ينقال للزبون إن المبلغ صفر ويطلعله "مجانية".
+       وإذا عنده خصم من الإدارة، ينطبق هنا على سعر العرض. */
+    const rw = ride.rewardId ? await db.getRewardById(ride.rewardId) : null;
+    ride.customerPaid = applyReward(ride.offerPrice, rw);
     await db.acceptRideOffer(rideId);
 
     const driver = onlineDrivers.get(ride.driverId);
@@ -1575,7 +1587,11 @@ async function finishRide(ride, { keepFare = false, doneBy = 'driver' } = {}) {
       if (pricing) {
         ride.estKm = pricing.km;
         ride.estFare = pricing.fare;
-        if (!ride.rewardId) ride.customerPaid = pricing.fare;   // المكافأة تبقى مثل ما هي
+        /* الخصم ينطبق على المبلغ النهائي. قبل كان الزبون اللي بلا وجهة
+           يطلع مجاني كلش (الخصم انحسب على تقدير = صفر). */
+        const rw = ride.rewardId ? await db.getRewardById(ride.rewardId) : null;
+        ride.customerPaid = applyReward(pricing.fare, rw);
+        pricing.discount = Math.max(0, pricing.fare - ride.customerPaid);
         await db.setRideFare(ride.id, ride.estKm, ride.estFare, ride.customerPaid);
       }
     }
@@ -2033,11 +2049,12 @@ app.post('/api/admin/reward-settings', checkAdmin, async (req, res) => {
 // منح مكافأة يدوية لزبون معيّن
 app.post('/api/admin/customer/:phone/grant-reward', checkAdmin, async (req, res) => {
   try {
-    const settings = await db.getRewardSettings();
-    if (!settings.enabled) return res.status(400).json({ error: 'نظام المكافآت متوقف حالياً — فعّله أول من الإعدادات' });
+    /* زر "نظام المكافآت" يخص المنح التلقائي (كل ١٠ رحلات)؛ الإدارة لازم
+       تكدر تنطي خصم يدوي بأي وقت. */
     const type = req.body.type;
     const value = parseInt(req.body.value, 10) || 0;
     if (!['free_ride', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: 'نوع مكافأة غير معروف' });
+    if (type !== 'free_ride' && value <= 0) return res.status(400).json({ error: 'اكتب قيمة الخصم' });
     const reward = await db.grantManualReward(req.params.phone, type, value);
     res.json({ ok: true, reward });
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -2737,16 +2737,26 @@ function openRateScreen() {
   const box = document.getElementById('final-fare');
   const amt = document.getElementById('ff-amt');
   const detail = document.getElementById('ff-detail');
+  const paid = lastFare && lastFare.fare != null ? lastFare.fare : null;
+  const full = lastFare ? lastFare.estFare : null;
+  // خصم الإدارة لازم يبين بوضوح: قيمة الرحلة ناقص الخصم
+  const discount = (full != null && paid != null && full > paid) ? full - paid : 0;
+
   if (lastPricing) {
-    amt.textContent = lastPricing.fare.toLocaleString() + ' د.ع';
-    detail.textContent = lastPricing.reason === 'longer_trip'
+    amt.textContent = (paid != null ? paid : lastPricing.fare).toLocaleString() + ' د.ع';
+    const why = lastPricing.reason === 'longer_trip'
       ? `المتفق عليه ${lastPricing.base.toLocaleString()} + ${lastPricing.extra.toLocaleString()} لأن المشوار طال ${lastPricing.extraKm} كم`
       : `انحسبت على ${lastPricing.km} كم من المسافة اللي قطعتوها`;
+    detail.textContent = discount
+      ? `${why} — قيمتها ${lastPricing.fare.toLocaleString()} وخصم ${discount.toLocaleString()} د.ع 🎁`
+      : why;
     box.classList.remove('hidden');
   } else if (lastFare && lastFare.fare != null) {
     if (lastFare.fare > 0) {
       amt.textContent = lastFare.fare.toLocaleString() + ' د.ع';
-      detail.textContent = '';
+      detail.textContent = discount
+        ? `قيمة الرحلة ${full.toLocaleString()} — خصم ${discount.toLocaleString()} د.ع 🎁`
+        : '';
     } else {
       // مكافأة: الزبون ما يدفع شي
       amt.textContent = 'مجانية 🎁';

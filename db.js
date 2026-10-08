@@ -1247,6 +1247,14 @@ async function getPendingReward(phone) {
   return res.rows[0] || null;
 }
 
+// تفاصيل مكافأة محجوزة لرحلة — نحتاجها لما نحسب الأجرة النهائية
+async function getRewardById(id) {
+  if (!id) return null;
+  if (!HAS_DB) return (mem.rewards || []).find(r => String(r.id) === String(id)) || null;
+  const res = await pool.query('SELECT * FROM customer_rewards WHERE id=$1', [id]);
+  return res.rows[0] || null;
+}
+
 // منح مكافأة يدوية من الأدمن
 async function grantManualReward(phone, type, value) {
   const clean = cleanPhone(phone);
@@ -1679,7 +1687,7 @@ module.exports = {
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,
-  getRewardSettings, setRewardSettings, getServiceSettings, setServiceSettings, getPendingReward, grantManualReward,
+  getRewardSettings, setRewardSettings, getRewardById, getServiceSettings, setServiceSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout, getRewardStatement,
   payDriverRewardsInFull, getDriverFullStatement,
