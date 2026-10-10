@@ -1018,6 +1018,97 @@ function geoSet(key, val) {
   geoCache.set(key, { at: Date.now(), val });
 }
 
+/* ===== خط السير =====
+   كان كل موبايل يسأل محرك المسارات مباشرة. صار يمر من هنا لسببين:
+   مفتاح الخدمة المدفوعة يبقى عندنا مو بموبايل الناس، والسائق والزبون
+   اللي يطلبون نفس الطريق (السائق ← الزبون) يجيهم جواب واحد مخزون.
+   المحرك: Stadia إذا مفتاحه منضاف، وإلا السيرفر العام المجاني. */
+const STADIA_API_KEY = process.env.STADIA_API_KEY || '';
+const routeCache = new Map();
+const ROUTE_TTL = 5 * 60 * 1000, ROUTE_MAX = 2000;
+
+// يفك ترميز مسار Valhalla (دقة ٦ خانات)
+function decodePolyline6(str) {
+  const out = [];
+  let lat = 0, lng = 0, i = 0;
+  while (i < str.length) {
+    let shift = 0, result = 0, b;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
+}
+
+async function fetchRouteFromProvider(from, to) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    if (STADIA_API_KEY) {
+      const body = {
+        locations: [{ lat: from.lat, lon: from.lng }, { lat: to.lat, lon: to.lng }],
+        costing: 'auto', units: 'km',
+      };
+      const r = await fetch(`https://api.stadiamaps.com/route/v1?api_key=${STADIA_API_KEY}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), signal: ctrl.signal,
+      });
+      const data = await r.json();
+      const legs = data && data.trip && data.trip.legs;
+      if (!r.ok || !legs || !legs.length) return null;
+      const coords = legs.flatMap(l => decodePolyline6(l.shape || ''));
+      return { coords, km: data.trip.summary.length, minutes: data.trip.summary.time / 60 };
+    }
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const r = await fetch(url, { signal: ctrl.signal });
+    const data = await r.json();
+    if (!r.ok || data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
+    const route = data.routes[0];
+    return {
+      coords: route.geometry.coordinates.map(c => [c[1], c[0]]),
+      km: route.distance / 1000, minutes: route.duration / 60,
+    };
+  } catch (e) { return null; }
+  finally { clearTimeout(timer); }
+}
+
+// بس للمسجّلين — حتى ما يستهلك غيرنا حصتنا المدفوعة
+function requireAppUser(req, res, next) {
+  if (driverIdFromToken(req.headers['x-driver-token'])) return next();
+  const t = String(req.headers['x-customer-token'] || '');
+  const dot = t.lastIndexOf('.');
+  if (dot > 0) {
+    const sig = Buffer.from(t.slice(dot + 1)), expected = Buffer.from(signCustomer(t.slice(0, dot)));
+    if (sig.length === expected.length && crypto.timingSafeEqual(sig, expected)) return next();
+  }
+  res.status(401).json({ error: 'غير مصرح' });
+}
+
+app.get('/api/route', requireAppUser, async (req, res) => {
+  try {
+    const [fLat, fLng] = String(req.query.from || '').split(',').map(Number);
+    const [tLat, tLng] = String(req.query.to || '').split(',').map(Number);
+    if (!validLoc(fLat, fLng) || !validLoc(tLat, tLng)) return res.status(400).json({ error: 'إحداثيات غير صحيحة' });
+
+    // نقرّب لـ ~١١٠ متر: السائق والزبون يطلبون نفس الطريق فيجيهم نفس الجواب
+    const key = `${fLat.toFixed(3)},${fLng.toFixed(3)}>${tLat.toFixed(3)},${tLng.toFixed(3)}`;
+    const hit = routeCache.get(key);
+    if (hit && Date.now() - hit.at < ROUTE_TTL) return res.json(hit.val);
+
+    const route = await fetchRouteFromProvider({ lat: fLat, lng: fLng }, { lat: tLat, lng: tLng });
+    if (!route) return res.json(null);                 // التطبيق يرسم خط مستقيم بداله
+    if (routeCache.size >= ROUTE_MAX) routeCache.delete(routeCache.keys().next().value);
+    routeCache.set(key, { at: Date.now(), val: route });
+    res.json(route);
+  } catch (e) {
+    console.error('خطأ بخط السير:', e.message);
+    res.json(null);
+  }
+});
+
 app.get('/api/reverse', async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat), lng = parseFloat(req.query.lng);

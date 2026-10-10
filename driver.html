@@ -130,6 +130,9 @@
   .tab.active { color:var(--ink); border-bottom-color:var(--sky); }
 
   /* الخريطة تملأ كل مساحة العرض، واللوحة تطفو فوقها */
+  /* حقوق بيانات الخريطة — مطلوبة برخصة OpenStreetMap ومن مزوّد البلاطات */
+  .map-credit { position:absolute; bottom:2px; left:6px; z-index:620; font-size:9px; color:#6E6A60;
+    background:rgba(255,255,255,.72); padding:1px 6px; border-radius:6px; pointer-events:none; letter-spacing:.2px; }
   #map { position:absolute; inset:0; z-index:1; background:#DCE9F0; }
 
   /* ===== وضع الخريطة الكاملة ===== */
@@ -639,6 +642,7 @@
       <div class="rp-title" id="rp-title">طريق الطلب</div>
     </div>
     <div id="preview-map"></div>
+    <div class="map-credit">© OpenFreeMap © OpenStreetMap</div>
     <div class="rp-foot">
       <div class="rp-legend">
         <span><i class="rp-dot me"></i> <span id="rp-me">إنت هنا</span></span>
@@ -688,6 +692,7 @@
 
   <div class="work-view hidden" id="work-view">
     <div id="map"></div>
+    <div class="map-credit">© OpenFreeMap © OpenStreetMap</div>
 
     <div class="map-hint" id="map-hint">👆 اضغط الخريطة حتى تكبّرها</div>
     <button class="map-expand" onclick="toggleMapFull(true)" title="كبّر الخريطة">⛶</button>
@@ -2664,24 +2669,22 @@ let routeTimer = null;
 // مسار حقيقي على الطرق عبر OSRM (مجاني، بدون مفتاح API)
 /* محرك المسارات خدمة مجانية خارجية — أحياناً بطيئة أو ما ترد أبداً.
    بلا مهلة، الـawait يبقى معلّق للأبد وما ينرسم أي خط. */
+/* خط السير يجي من سيرفرنا — مو من محرك المسارات مباشرة:
+   المفتاح المدفوع يبقى بالسيرفر، والطريق الواحد ينحسب مرة وحدة حتى لو
+   طلبه السائق والزبون سوا. */
 async function fetchRoute(from, to) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6000);
+  const timer = setTimeout(() => ctrl.abort(), 7000);
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const url = `/api/route?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}`;
     const res = await fetch(url, { signal: ctrl.signal });
-    const data = await res.json();
-    if (data.code !== 'Ok' || !data.routes || !data.routes[0]) return null;
-    const route = data.routes[0];
-    return {
-      coords: route.geometry.coordinates.map(c => [c[1], c[0]]), // [lng,lat] → [lat,lng]
-      km: route.distance / 1000,
-      minutes: route.duration / 60,
-    };
+    if (!res.ok) return null;
+    return await res.json();   // { coords, km, minutes } أو null
   } catch (e) { return null; } finally { clearTimeout(timer); }
 }
 
 let lastRouteFetch = 0;
+let routeFrom = null, routeTarget = null;   // من وين حسبنا آخر مسار ولأي وجهة
 let routeFitDone = false; // نكبّر/نصغّر الخريطة تلقائياً مرة وحدة بس، وبعدها نتابع موقع السائق بدون ما نصفّر تكبيره اليدوي
 
 /* وين لازم يروح السائق هسه؟ نفس المنطق يستعمله خط السير بالخريطة
@@ -2723,17 +2726,25 @@ async function drawRoute() {
     clearRoute(); routeLine = null;
     return;
   }
+  /* الخط يبقى مرسوم على الشاشة طول الوقت — بس ما نعيد حسابه من محرك المسارات
+     إلا إذا في سبب: أول مرة، أو تغيّرت الوجهة، أو السائق تحرك مسافة معتبرة،
+     أو مرّت دقيقة. قبل كان يعيد الحساب كل ١٠ ثواني حتى وهو واقف بالإشارة —
+     يعني مئات الطلبات بالرحلة الوحدة بلا فائدة. */
   const now = Date.now();
-  if (routeLine && now - lastRouteFetch < 4000) return; // ما نكرر الطلب لمحرك المسارات كل ثانيتين
+  const movedKm = routeFrom ? haversine(routeFrom.lat, routeFrom.lng, myPos.lat, myPos.lng) : 999;
+  const needsFetch = !routeLine || routeTarget !== target || movedKm > 0.15 || now - lastRouteFetch > 60000;
+  if (!needsFetch) return;
   lastRouteFetch = now;
+  routeFrom = { lat: myPos.lat, lng: myPos.lng };
+  routeTarget = target;
 
-  /* خط مستقيم فوراً — السائق لازم يشوف الاتجاه حتى لو محرك المسارات بطيء
-     أو مقطوع عن شبكته. نبدله بالمسار الحقيقي أول ما يوصل. */
-  setRoute([[myPos.lat, myPos.lng], [target.lat, target.lng]]);
-  routeLine = true;
+  /* خط مستقيم فوراً إذا ماكو خط — السائق لازم يشوف الاتجاه حتى لو محرك
+     المسارات بطيء أو مقطوع عن شبكته. ينبدل بالمسار الحقيقي أول ما يوصل. */
+  if (!routeLine) { setRoute([[myPos.lat, myPos.lng], [target.lat, target.lng]]); routeLine = true; }
   const route = await fetchRoute(myPos, target);
   if (!activeRide || currentTarget() !== target) return;   // خلصت أو تغيّرت المرحلة وإحنا ننتظر
   if (route) setRoute(route.coords);
+  else if (!routeLine) { setRoute([[myPos.lat, myPos.lng], [target.lat, target.lng]]); routeLine = true; }
   // متل خرائط الملاحة: نضل مقرّبين على موقع السائق (مو نكبّر لنشوف المسار كله)، ونتابع بدون ما نغيّر تكبيره اليدوي
   const NAV_ZOOM = 17;
   if (!routeFitDone) {

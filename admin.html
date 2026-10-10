@@ -152,6 +152,9 @@
 
   /* ===== الخريطة ===== */
   #live-map { height:calc(100vh - 190px); min-height:340px; border-radius:16px; border:1px solid var(--line); background:#DCE9F0; }
+  /* حقوق بيانات الخريطة — مطلوبة برخصة OpenStreetMap ومن مزوّد البلاطات */
+  .map-credit { position:absolute; bottom:2px; left:6px; z-index:620; font-size:9px; color:#6E6A60;
+    background:rgba(255,255,255,.72); padding:1px 6px; border-radius:6px; pointer-events:none; letter-spacing:.2px; }
   .map-legend { display:flex; gap:14px; padding:11px 14px; background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; font-size:12px; flex-wrap:wrap; }
   .map-legend span { display:flex; align-items:center; gap:5px; }
   .lg-dot { width:9px; height:9px; border-radius:50%; }
@@ -326,7 +329,9 @@
       <span><i class="lg-dot off"></i> تطبيقه مسكّر (آخر موقع)</span>
       <span id="map-count" style="margin-right:auto;color:var(--muted)">—</span>
     </div>
-    <div id="live-map"></div>
+    <div style="position:relative"><div id="live-map"></div>
+      <div class="map-credit">© OpenFreeMap © OpenStreetMap</div>
+    </div>
   </div>
 
   <!-- ===== الطلبات ===== -->
