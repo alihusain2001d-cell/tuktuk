@@ -465,6 +465,9 @@
       <button class="btn ghost" onclick="event.stopPropagation();openFareSettingsModal()">تعديل</button>
     </div>
 
+    <div class="section-title">🚀 جاهزية النشر</div>
+    <div id="readiness-box" style="margin-bottom:22px"><div class="loading"><div class="spinner"></div>نفحص...</div></div>
+
     <div class="sub-row">
       <div class="sr-ico">🛒</div>
       <div class="sr-body">
@@ -730,7 +733,7 @@ function switchTab(name) {
   if (name === 'customers') loadCustomers();
   if (name === 'rewards') renderRewardsView();
   if (name === 'statement') renderStatementView();
-  if (name === 'settings') renderDeliveryService();
+  if (name === 'settings') { renderDeliveryService(); renderReadiness(); }
 }
 
 function openSidebar() {
@@ -1721,6 +1724,51 @@ async function renderFareRuleSub() {
 }
 
 // ============ روابط التواصل ============
+/* فحص جاهزية النشر — السيرفر يرد بحالته الحقيقية، مو تخمين */
+async function renderReadiness() {
+  const box = document.getElementById('readiness-box');
+  try {
+    const r = await api('/api/admin/readiness').then(x => x.json());
+    const rows = r.items.map(i => `
+      <div class="sub-row" style="align-items:flex-start">
+        <div class="sr-ico">${i.ok ? '✅' : '⚠️'}</div>
+        <div class="sr-body">
+          <h4>${i.title}</h4>
+          <p style="color:${i.ok ? 'var(--go)' : 'var(--stop)'}">${i.note}</p>
+          ${i.how ? `<p style="font-size:11.5px;color:var(--muted);margin-top:3px">الحل: ${i.how}</p>` : ''}
+        </div>
+      </div>`).join('');
+    const bad = r.items.filter(i => !i.ok).length;
+    box.innerHTML = `
+      <div class="sub-row" style="background:${r.ready ? '#EAF7EE' : '#FFF4E5'};border-radius:12px">
+        <div class="sr-ico">${r.ready ? '🎉' : '📋'}</div>
+        <div class="sr-body">
+          <h4>${r.ready ? 'كلشي جاهز للنشر' : `باقي ${bad} نقطة قبل النشر`}</h4>
+          <p>خدمة التوصيل: ${r.info.deliveryEnabled ? 'شغّالة' : 'متوقفة (الزبون يشوف «قريباً»)'}</p>
+        </div>
+        <button class="btn ghost" onclick="renderReadiness()">افحص مرة ثانية</button>
+      </div>
+      ${rows}
+      <div class="sub-row" style="align-items:flex-start">
+        <div class="sr-ico">💾</div>
+        <div class="sr-body">
+          <h4>النسخ الاحتياطي لقاعدة البيانات</h4>
+          <p style="color:var(--muted)">ما نكدر نفحصه من هنا — تأكد منه بنفسك</p>
+          <p style="font-size:11.5px;color:var(--muted);margin-top:3px">Railway ← قاعدة البيانات Postgres ← Backups ← فعّل النسخ اليومي</p>
+        </div>
+      </div>
+      <div class="sub-row" style="align-items:flex-start">
+        <div class="sr-ico">📄</div>
+        <div class="sr-body">
+          <h4>روابط المتجر</h4>
+          <p><a href="${r.info.privacyUrl}" target="_blank">سياسة الخصوصية</a> · <a href="${r.info.deleteAccountUrl}" target="_blank">حذف الحساب</a></p>
+        </div>
+      </div>`;
+  } catch (e) {
+    box.innerHTML = '<div class="empty">ما كدرنا نفحص الجاهزية</div>';
+  }
+}
+
 /* تشغيل/إيقاف خدمة التوصيل — لما تتوقف يشوف الزبون "قريباً" بمكانها */
 let deliverySvcOn = true;
 async function renderDeliveryService() {
