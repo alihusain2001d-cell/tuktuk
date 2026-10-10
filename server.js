@@ -1961,12 +1961,8 @@ app.delete('/api/admin/driver/:id', checkAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
-/* ===== جاهزية النشر =====
-   قبل ما ينفتح التطبيق للناس لازم إعدادات السيرفر تكون صح. بدل ما نخمّن،
-   اللوحة تسأل السيرفر نفسه ويرد بحالته الحقيقية. */
-/* تنزيل نسخة احتياطية كاملة — الإدارة تحتفظ بيها على جهازها.
-   مو بديل عن النسخ التلقائي، بس شبكة أمان ما تكلّف شي. */
+/* تنزيل نسخة احتياطية كاملة — الإدارة تحتفظ بيها عندها.
+   مو بديل عن نسخ الاستضافة التلقائية، بس تنفع قبل أي تعديل كبير. */
 app.get('/api/admin/backup', checkAdmin, async (req, res) => {
   try {
     const includePhotos = req.query.photos === '1';
@@ -1981,65 +1977,7 @@ app.get('/api/admin/backup', checkAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/admin/readiness', checkAdmin, async (req, res) => {
-  const items = [];
-  const add = (key, okFlag, title, good, bad, how) =>
-    items.push({ key, ok: !!okFlag, title, note: okFlag ? good : bad, how: okFlag ? null : how });
-
-  add('otp', !OTP_DEV_MODE, 'وضع التجربة لكود الدخول',
-    'مطفي — الكود يوصل برسالة بس',
-    'شغّال — السيرفر يرجّع الكود لأي أحد يطلبه، يعني أي شخص يدخل بأي رقم',
-    'Railway ← Variables ← OTP_DEV_MODE = false');
-
-  add('sms', !!process.env.OTPIQ_API_KEY, 'خدمة الرسائل (OTPIQ)',
-    'مفتاحها منضاف',
-    'ماكو مفتاح — ما راح توصل أكواد للناس',
-    'Railway ← Variables ← OTPIQ_API_KEY');
-
-  add('session', !!process.env.SESSION_SECRET, 'مفتاح الجلسات',
-    'منضاف ومستقل',
-    'ماكو — الجلسات توقّع بمفتاح الإدارة، ولو غيّرته ينطلع كل الناس من حساباتهم',
-    'Railway ← Variables ← SESSION_SECRET = أي نص طويل عشوائي');
-
-  add('admin', ADMIN_KEY !== '1994', 'مفتاح لوحة التحكم',
-    'مفتاح خاص بيك',
-    'المفتاح الافتراضي — أي أحد يفتح لوحتك',
-    'Railway ← Variables ← ADMIN_KEY');
-
-  add('push', PUSH_ENABLED, 'إشعارات الطلبات',
-    'شغّالة',
-    'مطفية — ما توصل تنبيهات للسواق والتطبيق مسكّر',
-    'Railway ← Variables ← VAPID_PUBLIC_KEY و VAPID_PRIVATE_KEY');
-
-  const prints = [...new Set([LOCAL_SHA256, ...(process.env.ANDROID_SHA256 || '').split(/[,\s]+/)]
-    .map(normalizeFingerprint).filter(Boolean))];
-  add('android', prints.length > 1, 'ربط تطبيق أندرويد',
-    `${prints.length} بصمة — بصمة جوجل منضافة`,
-    'بصمة وحدة بس — التطبيق راح يفتح وبيه شريط عنوان متصفح',
-    'خذ SHA-256 من Play Console ← App signing، وحطها بـ Railway ← ANDROID_SHA256');
-
-  let dbOk = false, dbMs = null;
-  try { const t0 = Date.now(); await db.ping(); dbMs = Date.now() - t0; dbOk = true; } catch (e) {}
-  add('db', dbOk && !!process.env.DATABASE_URL, 'قاعدة البيانات',
-    `متصلة (${dbMs} جزء من الثانية)`,
-    'مو متصلة — البيانات تنمسح مع كل إعادة تشغيل',
-    'Railway ← Variables ← DATABASE_URL');
-
-  let deliveryOn = true;
-  try { deliveryOn = (await db.getServiceSettings()).delivery_enabled !== false; } catch (e) {}
-
-  res.json({
-    ready: items.every(i => i.ok),
-    items,
-    info: {
-      deliveryEnabled: deliveryOn,
-      privacyUrl: '/privacy',
-      deleteAccountUrl: '/delete-account',
-      androidFingerprints: prints.length,
-    },
-  });
-});
-
+// السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
 app.get('/api/admin/live', checkAdmin, async (req, res) => {
   try {
     const allDriverRows = await cachedDriversLite();
