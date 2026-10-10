@@ -1724,6 +1724,24 @@ async function renderFareRuleSub() {
 }
 
 // ============ روابط التواصل ============
+/* نسخة احتياطية تنزّلها الإدارة — بلا صور المستمسكات حتى يبقى الملف خفيف */
+async function downloadBackup() {
+  const btn = document.getElementById('backup-btn');
+  btn.disabled = true; btn.textContent = 'نجهّز...';
+  try {
+    const res = await api('/api/admin/backup');
+    if (!res.ok) throw new Error('failed');
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `jayak-backup-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`انحفظت النسخة (${Math.round(blob.size/1024)} كيلوبايت) ✅`);
+  } catch (e) { toast('ما كدرنا نجهّز النسخة'); }
+  finally { btn.disabled = false; btn.textContent = '⬇️ نزّل'; }
+}
+
 /* فحص جاهزية النشر — السيرفر يرد بحالته الحقيقية، مو تخمين */
 async function renderReadiness() {
   const box = document.getElementById('readiness-box');
@@ -1752,10 +1770,11 @@ async function renderReadiness() {
       <div class="sub-row" style="align-items:flex-start">
         <div class="sr-ico">💾</div>
         <div class="sr-body">
-          <h4>النسخ الاحتياطي لقاعدة البيانات</h4>
-          <p style="color:var(--muted)">ما نكدر نفحصه من هنا — تأكد منه بنفسك</p>
-          <p style="font-size:11.5px;color:var(--muted);margin-top:3px">Railway ← قاعدة البيانات Postgres ← Backups ← فعّل النسخ اليومي</p>
+          <h4>نسخة احتياطية</h4>
+          <p style="color:var(--muted)">نزّلها واحتفظ بيها بجهازك — سوّيها كل أسبوع على الأقل</p>
+          <p style="font-size:11.5px;color:var(--muted);margin-top:3px">النسخ التلقائي اليومي يحتاج ترقية خطة Railway (Pro)</p>
         </div>
+        <button class="btn ghost" id="backup-btn" onclick="downloadBackup()">⬇️ نزّل</button>
       </div>
       <div class="sub-row" style="align-items:flex-start">
         <div class="sr-ico">📄</div>

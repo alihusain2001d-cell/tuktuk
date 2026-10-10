@@ -1247,6 +1247,30 @@ async function getPendingReward(phone) {
   return res.rows[0] || null;
 }
 
+/* ===== نسخة احتياطية =====
+   خطة الاستضافة الحالية ما بيها نسخ تلقائي، فنخلي الإدارة تنزّل نسخة كاملة
+   وقت ما تريد. الصور (base64) تكبّر الملف أضعاف، فتنشال افتراضياً —
+   السائق يكدر يرفعها من جديد، أما الحسابات والرحلات ما تنعوّض. */
+const BACKUP_TABLES = ['drivers', 'customers', 'rides', 'subscriptions', 'driver_payments',
+  'saved_places', 'reward_settings', 'service_settings', 'fare_settings', 'customer_rewards', 'contact_settings'];
+
+async function exportAll({ includePhotos = false } = {}) {
+  const out = { takenAt: new Date().toISOString(), includePhotos, tables: {} };
+  if (!HAS_DB) {
+    out.tables = { drivers: [...mem.drivers.values()], customers: [...mem.customers.values()], rides: [...mem.rides.values()] };
+    return out;
+  }
+  for (const t of BACKUP_TABLES) {
+    const cols = t === 'drivers' && !includePhotos
+      ? `${DRIVER_LITE}, push_subscription, deleted_at`
+      : '*';
+    const res = await pool.query(`SELECT ${cols} FROM ${t}`);
+    out.tables[t] = res.rows;
+  }
+  out.counts = Object.fromEntries(Object.entries(out.tables).map(([k, v]) => [k, v.length]));
+  return out;
+}
+
 // تفاصيل مكافأة محجوزة لرحلة — نحتاجها لما نحسب الأجرة النهائية
 async function getRewardById(id) {
   if (!id) return null;
@@ -1687,7 +1711,7 @@ module.exports = {
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,
-  getRewardSettings, setRewardSettings, getRewardById, getServiceSettings, setServiceSettings, getPendingReward, grantManualReward,
+  getRewardSettings, setRewardSettings, getRewardById, exportAll, getServiceSettings, setServiceSettings, getPendingReward, grantManualReward,
   maybeGrantAutoReward, reserveRewardForRide, releaseRewardByRide,
   markRewardUsedByRide, getPendingAutoRewardsCount, getDriverPayouts, settleDriverPayout, getRewardStatement,
   payDriverRewardsInFull, getDriverFullStatement,

@@ -1965,6 +1965,22 @@ app.delete('/api/admin/driver/:id', checkAdmin, async (req, res) => {
 /* ===== جاهزية النشر =====
    قبل ما ينفتح التطبيق للناس لازم إعدادات السيرفر تكون صح. بدل ما نخمّن،
    اللوحة تسأل السيرفر نفسه ويرد بحالته الحقيقية. */
+/* تنزيل نسخة احتياطية كاملة — الإدارة تحتفظ بيها على جهازها.
+   مو بديل عن النسخ التلقائي، بس شبكة أمان ما تكلّف شي. */
+app.get('/api/admin/backup', checkAdmin, async (req, res) => {
+  try {
+    const includePhotos = req.query.photos === '1';
+    const data = await db.exportAll({ includePhotos });
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="jayak-backup-${stamp}.json"`);
+    res.send(JSON.stringify(data));
+  } catch (e) {
+    console.error('خطأ بالنسخة الاحتياطية:', e.message);
+    res.status(500).json({ error: 'ما كدرنا نجهّز النسخة' });
+  }
+});
+
 app.get('/api/admin/readiness', checkAdmin, async (req, res) => {
   const items = [];
   const add = (key, okFlag, title, good, bad, how) =>
