@@ -132,6 +132,8 @@ app.get('/health', async (req, res) => {
       activeRides: activeRides.size,
       onlineDrivers: onlineDrivers.size,
       uptimeSec: Math.round(process.uptime()),
+      // أي محرك يرسم خط السير — المدفوع لو مفتاحه منضاف، وإلا العام المجاني
+      router: STADIA_API_KEY ? 'stadia' : 'osrm',
     });
   } catch (e) {
     // القاعدة مقطوعة: ما ننشر هاي النسخة
@@ -1058,7 +1060,10 @@ async function fetchRouteFromProvider(from, to) {
       });
       const data = await r.json();
       const legs = data && data.trip && data.trip.legs;
-      if (!r.ok || !legs || !legs.length) return null;
+      if (!r.ok || !legs || !legs.length) {
+        console.error('محرك المسارات رفض الطلب:', r.status, (data && data.error) || '');
+        return null;
+      }
       const coords = legs.flatMap(l => decodePolyline6(l.shape || ''));
       return { coords, km: data.trip.summary.length, minutes: data.trip.summary.time / 60 };
     }
@@ -1071,7 +1076,11 @@ async function fetchRouteFromProvider(from, to) {
       coords: route.geometry.coordinates.map(c => [c[1], c[0]]),
       km: route.distance / 1000, minutes: route.duration / 60,
     };
-  } catch (e) { return null; }
+  } catch (e) {
+    // أغلب الأحيان انقطاع شبكة أو تأخير — التطبيق يرسم خط مستقيم ويعيد المحاولة
+    console.error('ما كدرنا نجيب خط السير:', e.name === 'AbortError' ? 'تأخر أكثر من ٦ ثواني' : e.message);
+    return null;
+  }
   finally { clearTimeout(timer); }
 }
 
