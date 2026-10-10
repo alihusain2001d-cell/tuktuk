@@ -352,8 +352,17 @@ const OTP_TTL = 5 * 60 * 1000;        // صلاحية الكود: ٥ دقايق
 const OTP_RESEND_WAIT = 60 * 1000;    // ما يقدر يعيد الإرسال قبل دقيقة
 const OTP_MAX_ATTEMPTS = 5;           // أقصى محاولات خاطئة
 
-// وضع التطوير: الكود يرجع بالرد حتى تجرّب بدون خدمة SMS
-const OTP_DEV_MODE = process.env.OTP_DEV_MODE !== 'false';
+/* وضع التجربة: الكود يرجع بالرد حتى نجرّب بدون خدمة رسائل.
+   خطر لو بقى شغّال بالنشر — أي أحد يطلب كود لأي رقم ويدخل بحسابه.
+   فما نعتمد على متغيّر ممكن ينكتب غلط ("False" أو ينتنسى):
+   ما دامت خدمة الرسائل مضبوطة، الكود ما يرجع أبداً — إلا إذا طلبته
+   صراحة بـ OTP_DEV_MODE=true (للتجربة المحلية). */
+const OTP_FORCE_DEV = String(process.env.OTP_DEV_MODE || '').trim().toLowerCase() === 'true';
+const OTP_DEV_MODE = OTP_FORCE_DEV || !process.env.OTPIQ_API_KEY;
+if (OTP_DEV_MODE && process.env.DATABASE_URL) {
+  console.warn('⚠️ وضع التجربة شغّال: الكود يرجع بالرد. ' +
+    (process.env.OTPIQ_API_KEY ? 'شيل OTP_DEV_MODE=true من الإعدادات قبل النشر.' : 'أضف OTPIQ_API_KEY حتى ترسل الأكواد برسالة.'));
+}
 
 function genOTP() {
   return String(Math.floor(100000 + Math.random() * 900000)); // ٦ أرقام
