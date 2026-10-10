@@ -106,6 +106,7 @@ app.get('/ride', (req, res) => sendPage(res, 'index.html'));
 app.get('/driver', (req, res) => sendPage(res, 'driver.html'));
 app.get('/admin', (req, res) => sendPage(res, 'admin.html'));
 app.get('/privacy', (req, res) => sendPage(res, 'privacy.html'));   // المتجر يطلب رابط سياسة خصوصية
+app.get('/delete-account', (req, res) => sendPage(res, 'delete-account.html'));   // جوجل يطلب رابط حذف حساب يفتح بلا تطبيق
 // ============================================================
 //  /health — تستعمله Railway حتى تنشر بدون انقطاع:
 //  تنتظر النسخة الجديدة ترد 200 قبل ما تطفي القديمة، فالسواق
@@ -141,6 +142,29 @@ app.get('/health', async (req, res) => {
 /* الصور والأيقونات ما تتغير، فنخلي المتصفح يحتفظ بيها أسبوع — ما يعيد
    تنزيلها كل فتحة. أما صفحات HTML فما نخزنها أبداً، وإلا السائق أو الزبون
    يضل على نسخة قديمة بعد كل تحديث ننشره. */
+/* ===== ربط تطبيق أندرويد بالموقع =====
+   جوجل يعيد توقيع التطبيق بمفتاحه (Play App Signing)، فبصمة مفتاحنا المحلي
+   ما تكفي — وبدون بصمة جوجل يفتح التطبيق وبيه شريط عنوان متصفح.
+   نخلي البصمات تنقرا من إعدادات السيرفر حتى تنضاف بدون تعديل كود ولا نشر. */
+const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE || 'com.jayak.app';
+const LOCAL_SHA256 = '9E:2E:B6:06:F9:8D:21:92:4D:21:4E:F7:28:5D:7A:D2:0E:50:F8:79:A8:EC:3E:46:6C:0E:25:E2:A2:67:9A:D5';
+
+function normalizeFingerprint(fp) {
+  const hex = String(fp || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  if (hex.length !== 64) return null;                       // بصمة SHA-256 لازم ٦٤ رمز
+  return hex.match(/.{2}/g).join(':');
+}
+
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  const extra = (process.env.ANDROID_SHA256 || '').split(/[,\s]+/);
+  const prints = [...new Set([LOCAL_SHA256, ...extra].map(normalizeFingerprint).filter(Boolean))];
+  res.setHeader('Cache-Control', 'no-cache');
+  res.json([{
+    relation: ['delegate_permission/common.handle_all_urls'],
+    target: { namespace: 'android_app', package_name: ANDROID_PACKAGE, sha256_cert_fingerprints: prints },
+  }]);
+});
+
 app.use(express.static(path.join(__dirname), {
   dotfiles: 'allow',   // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
   setHeaders(res, filePath) {
