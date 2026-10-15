@@ -11,6 +11,27 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="جايك">
+<script>
+  /* التطبيق واحد للزبون والسائق. هاي الشاشة تسأل أول مرة بس — بعدها
+     تفوّته مباشرة على حساب آخر واحد استعمله. ترجع تسأل إذا سجّل خروج
+     (لأن حسابه ينمسح من الجهاز)، أو إذا ضغط «تبديل الحساب» بالقائمة. */
+  (function () {
+    if (location.search.indexOf('pick') > -1) return;   // جاي يبدّل بإرادته
+    var hasDriver, hasUser, last;
+    try {
+      hasDriver = !!localStorage.getItem('jayak_driver');
+      hasUser   = !!localStorage.getItem('jayak_user');
+      last      = localStorage.getItem('jayak_role');
+    } catch (e) { return; }   // تصفح خفي أو تخزين مقفل: نخلي الاختيار يدوي
+    /* نفوّته بس إذا حسابه هو بعده موجود بالجهاز. يعني من يسجّل خروج
+       ينمسح حسابه وترجع هاي الشاشة تسأله — حتى لو عنده حساب بالجهة الثانية. */
+    var go = null;
+    if      (last === 'driver'   && hasDriver) go = '/driver';
+    else if (last === 'customer' && hasUser)   go = '/ride';
+    // replace مو href — حتى زر الرجوع ما يلف بين هاي الشاشة والتطبيق
+    if (go) location.replace(go);
+  })();
+</script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; font-family:'Segoe UI',Tahoma,sans-serif; }
   :root {

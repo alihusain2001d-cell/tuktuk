@@ -578,6 +578,10 @@
         <div class="mi-label">عن جايك</div>
       </div>
       <div class="menu-divider"></div>
+      <div class="menu-item" onclick="location.href='/?pick=1'">
+        <div class="mi-icon">🔄</div>
+        <div class="mi-label">تبديل: زبون / سائق</div>
+      </div>
       <div class="menu-item" onclick="logout()">
         <div class="mi-icon">🚪</div>
         <div class="mi-label" style="color:var(--stop)">تسجيل خروج</div>
@@ -876,6 +880,8 @@
 <script>
 const MUSAYYIB = [32.7789, 44.2892];
 let user = JSON.parse(localStorage.getItem('jayak_user') || 'null');
+// شاشة البداية تتذكر آخر حساب انستعمل، حتى ما تسأل كل مرة يفتح التطبيق
+if (user) { try { localStorage.setItem('jayak_role', 'customer'); } catch (e) {} }
 
 /* كل طلب لسيرفرنا يحمل توكن الزبون، حتى السيرفر يعرف إنه صاحب الحساب فعلاً
    (قبل كان رقم الموبايل وحده يكفي). لو السيرفر رفض التوكن نرجعه لتسجيل الدخول. */

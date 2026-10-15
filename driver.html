@@ -685,6 +685,7 @@
       <div class="dr-item" id="dr-wa" onclick="supportWhatsapp()"><span class="di-ico">💬</span><span>واتساب الدعم</span></div>
 
       <div class="dr-sep"></div>
+      <div class="dr-item" onclick="location.href='/?pick=1'"><span class="di-ico">🔄</span><span>تبديل: زبون / سائق</span></div>
       <div class="dr-item danger" onclick="logout()"><span class="di-ico">🚪</span><span>تسجيل خروج</span></div>
       <div class="dr-item danger" onclick="deleteMyAccount()"><span class="di-ico">🗑️</span><span>حذف حسابي</span></div>
     </nav>
@@ -1011,6 +1012,8 @@ function clearRoute() { setRoute([]); }
 let map, meMarker, pickupMarker, destMarker, routeLine;
 let ws, driverId = localStorage.getItem('jayak_driver_id') || genId();
 let driver = JSON.parse(localStorage.getItem('jayak_driver') || 'null');
+// شاشة البداية تتذكر آخر حساب انستعمل، حتى ما تسأل كل مرة يفتح التطبيق
+if (driver) { try { localStorage.setItem('jayak_role', 'driver'); } catch (e) {} }
 
 /* كل طلب لسيرفرنا يحمل توكن السائق، حتى السيرفر يعرف إنه هو فعلاً.
    لو رفضه، نرجعه لتسجيل الدخول. */
