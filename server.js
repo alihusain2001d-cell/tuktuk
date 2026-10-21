@@ -561,10 +561,31 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
+/* ===== أرقام مراجعة المتجر =====
+   جوجل وآبل يفحصون التطبيق من برّا العراق، فرسالة الكود ما توصلهم
+   ويرفضون التطبيق بحجة "ما كدرنا نفحصه". نخلي أرقام محددة كودها ثابت
+   وما ننطيها رسالة.
+
+   الأرقام والكود ينضبطون بإعدادات السيرفر مو بالكود — المستودع عام.
+   إذا ما انضبطوا، الميزة مطفية بالكامل وكل رقم يمشي بالطريق الطبيعي. */
+const REVIEW_CODE = String(process.env.REVIEW_CODE || '').trim();
+const REVIEW_PHONES = new Set(
+  String(process.env.REVIEW_PHONE || '').split(/[,\s]+/).map(normalizePhone).filter(p => p.length >= 10)
+);
+function isReviewPhone(phone) {
+  return REVIEW_CODE.length >= 6 && REVIEW_PHONES.has(phone);
+}
+if (REVIEW_PHONES.size && REVIEW_CODE.length >= 6) {
+  console.log(`🔍 أرقام مراجعة المتجر مفعّلة (${REVIEW_PHONES.size}) — شيلها بعد ما ينشر التطبيق`);
+}
+
 app.post('/api/otp/send', async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     if (phone.length < 10) return res.status(400).json({ error: 'رقم غير صحيح' });
+
+    // رقم مراجعة: ما ننطيه رسالة وما نحسبه على حدود الإرسال — كوده ثابت
+    if (isReviewPhone(phone)) return res.json({ ok: true, sent: true });
 
     const existing = otpCodes.get(phone);
     if (existing && Date.now() - existing.lastSentAt < OTP_RESEND_WAIT) {
@@ -594,6 +615,13 @@ app.post('/api/otp/verify', (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     const code = String(req.body.code || '').trim();
+
+    if (isReviewPhone(phone)) {
+      if (code !== REVIEW_CODE) return res.status(400).json({ error: 'الكود غلط' });
+      const token = phoneProof(phone, Math.floor(Date.now() / PHONE_PROOF_SLOT));
+      return res.json({ ok: true, verified: true, token });
+    }
+
     const rec = otpCodes.get(phone);
 
     if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
