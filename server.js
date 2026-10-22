@@ -26,6 +26,27 @@ app.set('trust proxy', 1);
 
 app.use(compression());
 
+/* ===== السماح لتطبيق الآيفون =====
+   بتطبيق الآيفون الصفحات تنفتح من الجهاز نفسه، فطلباتها للسيرفر
+   تُحسب "من موقع ثاني" ويرفضها المتصفح ما لم نسمح بمصدرها صراحةً.
+
+   القائمة محصورة بمصادر تطبيقنا — مو مفتوحة للكل — وما نسمح
+   بالكوكيز، لأن الهوية عندنا برمز بالترويسة مو بكوكي. يعني حتى لو
+   فتح أحد موقع خبيث، ما يكدر ينتحل شخصية زبون مسجّل. */
+const APP_ORIGINS = new Set(['capacitor://localhost', 'ionic://localhost', 'http://localhost']);
+app.use('/api', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && APP_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-customer-token, x-driver-token');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' })); // حد أعلى للصور
 
 /* النصوص اللي يكتبها المستخدمين (اسم، اسم محل، ملاحظة...) تنعرض بصفحات غيرهم:
