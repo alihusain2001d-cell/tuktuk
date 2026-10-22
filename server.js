@@ -156,6 +156,9 @@ app.get('/health', async (req, res) => {
       uptimeSec: Math.round(process.uptime()),
       // أي محرك يرسم خط السير — المدفوع لو مفتاحه منضاف، وإلا العام المجاني
       router: STADIA_API_KEY ? 'stadia' : 'osrm',
+      // إشعارات الآيفون: شغّالة لو مفاتيح آبل منقروءة. ما ننشر المفاتيح،
+      // بس نحتاج نعرف من برّا إنها انضبطت بدل ما نكتشف الخلل من الزبون.
+      apns: apns.ENABLED ? (apns.SANDBOX ? 'sandbox' : 'production') : 'off',
     });
   } catch (e) {
     // القاعدة مقطوعة: ما ننشر هاي النسخة
