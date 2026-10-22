@@ -40,6 +40,41 @@ const BRIDGE = `<script>
     return realFetch.call(window, input, init);
   };
 
+  /* الإشعارات: آبل تمنع إشعارات المتصفح جوّا التطبيقات، فنسجّل عند
+     آبل نفسها وناخذ رمز الجهاز. الصفحة تنادي هاي وترسل الرمز
+     للسيرفر. نرجّع null لو الزبون رفض أو تأخر الجواب — والصفحة
+     تكمل عادي بلا إشعارات بدل ما تعلق. */
+  window.jayakNativePushToken = function () {
+    return new Promise(function (resolve) {
+      var P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+      if (!P) return resolve(null);
+
+      var done = false;
+      var finish = function (t) { if (!done) { done = true; resolve(t || null); } };
+
+      P.addListener('registration', function (t) { finish(t && t.value); });
+      P.addListener('registrationError', function () { finish(null); });
+
+      P.requestPermissions()
+        .then(function (r) { r && r.receive === 'granted' ? P.register() : finish(null); })
+        .catch(function () { finish(null); });
+
+      setTimeout(function () { finish(null); }, 12000);
+    });
+  };
+
+  /* ضغط الإشعار يفتح الشاشة الصح — السيرفر يرسل الرابط مع الإشعار */
+  (function () {
+    var P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+    if (!P) return;
+    P.addListener('pushNotificationActionPerformed', function (e) {
+      var url = e && e.notification && e.notification.data && e.notification.data.url;
+      if (!url) return;
+      if (url.indexOf('/driver') === 0) location.href = 'driver.html';
+      else if (url.indexOf('/ride') === 0) location.href = 'ride.html';
+    });
+  })();
+
   var RealWS = window.WebSocket;
   function PatchedWS(url, protocols) {
     if (typeof url === 'string' && !/^wss?:\\/\\/[^/]*tuktuk/.test(url)) {

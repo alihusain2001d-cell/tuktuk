@@ -12,6 +12,7 @@ const path = require('path');
 const crypto = require('crypto');
 const compression = require('compression');
 const webpush = require('web-push');
+const apns = require('./apns');       // إشعارات الآيفون — نظام آبل مو إشعارات المتصفح
 const db = require('./db');
 
 const app = express();
@@ -229,9 +230,25 @@ function sendTo(socketId, type, data) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type, data }));
 }
 
-// أرسل إشعار متصفح لاشتراك واحد — يمسح الاشتراك تلقائياً لو صار غير صالح (410/404)
+/* أرسل إشعار لاشتراك واحد — يمسح الاشتراك تلقائياً لو صار غير صالح.
+
+   أكو نوعين اشتراك مخزونين بنفس المكان: اشتراك متصفح (بيه endpoint)
+   ورمز جهاز آيفون (بيه apns). نفرّق بينهن من شكلهن، حتى كل نقاط
+   الإرسال بالسيرفر تبقى مثل ما هي وما نحتاج نعيد كتابتهن. */
 async function pushToSubscription(subscription, payload, onInvalid) {
-  if (!PUSH_ENABLED || !subscription) return;
+  if (!subscription) return;
+
+  if (subscription.apns) {
+    if (!apns.ENABLED) return;
+    const r = await apns.sendToDevice(subscription.apns, payload);
+    if (!r.ok) {
+      if (r.gone && onInvalid) await onInvalid();
+      else if (!r.gone) console.error('خطأ بإشعار آيفون:', r.reason || r.status);
+    }
+    return;
+  }
+
+  if (!PUSH_ENABLED) return;
   try {
     await webpush.sendNotification(subscription, JSON.stringify(payload));
   } catch (e) {
@@ -242,7 +259,7 @@ async function pushToSubscription(subscription, payload, onInvalid) {
 
 // إشعار لكل السواق المسموحلهم يشتغلون وعندهم اشتراك — بغض النظر عن حالة اتصال الـ WebSocket
 async function pushToAllDrivers(payload) {
-  if (!PUSH_ENABLED) return;
+  if (!PUSH_ENABLED && !apns.ENABLED) return;
   try {
     const drivers = await db.getDriversForPush();
     await Promise.all(drivers.map(d =>
@@ -252,7 +269,7 @@ async function pushToAllDrivers(payload) {
 }
 
 async function pushToDriver(driverId, payload) {
-  if (!PUSH_ENABLED || !driverId) return;
+  if ((!PUSH_ENABLED && !apns.ENABLED) || !driverId) return;
   try {
     const d = await db.getDriver(driverId);
     if (d && d.push_subscription) await pushToSubscription(d.push_subscription, payload, () => db.clearDriverPushSubscription(driverId));
@@ -260,7 +277,7 @@ async function pushToDriver(driverId, payload) {
 }
 
 async function pushToCustomer(phone, payload) {
-  if (!PUSH_ENABLED || !phone) return;
+  if ((!PUSH_ENABLED && !apns.ENABLED) || !phone) return;
   try {
     const sub = await db.getCustomerPushSubscription(phone);
     if (sub) await pushToSubscription(sub, payload, () => db.clearCustomerPushSubscription(phone));

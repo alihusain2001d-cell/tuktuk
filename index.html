@@ -1123,6 +1123,23 @@ function urlBase64ToUint8Array(base64String) {
 let pushSetupDone = false;
 async function setupPushNotifications() {
   if (pushSetupDone || !user) return;
+
+  /* بتطبيق الآيفون ماكو إشعارات متصفح — آبل تمنعها جوّا التطبيقات.
+     فنسجّل عند آبل مباشرة وناخذ رمز الجهاز ونرسله للسيرفر بداله.
+     والسيرفر يعرف من شكل الاشتراك أي طريق يستعمل. */
+  if (window.JAYAK_NATIVE && window.jayakNativePushToken) {
+    try {
+      const token = await window.jayakNativePushToken();
+      if (!token) return;
+      await fetch('/api/customer/push-subscribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: user.phone, subscription: { apns: token } }),
+      });
+      pushSetupDone = true;
+    } catch (e) { console.error('تعذّر تفعيل إشعارات الآيفون:', e); }
+    return;
+  }
+
   if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
   try {
     const vapid = await fetch('/api/push/vapid-public-key').then(r => r.json());
