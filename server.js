@@ -604,12 +604,21 @@ const REVIEW_CODE = String(process.env.REVIEW_CODE || '').trim();
 const REVIEW_PHONES = new Set(
   String(process.env.REVIEW_PHONE || '').split(/[,\s]+/).map(normalizePhone).filter(p => p.length >= 10)
 );
+/* الكود لازم ٦ أرقام بالضبط: خانة الإدخال بالتطبيق ست مربعات، كل
+   وحدة حرف. كود أطول أو أقصر ما ينكتب أصلاً — فنعتبره غير مضبوط
+   بدل ما نخلي المراجع يحاول ويفشل وإحنا نحسب الميزة شغالة. */
+const REVIEW_CODE_OK = /^\d{6}$/.test(REVIEW_CODE);
+
 function isReviewPhone(phone) {
-  return REVIEW_CODE.length >= 6 && REVIEW_PHONES.has(phone);
+  return REVIEW_CODE_OK && REVIEW_PHONES.has(phone);
 }
 
-if (REVIEW_PHONES.size && REVIEW_CODE.length >= 6) {
-  console.log(`🔍 أرقام مراجعة المتجر مفعّلة (${REVIEW_PHONES.size}) — شيلها بعد ما ينشر التطبيق`);
+if (REVIEW_PHONES.size) {
+  if (REVIEW_CODE_OK) {
+    console.log(`🔍 أرقام مراجعة المتجر مفعّلة (${REVIEW_PHONES.size}) — شيلها بعد ما ينشر التطبيق`);
+  } else {
+    console.error('⚠️ REVIEW_PHONE مضبوط بس REVIEW_CODE مو ٦ أرقام — الميزة مطفية');
+  }
 }
 
 app.post('/api/otp/send', async (req, res) => {
