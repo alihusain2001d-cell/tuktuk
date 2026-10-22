@@ -38,11 +38,10 @@ workflows:
         BUNDLE_ID: "com.jayak.app"
         XCODE_PROJECT: "ios-app/ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-        # ⚠️ بعد ما تسوي التطبيق بـApp Store Connect، خذ رقمه من
-        #    (App Information ← Apple ID) وضيفه هنا هيچي:
-        #      APP_STORE_APP_ID: "1234567890"
-        #    ولا تحطه فاضي "" أبداً — Codemagic يرفض الملف كله.
-        #    بدونه البناء يشتغل عادي ويستعمل رقم بناء Codemagic.
+        # رقم التطبيق من App Store Connect (App Information ← Apple ID).
+        # بيه ناخذ آخر رقم بناء من أبل ونزيد واحد، حتى ما ترفض الرفعة.
+        # ⚠️ لا تخليه فاضي "" أبداً — Codemagic يرفض الملف كله.
+        APP_STORE_APP_ID: "6825758018"
       # كاباسيتور ٨ يطلب Node 22 أو أحدث — بـ20 يفشل «cap sync»
       node: lts
       xcode: latest
