@@ -8,6 +8,11 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
         <string>جايك</string>
+	<!-- إقرار التشفير: بدونه آبل توقف كل رفعة وتنتظر جواب يدوي قبل
+	     ما توصل للمختبرين. تطبيقنا يستعمل HTTPS بس — وهذا تشفير
+	     معفي من قوانين التصدير الأمريكية، فالجواب "لا". -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- نص إذن الموقع: آبل تعرضه للزبون حرفياً وقت السؤال، وترفض
 	     التطبيق إذا كان فاضي أو ما يشرح الفائدة. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
