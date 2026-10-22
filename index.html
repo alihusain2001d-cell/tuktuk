@@ -107,6 +107,26 @@
   .app-credit .ac-tel { display:inline-block; margin-top:2px; color:var(--muted);
     text-decoration:none; direction:ltr; letter-spacing:.5px; }
 
+
+  /* ============ تنبيه التحديث ============ */
+  .upd-bar { position:fixed; left:0; right:0; bottom:0; z-index:5000; background:var(--ink);
+    color:#fff; padding:12px 16px; display:flex; align-items:center; gap:12px;
+    font-size:13.5px; transform:translateY(120%); transition:transform .3s; }
+  .upd-bar.show { transform:none; }
+  .upd-bar b { color:var(--brand); }
+  .upd-bar button { margin-inline-start:auto; background:var(--brand); color:#1A1A1A; border:0;
+    padding:9px 18px; border-radius:9px; font-weight:800; font-size:13px; cursor:pointer;
+    font-family:inherit; white-space:nowrap; }
+  .upd-gate { position:fixed; inset:0; z-index:6000; background:#FFFDF7; display:none;
+    flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px 26px; }
+  .upd-gate.show { display:flex; }
+  .upd-gate .ug-ico { font-size:62px; margin-bottom:18px; }
+  .upd-gate h2 { font-size:21px; margin-bottom:10px; }
+  .upd-gate p { font-size:14.5px; color:var(--muted); line-height:1.9; max-width:330px; }
+  .upd-gate button { margin-top:24px; background:var(--brand); color:#1A1A1A; border:0;
+    padding:15px 40px; border-radius:13px; font-weight:800; font-size:16px; cursor:pointer; font-family:inherit; }
+  .upd-gate .ug-later { margin-top:12px; background:none; color:var(--muted); font-size:13.5px;
+    font-weight:600; padding:8px; text-decoration:underline; }
   /* ============ القائمة الجانبية ============ */
   .drawer-overlay { position:absolute; inset:0; background:rgba(15,27,61,.5); z-index:1500; opacity:0; pointer-events:none; transition:opacity .25s; }
   .drawer-overlay.open { opacity:1; pointer-events:auto; }
@@ -550,11 +570,24 @@
 
     <div class="app-credit">
       <div>جميع الحقوق محفوظة — جايك © <span id="credit-year">2026</span></div>
-      <div class="ac-by">تطوير وبرمجة <b>امواج للالكترونيات</b></div>
-      <a class="ac-tel" href="tel:07717533595">٠٧٧١٧٥٣٣٥٩٥</a>
+      <div class="ac-by">تطوير وبرمجة <b>علي الدجيلي</b></div>
+      <a class="ac-tel" href="tel:07717533595">07717533595</a>
     </div>
   </div>
 
+
+  <!-- تنبيه التحديث -->
+  <div class="upd-bar" id="upd-bar">
+    <span>صار <b>تحديث جديد</b> — حدّث حتى تشتغل عدلة</span>
+    <button onclick="location.reload()">تحديث</button>
+  </div>
+  <div class="upd-gate" id="upd-gate">
+    <div class="ug-ico">🔄</div>
+    <h2>متوفر تحديث للتطبيق</h2>
+    <p id="upd-gate-msg">النسخة اللي عندك قديمة. حدّث التطبيق من المتجر حتى تكمّل.</p>
+    <button onclick="openStore()">تحديث الآن</button>
+    <button class="ug-later hidden" id="upd-later" onclick="dismissUpdate()">بعدين</button>
+  </div>
   <!-- ============ القائمة الجانبية ============ -->
   <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer()"></div>
   <div class="drawer" id="drawer">
@@ -2960,6 +2993,63 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 // ============ التشغيل ============
 connectWS();
 loadFareSettings();
+
+/* ============ مراقبة التحديث ============
+
+   تطبيق الآيفون شاشاته محزومة جوّاه، فأي تعديل ننشره ما يوصله إلا
+   برفعة جديدة للمتجر — وممكن يبقى شهر بنسخة قديمة تتكلم مع سيرفر
+   تغيّر. فالإدارة تحدد أقل نسخة مقبولة، وإحنا نمنعه أو ننبّهه.
+
+   والموقع وتطبيق الأندرويد يوصلهم التعديل فوراً، بس الصفحة اللي
+   تبقى مفتوحة أيام تضل تشتغل بالكود القديم. فنقارن بصمة النسخة
+   ونعرض زر تحديث لما تتغير — بلا ما نعيد تحميل الصفحة تحت إيده. */
+const APP_STORE_URL = 'https://apps.apple.com/app/id6825758018';
+let webBuildSeen = null;
+let updateShown = false;
+
+// يقارن "1.2" مع "1.10" صح — المقارنة النصية تكول 1.2 أكبر وهي غلط
+function versionLess(have, need) {
+  const a = String(have).split('.').map(n => parseInt(n, 10) || 0);
+  const b = String(need).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+function openStore() { location.href = APP_STORE_URL; }
+function dismissUpdate() { document.getElementById('upd-gate').classList.remove('show'); }
+
+async function checkForUpdate(s) {
+  if (!s) return;
+
+  // تطبيق الآيفون: نقارن نسخته المنصّبة بالمطلوبة
+  if (window.JAYAK_NATIVE && s.minAppVersion && window.jayakAppVersion) {
+    if (updateShown) return;
+    const have = await window.jayakAppVersion();
+    if (!have || !versionLess(have, s.minAppVersion)) return;
+    updateShown = true;
+    if (s.updateMessage) document.getElementById('upd-gate-msg').textContent = s.updateMessage;
+    document.getElementById('upd-later').classList.toggle('hidden', !!s.updateForced);
+    document.getElementById('upd-gate').classList.add('show');
+    return;
+  }
+
+  // الموقع وتطبيق الأندرويد: بصمة النسخة تغيّرت وإحنا فاتحين
+  if (!s.webBuild) return;
+  if (webBuildSeen === null) { webBuildSeen = s.webBuild; return; }
+  if (webBuildSeen !== s.webBuild) document.getElementById('upd-bar').classList.add('show');
+}
+
+async function pollUpdate() {
+  try { checkForUpdate(await fetch('/api/service-settings').then(r => r.json())); } catch (e) {}
+}
+
+// نفحص لما يرجع للتطبيق — هاي اللحظة اللي يهمه فيها، مو كل دقيقة وهو مشغول
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollUpdate(); });
+setTimeout(pollUpdate, 3000);
+
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
 
 // سنة الحقوق تتحدث لحالها — حتى ما تبقى سنة قديمة مكتوبة بالتطبيق

@@ -93,6 +93,11 @@ async function init() {
     await pool.query(`UPDATE drivers SET approved=true WHERE approved=false AND (sub_ends_at IS NOT NULL OR trial_ends_at IS NOT NULL);`);
     // ترقية: اشتراك إشعارات المتصفح (Web Push) — يوصل الطلب للسائق حتى لو التطبيق مقفل بالخلفية
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS push_subscription JSONB;`);
+    /* إلزام تحديث تطبيق الآيفون: شاشاته محزومة جوّاه، فالتعديل ما يوصله
+       إلا برفعة جديدة للمتجر — بخلاف الأندرويد والموقع اللي يوصلهم فوراً */
+    await pool.query(`ALTER TABLE service_settings ADD COLUMN IF NOT EXISTS min_app_version TEXT NOT NULL DEFAULT '';`);
+    await pool.query(`ALTER TABLE service_settings ADD COLUMN IF NOT EXISTS update_forced BOOLEAN NOT NULL DEFAULT false;`);
+    await pool.query(`ALTER TABLE service_settings ADD COLUMN IF NOT EXISTS update_message TEXT NOT NULL DEFAULT '';`);
     await pool.query(`ALTER TABLE drivers ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;`);
     // ترقية: زر شغّال/مطفي — السائق يوقف استلام الطلبات بدون ما يسجّل خروج.
     // محفوظ بالقاعدة مو بالذاكرة، لأن الإشعار لازم يحترم الحالة حتى والتطبيق مسكّر.
@@ -1201,17 +1206,36 @@ async function getDriverPaidTotal(driverId) {
 }
 
 // ============ مكافآت الولاء ============
+const SERVICE_DEFAULTS = {
+  delivery_enabled: true,
+  min_app_version: '',      // فاضي = ماكو إلزام تحديث
+  update_forced: false,
+  update_message: '',
+};
+
 async function getServiceSettings() {
-  if (!HAS_DB) return mem.serviceSettings || (mem.serviceSettings = { delivery_enabled: true });
+  if (!HAS_DB) return mem.serviceSettings || (mem.serviceSettings = { ...SERVICE_DEFAULTS });
   const res = await pool.query('SELECT * FROM service_settings WHERE id=1');
-  return res.rows[0] || { delivery_enabled: true };
+  return { ...SERVICE_DEFAULTS, ...(res.rows[0] || {}) };
 }
 
-async function setServiceSettings({ deliveryEnabled }) {
-  if (!HAS_DB) { mem.serviceSettings = { delivery_enabled: !!deliveryEnabled }; return mem.serviceSettings; }
+/* ندمج مع الموجود بدل ما نستبدله: زر خدمة التوصيل يرسل حقله هو بس،
+   ولو استبدلنا الكل كان يمسح إعدادات التحديث بكل ضغطة عليه. */
+async function setServiceSettings({ deliveryEnabled, minAppVersion, updateForced, updateMessage }) {
+  const cur = await getServiceSettings();
+  const next = {
+    delivery_enabled: deliveryEnabled === undefined ? cur.delivery_enabled !== false : deliveryEnabled !== false,
+    min_app_version: minAppVersion === undefined ? (cur.min_app_version || '') : String(minAppVersion).trim().slice(0, 20),
+    update_forced: updateForced === undefined ? !!cur.update_forced : !!updateForced,
+    update_message: updateMessage === undefined ? (cur.update_message || '') : String(updateMessage).trim().slice(0, 300),
+  };
+  if (!HAS_DB) { mem.serviceSettings = next; return next; }
   const res = await pool.query(
-    'UPDATE service_settings SET delivery_enabled=$1 WHERE id=1 RETURNING *', [!!deliveryEnabled]);
-  return res.rows[0];
+    `UPDATE service_settings
+        SET delivery_enabled=$1, min_app_version=$2, update_forced=$3, update_message=$4
+      WHERE id=1 RETURNING *`,
+    [next.delivery_enabled, next.min_app_version, next.update_forced, next.update_message]);
+  return { ...SERVICE_DEFAULTS, ...(res.rows[0] || next) };
 }
 
 async function getRewardSettings() {

@@ -13,6 +13,12 @@ const crypto = require('crypto');
 const compression = require('compression');
 const webpush = require('web-push');
 const apns = require('./apns');       // إشعارات الآيفون — نظام آبل مو إشعارات المتصفح
+
+/* بصمة النسخة المنشورة. الصفحة تبقى مفتوحة بموبايل الزبون أيام، وتضل
+   تشتغل بكود قديم بعد ما ننشر تعديل. تقارن بصمتها ببصمة السيرفر
+   وتعرض زر تحديث لما تختلف. تتغير مع كل نشر. */
+const WEB_BUILD = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 8)
+  || String(Date.now()).slice(-8);
 const db = require('./db');
 
 const app = express();
@@ -1922,14 +1928,26 @@ app.post('/api/cancel', async (req, res) => {
 app.get('/api/service-settings', async (req, res) => {
   try {
     const s = await db.getServiceSettings();
-    res.json({ deliveryEnabled: s.delivery_enabled !== false });
-  } catch (e) { res.json({ deliveryEnabled: true }); }
+    res.json({
+      deliveryEnabled: s.delivery_enabled !== false,
+      minAppVersion: s.min_app_version || '',
+      updateForced: !!s.update_forced,
+      updateMessage: s.update_message || '',
+      webBuild: WEB_BUILD,
+    });
+  } catch (e) { res.json({ deliveryEnabled: true, webBuild: WEB_BUILD }); }
 });
 
 app.post('/api/admin/service-settings', checkAdmin, async (req, res) => {
   try {
-    const s = await db.setServiceSettings({ deliveryEnabled: req.body.deliveryEnabled !== false });
-    res.json({ ok: true, deliveryEnabled: s.delivery_enabled !== false });
+    const s = await db.setServiceSettings(req.body);
+    res.json({
+      ok: true,
+      deliveryEnabled: s.delivery_enabled !== false,
+      minAppVersion: s.min_app_version || '',
+      updateForced: !!s.update_forced,
+      updateMessage: s.update_message || '',
+    });
   } catch (e) { res.status(500).json({ error: 'خطأ' }); }
 });
 

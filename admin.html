@@ -479,6 +479,15 @@
       <button class="btn ghost" id="delivery-svc-btn" onclick="toggleDeliveryService()">—</button>
     </div>
 
+    <div class="sub-row" style="cursor:pointer" onclick="openUpdateSettingsModal()">
+      <div class="sr-ico">🔄</div>
+      <div class="sr-body">
+        <h4>إلزام تحديث التطبيق</h4>
+        <p id="update-svc-sub">نحمّل...</p>
+      </div>
+      <button class="btn ghost" onclick="event.stopPropagation();openUpdateSettingsModal()">تعديل</button>
+    </div>
+
     <div class="sub-row" style="cursor:pointer" onclick="openContactSettingsModal()">
       <div class="sr-ico">📞</div>
       <div class="sr-body">
@@ -661,6 +670,47 @@
   </div>
 </div>
 
+<!-- إلزام تحديث التطبيق -->
+<div class="modal-bg" id="update-settings-modal">
+  <div class="modal">
+    <h3>إلزام تحديث التطبيق</h3>
+    <div class="m-sub">
+      يخص <b>تطبيق الآيفون فقط</b> — شاشاته محزومة جوّاه فالتعديلات ما توصله إلا برفعة جديدة للمتجر.
+      <br>تطبيق الأندرويد والموقع ياخذون كل تعديل <b>فوراً</b> وما يحتاجون شي من هنا.
+    </div>
+
+    <div class="lg-field-a">
+      <label class="m-label">📱 أقل نسخة مقبولة</label>
+      <input type="text" id="us-version" class="note-input" placeholder="مثال: 1.1 — اتركه فارغ لتعطيل الإلزام"
+             style="direction:ltr;text-align:right;margin-bottom:6px">
+      <div class="m-sub" style="margin-bottom:14px">
+        أي زبون أو سائق نسخته أقدم من هذا الرقم راح تطلعله شاشة التحديث.
+      </div>
+    </div>
+
+    <div class="lg-field-a">
+      <label class="m-label">💬 الرسالة اللي يشوفها</label>
+      <input type="text" id="us-message" class="note-input" maxlength="300"
+             placeholder="النسخة اللي عندك قديمة. حدّث التطبيق من المتجر حتى تكمّل."
+             style="margin-bottom:14px">
+    </div>
+
+    <div class="sub-row" style="margin-bottom:16px">
+      <div class="sr-ico">🔒</div>
+      <div class="sr-body">
+        <h4>إجباري</h4>
+        <p>يمنعه يكمّل لين يحدّث. لو مطفي، يكدر يضغط «بعدين» ويستعمل التطبيق.</p>
+      </div>
+      <button class="btn ghost" id="us-forced-btn" onclick="toggleUpdateForced()">—</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn go" onclick="saveUpdateSettings()">حفظ ✅</button>
+      <button class="btn ghost" onclick="closeUpdateSettingsModal()">إلغاء</button>
+    </div>
+  </div>
+</div>
+
 <!-- نافذة ملف السائق التفصيلي -->
 <div class="modal-bg" id="driver-detail-modal">
   <div class="modal detail-modal" style="max-width:420px">
@@ -735,7 +785,7 @@ function switchTab(name) {
   if (name === 'customers') loadCustomers();
   if (name === 'rewards') renderRewardsView();
   if (name === 'statement') renderStatementView();
-  if (name === 'settings') renderDeliveryService();
+  if (name === 'settings') { renderDeliveryService(); renderUpdateSettings(); }
 }
 
 function openSidebar() {
@@ -1742,6 +1792,62 @@ async function downloadBackup() {
     toast(`انحفظت النسخة (${Math.round(blob.size/1024)} كيلوبايت) ✅`);
   } catch (e) { toast('ما كدرنا نجهّز النسخة'); }
   finally { btn.disabled = false; btn.textContent = '⬇️ نزّل'; }
+}
+
+/* ===== إلزام تحديث التطبيق =====
+   يخص الآيفون بس: شاشاته محزومة جوّا التطبيق، فالزبون ممكن يبقى شهر
+   بنسخة قديمة تتكلم مع سيرفر تغيّر. الأندرويد والموقع ياخذون التعديل
+   فوراً فما يحتاجون إلزام. */
+let updForced = false;
+
+async function renderUpdateSettings() {
+  try {
+    const s = await fetch('/api/service-settings').then(r => r.json());
+    updForced = !!s.updateForced;
+    const v = s.minAppVersion || '';
+    document.getElementById('update-svc-sub').textContent = v
+      ? `${s.updateForced ? '🔒 إجباري' : '🔔 تنبيه'} — أقل نسخة ${v}`
+      : '⏸️ مطفي — ماكو إلزام تحديث';
+  } catch (e) {}
+}
+
+async function openUpdateSettingsModal() {
+  document.getElementById('update-settings-modal').classList.add('show');
+  try {
+    const s = await fetch('/api/service-settings').then(r => r.json());
+    document.getElementById('us-version').value = s.minAppVersion || '';
+    document.getElementById('us-message').value = s.updateMessage || '';
+    updForced = !!s.updateForced;
+  } catch (e) {}
+  paintUpdForced();
+}
+
+function closeUpdateSettingsModal() { document.getElementById('update-settings-modal').classList.remove('show'); }
+
+function paintUpdForced() {
+  document.getElementById('us-forced-btn').textContent = updForced ? 'مفعّل 🔒' : 'مطفي';
+}
+function toggleUpdateForced() { updForced = !updForced; paintUpdForced(); }
+
+async function saveUpdateSettings() {
+  const version = document.getElementById('us-version').value.trim();
+  if (version && !/^\d+(\.\d+)*$/.test(version)) {
+    return toast('النسخة لازم أرقام ونقاط بس — مثل 1.1');
+  }
+  try {
+    const res = await api('/api/admin/service-settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        minAppVersion: version,
+        updateForced: updForced,
+        updateMessage: document.getElementById('us-message').value.trim(),
+      }),
+    });
+    if (!res.ok) return toast('صار خطأ');
+    toast(version ? 'انحفظ ✅' : 'انطفى الإلزام ✅');
+    closeUpdateSettingsModal();
+    renderUpdateSettings();
+  } catch (e) { toast('صار خطأ'); }
 }
 
 /* تشغيل/إيقاف خدمة التوصيل — لما تتوقف يشوف الزبون "قريباً" بمكانها */

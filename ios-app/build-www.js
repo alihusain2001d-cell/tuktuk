@@ -40,6 +40,14 @@ const BRIDGE = `<script>
     return realFetch.call(window, input, init);
   };
 
+  /* رقم نسخة التطبيق المنصّبة — الصفحة تقارنه بأقل نسخة تقبلها
+     الإدارة، وتطلب التحديث إذا كان أقدم. */
+  window.jayakAppVersion = function () {
+    var A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (!A || !A.getInfo) return Promise.resolve(null);
+    return A.getInfo().then(function (i) { return (i && i.version) || null; }).catch(function () { return null; });
+  };
+
   /* الإشعارات: آبل تمنع إشعارات المتصفح جوّا التطبيقات، فنسجّل عند
      آبل نفسها وناخذ رمز الجهاز. الصفحة تنادي هاي وترسل الرمز
      للسيرفر. نرجّع null لو الزبون رفض أو تأخر الجواب — والصفحة
