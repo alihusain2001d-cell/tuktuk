@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>مولّد صورة المتجر — جايك</title>
+<style>
+  body { font-family:'Segoe UI',Tahoma,sans-serif; background:#F5F2EA; margin:0; padding:24px;
+         display:flex; flex-direction:column; align-items:center; gap:16px; }
+  h1 { font-size:20px; margin:0; }
+  p { color:#6E6A60; font-size:14px; margin:0; text-align:center; max-width:640px; line-height:1.8; }
+  canvas { border:1px solid #DDD; border-radius:10px; max-width:100%; height:auto; box-shadow:0 4px 18px rgba(0,0,0,.08); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  button { background:#FFC800; border:0; padding:13px 26px; border-radius:11px; font-size:15px;
+           font-weight:700; cursor:pointer; font-family:inherit; }
+  button.alt { background:#fff; border:1.5px solid #DDD; }
+  .note { background:#FFF9E8; border:1.5px solid #FFE3B0; border-radius:10px; padding:12px 16px;
+          font-size:13.5px; max-width:640px; line-height:1.9; }
+</style>
+</head>
+<body>
+
+<h1>الصورة الرئيسية لمتجر Google Play</h1>
+<p>المقاس المطلوب بالضبط <b>١٠٢٤ × ٥٠٠</b> بكسل. اختر شكل وبعدين نزّل.</p>
+
+<canvas id="c" width="1024" height="500"></canvas>
+
+<div class="row">
+  <button onclick="draw('yellow')">أصفر</button>
+  <button class="alt" onclick="draw('dark')">غامق</button>
+  <button class="alt" onclick="draw('split')">مقسّم</button>
+</div>
+
+<div class="row">
+  <button onclick="save()">⬇ نزّل الصورة</button>
+</div>
+
+<div class="note">
+  بعد ما تنزّلها، ارفعها بالكونسول:<br>
+  <b>بطاقة بيانات المتجر ← مواد العرض الرسومية ← صورة رئيسية</b>
+</div>
+
+<script>
+const c = document.getElementById('c');
+const x = c.getContext('2d');
+
+function draw(style) {
+  const W = 1024, H = 500;
+  x.clearRect(0, 0, W, H);
+
+  // الخلفية
+  if (style === 'yellow') {
+    const g = x.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#FFD233'); g.addColorStop(1, '#FFB800');
+    x.fillStyle = g; x.fillRect(0, 0, W, H);
+  } else if (style === 'dark') {
+    const g = x.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, '#1C1C1C'); g.addColorStop(1, '#333028');
+    x.fillStyle = g; x.fillRect(0, 0, W, H);
+  } else {
+    x.fillStyle = '#1C1C1C'; x.fillRect(0, 0, W, H);
+    x.fillStyle = '#FFC800'; x.fillRect(0, 0, W * 0.42, H);
+  }
+
+  const onDark = style !== 'yellow';
+  const ink  = onDark ? '#FFFFFF' : '#1A1A1A';
+  const soft = onDark ? 'rgba(255,255,255,.72)' : 'rgba(26,26,26,.68)';
+
+  // دوائر خفيفة بالخلفية
+  x.save();
+  x.globalAlpha = .07;
+  x.fillStyle = onDark ? '#FFC800' : '#1A1A1A';
+  x.beginPath(); x.arc(170, 420, 190, 0, 7); x.fill();
+  x.beginPath(); x.arc(930, 90, 130, 0, 7); x.fill();
+  x.restore();
+
+  // التكتك
+  x.font = '150px "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('🛺', style === 'split' ? W * 0.21 : 185, H / 2);
+
+  // النصوص
+  x.direction = 'rtl';
+  x.textAlign = 'right';
+
+  const right = W - 80;
+  x.fillStyle = ink;
+  x.font = '800 104px "Segoe UI", Tahoma, sans-serif';
+  x.fillText('جايك', right, 168);
+
+  // خط تحت العنوان — تحت أسفل الحروف مو فوكها
+  x.fillStyle = onDark ? '#FFC800' : '#1A1A1A';
+  x.fillRect(right - 150, 248, 150, 6);
+
+  x.fillStyle = soft;
+  x.font = '600 42px "Segoe UI", Tahoma, sans-serif';
+  x.fillText('وين ما تريد، جايك', right, 312);
+
+  x.font = '400 31px "Segoe UI", Tahoma, sans-serif';
+  x.fillText('تكتك المسيب — اطلب من موبايلك', right, 374);
+}
+
+function save() {
+  c.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = 'jayak-feature-graphic-1024x500.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/png');
+}
+
+draw('yellow');
+</script>
+
+</body>
+</html>

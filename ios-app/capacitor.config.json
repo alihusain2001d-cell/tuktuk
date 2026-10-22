@@ -1,0 +1,22 @@
+{
+  "appId": "com.jayak.app",
+  "appName": "جايك",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#FFC800"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 800,
+      "backgroundColor": "#FFC800",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#FFC800",
+      "overlaysWebView": false
+    }
+  }
+}

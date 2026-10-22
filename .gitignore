@@ -6,3 +6,7 @@ nohup.out
 test-flow.js
 .claude/
 backups/
+ios-app/node_modules/
+ios-app/www/
+ios-app/ios/App/App/public/
+ios-app/ios/App/build/

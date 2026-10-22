@@ -188,6 +188,11 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   }]);
 });
 
+/* مشروع تطبيق الآيفون وملف البناء ساكنين بنفس المستودع، بس هذولا
+   كود مو محتوى موقع. بدون هذا السطر يصير موقع التكتك ينشر ملفات
+   Xcode وSwift لأي أحد يعرف أسماءها. */
+app.use(['/ios-app', '/codemagic.yaml', '/store'], (req, res) => res.status(404).end());
+
 app.use(express.static(path.join(__dirname), {
   dotfiles: 'allow',   // حتى يوصل .well-known/assetlinks.json لتطبيق أندرويد
   setHeaders(res, filePath) {
