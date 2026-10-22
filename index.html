@@ -98,6 +98,15 @@
   .promo-strip .ps-text h3 .hl { background:var(--accent); color:#fff; padding:0 6px; border-radius:5px; }
   .promo-strip .ps-emoji { font-size:44px; }
 
+  /* تذييل الحقوق — هادي ومتأخر بالترتيب البصري، حتى ما يزاحم
+     الخدمات على انتباه الزبون */
+  .app-credit { margin:26px 4px 14px; text-align:center; font-size:11.5px;
+    line-height:1.9; color:var(--muted); }
+  .app-credit .ac-by { font-size:12px; }
+  .app-credit .ac-by b { color:var(--ink); font-weight:700; }
+  .app-credit .ac-tel { display:inline-block; margin-top:2px; color:var(--muted);
+    text-decoration:none; direction:ltr; letter-spacing:.5px; }
+
   /* ============ القائمة الجانبية ============ */
   .drawer-overlay { position:absolute; inset:0; background:rgba(15,27,61,.5); z-index:1500; opacity:0; pointer-events:none; transition:opacity .25s; }
   .drawer-overlay.open { opacity:1; pointer-events:auto; }
@@ -538,6 +547,12 @@
       </div>
       <div class="ps-emoji">🛵</div>
     </div>
+
+    <div class="app-credit">
+      <div>جميع الحقوق محفوظة — جايك © <span id="credit-year">2026</span></div>
+      <div class="ac-by">تطوير وبرمجة <b>امواج للالكترونيات</b></div>
+      <a class="ac-tel" href="tel:07717533595">٠٧٧١٧٥٣٣٥٩٥</a>
+    </div>
   </div>
 
   <!-- ============ القائمة الجانبية ============ -->
@@ -578,10 +593,6 @@
         <div class="mi-label">عن جايك</div>
       </div>
       <div class="menu-divider"></div>
-      <div class="menu-item" onclick="location.href='/?pick=1'">
-        <div class="mi-icon">🔄</div>
-        <div class="mi-label">تبديل: زبون / سائق</div>
-      </div>
       <div class="menu-item" onclick="logout()">
         <div class="mi-icon">🚪</div>
         <div class="mi-label" style="color:var(--stop)">تسجيل خروج</div>
@@ -2950,6 +2961,12 @@ function haversine(lat1,lon1,lat2,lon2){ const R=6371, dLat=(lat2-lat1)*Math.PI/
 connectWS();
 loadFareSettings();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{}); // لتفعيل "إضافة للشاشة الرئيسية"
+
+// سنة الحقوق تتحدث لحالها — حتى ما تبقى سنة قديمة مكتوبة بالتطبيق
+(function () {
+  const el = document.getElementById('credit-year');
+  if (el) el.textContent = new Date().getFullYear();
+})();
 if (user && !user.token) {
   // دخل قبل تحديث الأمان — ما عنده توكن، فلازم يسجّل دخول مرة وحدة
   localStorage.removeItem('jayak_user');
