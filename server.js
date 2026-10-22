@@ -531,6 +531,12 @@ function checkPhoneProof(phone, proof) {
 // يتأكد من كود التأكيد ويستهلكه. يرجّع null إذا صحيح، أو { status, body } للخطأ
 function checkOtp(phone, code) {
   const clean = normalizePhone(phone);
+
+  // رقم مراجعة المتجر: كوده ثابت وما ينخزن، فنفحصه قبل المخزون
+  if (isReviewPhone(clean)) {
+    return String(code || '').trim() === REVIEW_CODE ? null : { status: 400, body: { error: 'الكود غلط' } };
+  }
+
   const rec = otpCodes.get(clean);
   if (!rec) return { status: 400, body: { error: 'اطلب كود جديد أول' } };
   if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return { status: 400, body: { error: 'الكود انتهت صلاحيته، اطلب واحد جديد' } }; }
@@ -601,6 +607,7 @@ const REVIEW_PHONES = new Set(
 function isReviewPhone(phone) {
   return REVIEW_CODE.length >= 6 && REVIEW_PHONES.has(phone);
 }
+
 if (REVIEW_PHONES.size && REVIEW_CODE.length >= 6) {
   console.log(`🔍 أرقام مراجعة المتجر مفعّلة (${REVIEW_PHONES.size}) — شيلها بعد ما ينشر التطبيق`);
 }
@@ -640,31 +647,9 @@ app.post('/api/otp/send', async (req, res) => {
 app.post('/api/otp/verify', (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
-    const code = String(req.body.code || '').trim();
+    const otpErr = checkOtp(phone, req.body.code);
+    if (otpErr) return res.status(otpErr.status).json(otpErr.body);
 
-    if (isReviewPhone(phone)) {
-      if (code !== REVIEW_CODE) return res.status(400).json({ error: 'الكود غلط' });
-      const token = phoneProof(phone, Math.floor(Date.now() / PHONE_PROOF_SLOT));
-      return res.json({ ok: true, verified: true, token });
-    }
-
-    const rec = otpCodes.get(phone);
-
-    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
-    if (Date.now() > rec.expiresAt) {
-      otpCodes.delete(phone);
-      return res.status(400).json({ error: 'الكود انتهت صلاحيته، اطلب واحد جديد' });
-    }
-    if (rec.attempts >= OTP_MAX_ATTEMPTS) {
-      otpCodes.delete(phone);
-      return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' });
-    }
-    if (rec.code !== code) {
-      rec.attempts++;
-      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
-    }
-
-    otpCodes.delete(phone);
     // إثبات إن الرقم تأكد — التسجيل يطلبه (صالح ساعة)
     const token = phoneProof(phone, Math.floor(Date.now() / PHONE_PROOF_SLOT));
     res.json({ ok: true, verified: true, token });
@@ -745,16 +730,8 @@ app.post('/api/driver/login', async (req, res) => {
     const { phone, code } = req.body;
     const clean = normalizePhone(phone);
 
-    // تأكد من الكود
-    const rec = otpCodes.get(clean);
-    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
-    if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return res.status(400).json({ error: 'الكود انتهت صلاحيته' }); }
-    if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpCodes.delete(clean); return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' }); }
-    if (rec.code !== String(code || '').trim()) {
-      rec.attempts++;
-      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
-    }
-    otpCodes.delete(clean);
+    const otpErr = checkOtp(clean, code);
+    if (otpErr) return res.status(otpErr.status).json(otpErr.body);
 
     // دوّر على السائق
     const d = await db.getDriverByPhone(clean);
@@ -893,16 +870,8 @@ app.post('/api/customer/login', async (req, res) => {
     const { phone, code } = req.body;
     const clean = normalizePhone(phone);
 
-    // تأكد من الكود
-    const rec = otpCodes.get(clean);
-    if (!rec) return res.status(400).json({ error: 'اطلب كود جديد أول' });
-    if (Date.now() > rec.expiresAt) { otpCodes.delete(clean); return res.status(400).json({ error: 'الكود انتهت صلاحيته' }); }
-    if (rec.attempts >= OTP_MAX_ATTEMPTS) { otpCodes.delete(clean); return res.status(429).json({ error: 'محاولات كثيرة، اطلب كود جديد' }); }
-    if (rec.code !== String(code || '').trim()) {
-      rec.attempts++;
-      return res.status(400).json({ error: 'الكود غلط', attemptsLeft: OTP_MAX_ATTEMPTS - rec.attempts });
-    }
-    otpCodes.delete(clean);
+    const otpErr = checkOtp(clean, code);
+    if (otpErr) return res.status(otpErr.status).json(otpErr.body);
 
     const c = await db.getCustomerByPhone(clean);
     if (!c) return res.status(404).json({ error: 'ماكو حساب بهذا الرقم', notFound: true });
