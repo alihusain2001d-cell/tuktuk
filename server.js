@@ -1146,6 +1146,8 @@ async function fetchRouteFromProvider(from, to) {
 
 // بس للمسجّلين — حتى ما يستهلك غيرنا حصتنا المدفوعة
 function requireAppUser(req, res, next) {
+  // الإدارة تحتاجها هم: متابعة الرحلة على الخريطة ترسم خط السير
+  if (ADMIN_KEY && req.headers['x-admin-key'] === ADMIN_KEY) return next();
   if (driverIdFromToken(req.headers['x-driver-token'])) return next();
   const t = String(req.headers['x-customer-token'] || '');
   const dot = t.lastIndexOf('.');
@@ -2154,6 +2156,52 @@ app.get('/api/admin/backup', checkAdmin, async (req, res) => {
 });
 
 // السواق المتصلين لحظياً (للخريطة بلوحة التحكم)
+/* ===== الرحلات الشغّالة =====
+   الإدارة تحتاج تشوف وين وصلت كل رحلة وهي تمشي — منو السائق، ووين
+   صار، وكم باقي عليه. نجمع كل شي بردّ واحد حتى اللوحة ما تسأل
+   عن كل رحلة لوحدها. */
+app.get('/api/admin/active-rides', checkAdmin, async (req, res) => {
+  try {
+    const rows = await cachedDriversLite();
+    const byId = {};
+    rows.forEach(r => { byId[r.id] = r; });
+
+    const live = [];
+    for (const ride of activeRides.values()) {
+      const d = ride.driverId ? byId[ride.driverId] : null;
+      const online = ride.driverId ? onlineDrivers.get(ride.driverId) : null;
+      // موقع السائق: الحيّ أولاً، وإلا آخر موقع محفوظ
+      const dLat = online && validLoc(online.lat, online.lng) ? online.lat : (d ? d.last_lat : null);
+      const dLng = online && validLoc(online.lat, online.lng) ? online.lng : (d ? d.last_lng : null);
+
+      live.push({
+        id: ride.id,
+        type: ride.type,
+        status: ride.status,
+        createdAt: ride.createdAt,
+        customer: { name: ride.customer.name, phone: ride.customer.phone },
+        pickup: ride.pickup,
+        destination: ride.destination,
+        store: ride.store || null,
+        storeName: ride.storeName || null,
+        estFare: ride.estFare || 0,
+        offerPrice: ride.offerPrice || null,
+        driver: d ? {
+          id: d.id, name: d.name, phone: d.phone, car: d.car,
+          lat: validLoc(dLat, dLng) ? dLat : null,
+          lng: validLoc(dLat, dLng) ? dLng : null,
+          connected: !!online,
+        } : null,
+      });
+    }
+    live.sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ rides: live, at: Date.now() });
+  } catch (e) {
+    console.error('خطأ بالرحلات الشغّالة:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/admin/live', checkAdmin, async (req, res) => {
   try {
     const allDriverRows = await cachedDriversLite();

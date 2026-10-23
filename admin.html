@@ -155,6 +155,32 @@
   /* حقوق بيانات الخريطة — مطلوبة برخصة OpenStreetMap ومن مزوّد البلاطات */
   .map-credit { position:absolute; bottom:2px; left:6px; z-index:620; font-size:9px; color:#6E6A60;
     background:rgba(255,255,255,.72); padding:1px 6px; border-radius:6px; pointer-events:none; letter-spacing:.2px; }
+  /* ===== الرحلات الشغّالة ===== */
+  .nav-badge { margin-inline-start:auto; background:var(--warn); color:#fff; font-size:11px;
+    font-weight:800; min-width:20px; height:20px; border-radius:10px; display:none;
+    align-items:center; justify-content:center; padding:0 6px; }
+  .nav-badge.on { display:flex; }
+
+  .lr-card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 16px;
+    margin-bottom:10px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+  .lr-card:hover { border-color:var(--sky,#FFC800); box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .lr-top { display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+  .lr-state { font-size:11px; font-weight:800; padding:3px 9px; border-radius:9px; color:#fff; white-space:nowrap; }
+  .lr-who { font-weight:700; font-size:14.5px; }
+  .lr-age { margin-inline-start:auto; font-size:11.5px; color:var(--muted); white-space:nowrap; }
+  .lr-path { font-size:12.5px; color:var(--muted); line-height:1.95; }
+  .lr-path b { color:var(--ink); font-weight:600; }
+  .lr-foot { display:flex; align-items:center; gap:8px; margin-top:10px;
+    padding-top:10px; border-top:1px dashed var(--line); font-size:12.5px; }
+  .lr-foot .lr-fare { margin-inline-start:auto; font-weight:800; }
+  .lr-nodriver { color:var(--muted); font-style:italic; }
+
+  .follow-bar { display:flex; align-items:center; gap:12px; padding:11px 14px; margin-bottom:12px;
+    background:var(--ink); color:#fff; border-radius:12px; font-size:13px; }
+  .follow-bar .fb-text { display:flex; flex-direction:column; gap:2px; line-height:1.5; }
+  .follow-bar .fb-text span { font-size:11.5px; opacity:.75; }
+  .follow-bar button { margin-inline-start:auto; }
+
   .map-legend { display:flex; gap:14px; padding:11px 14px; background:#fff; border:1px solid var(--line); border-radius:12px; margin-bottom:12px; font-size:12px; flex-wrap:wrap; }
   .map-legend span { display:flex; align-items:center; gap:5px; }
   .lg-dot { width:9px; height:9px; border-radius:50%; }
@@ -259,6 +285,7 @@
       <div class="nav-item active" data-tab="home" onclick="switchTab('home')"><span class="ni-ico">📊</span><span>عام</span></div>
       <div class="nav-item" data-tab="drivers" onclick="switchTab('drivers')"><span class="ni-ico">🚗</span><span>السواق</span></div>
       <div class="nav-item" data-tab="map" onclick="switchTab('map')"><span class="ni-ico">🗺️</span><span>الخريطة</span></div>
+      <div class="nav-item" data-tab="live" onclick="switchTab('live')"><span class="ni-ico">🛣️</span><span>الرحلات الشغّالة</span><span class="nav-badge" id="live-badge"></span></div>
       <div class="nav-item" data-tab="rides" onclick="switchTab('rides')"><span class="ni-ico">📋</span><span>الطلبات</span></div>
       <div class="nav-item" data-tab="customers" onclick="switchTab('customers')"><span class="ni-ico">👥</span><span>الزبائن</span></div>
       <div class="nav-divider"></div>
@@ -329,9 +356,21 @@
       <span><i class="lg-dot off"></i> تطبيقه مسكّر (آخر موقع)</span>
       <span id="map-count" style="margin-right:auto;color:var(--muted)">—</span>
     </div>
+    <div class="follow-bar hidden" id="follow-bar">
+      <div class="fb-text">
+        <b id="fb-title">—</b>
+        <span id="fb-sub">—</span>
+      </div>
+      <button class="btn ghost" onclick="clearFollow()">إلغاء المتابعة</button>
+    </div>
     <div style="position:relative"><div id="live-map"></div>
       <div class="map-credit">© OpenFreeMap © OpenStreetMap</div>
     </div>
+  </div>
+
+  <!-- ===== الرحلات الشغّالة ===== -->
+  <div class="view" id="view-live">
+    <div id="live-rides-list"><div class="loading"><div class="spinner"></div>نحمّل...</div></div>
   </div>
 
   <!-- ===== الطلبات ===== -->
@@ -780,6 +819,8 @@ function switchTab(name) {
 
   if (name === 'map') { initLiveMap(); startLiveUpdates(); }
   else stopLiveUpdates();
+  if (name === 'live') startLiveRides();
+  else if (name !== 'map') stopLiveRides();
 
   if (name === 'rides') loadRides();
   if (name === 'customers') loadCustomers();
@@ -1460,6 +1501,8 @@ function stopLiveUpdates(){ if(liveTimer) clearInterval(liveTimer); liveTimer=nu
 
 async function loadLive() {
   if (!liveMap) return;
+  // بوضع المتابعة الخريطة تخص رحلة وحدة — باقي السواق يزدحمونها
+  if (followedRide) { liveMarkers.forEach(m => liveMap.removeLayer(m)); liveMarkers = []; loadActiveRides(true); return; }
   try {
     const data = await api('/api/admin/live').then(r=>r.json());
     liveMarkers.forEach(m => liveMap.removeLayer(m));
@@ -1507,6 +1550,191 @@ async function loadLive() {
       liveMap._fitted = true;
     }
   } catch(e) { /* هادئ */ }
+}
+
+/* ============ الرحلات الشغّالة ============
+
+   قائمة بكل رحلة ماشية الآن، والضغط على وحدة يفتح الخريطة مركّزة
+   عليها: مكان الزبون ووجهته وخط السير، والسائق يتحرك عليها.
+
+   لما نتابع رحلة نخفي باقي السواق — وإلا تصير الخريطة مزدحمة
+   والمتابع يضيع بين عشر دبابيس. */
+let activeRides = [], followedRide = null, liveRidesTimer = null;
+let followLayers = [], followRouteFrom = null;
+
+const RIDE_STATES = {
+  searching: { t: 'ندوّر على سائق', c: '#8A8270' },
+  offered:   { t: 'سائق عرض سعر',   c: '#2BA9E0' },
+  accepted:  { t: 'السائق قبل',     c: '#F5A623' },
+  arriving:  { t: 'جاي للزبون',     c: '#F5A623' },
+  arrived:   { t: 'وصل للزبون',     c: '#2BA9E0' },
+  started:   { t: 'الرحلة ماشية',   c: '#12A150' },
+};
+const rideState = s => RIDE_STATES[s] || { t: s || '—', c: '#8A8270' };
+
+function sinceText(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'هسه';
+  if (m < 60) return `من ${m} دقيقة`;
+  return `من ${Math.floor(m / 60)} ساعة و${m % 60} دقيقة`;
+}
+
+function startLiveRides() { stopLiveRides(); loadActiveRides(); liveRidesTimer = setInterval(loadActiveRides, 5000); }
+function stopLiveRides() { if (liveRidesTimer) clearInterval(liveRidesTimer); liveRidesTimer = null; }
+
+async function loadActiveRides(silent) {
+  try {
+    const out = await api('/api/admin/active-rides').then(r => r.json());
+    activeRides = out.rides || [];
+  } catch (e) { return; }
+
+  const badge = document.getElementById('live-badge');
+  badge.textContent = activeRides.length || '';
+  badge.classList.toggle('on', activeRides.length > 0);
+
+  // الرحلة اللي نتابعها خلصت؟ نطلع من وضع المتابعة بدل ما نضل نراقب شبح
+  if (followedRide) {
+    const still = activeRides.find(r => r.id === followedRide.id);
+    if (!still) { clearFollow(); toast('الرحلة خلصت'); }
+    else { followedRide = still; paintFollowed(); }
+  }
+
+  if (!silent) renderActiveRides();
+}
+
+function renderActiveRides() {
+  const box = document.getElementById('live-rides-list');
+  if (!activeRides.length) {
+    box.innerHTML = '<div class="empty">ماكو رحلات شغّالة هسه</div>';
+    return;
+  }
+  box.innerHTML = activeRides.map(r => {
+    const st = rideState(r.status);
+    const from = r.type === 'delivery' ? (r.storeName || (r.store && r.store.label) || 'محل') : (r.pickup.label || 'موقع الزبون');
+    const to = r.type === 'delivery' ? (r.pickup.label || 'موقع الزبون') : (r.destination ? r.destination.label : 'وجهة غير محددة');
+    const fare = r.offerPrice || r.estFare;
+    return `
+      <div class="lr-card" onclick="followRide('${r.id}')">
+        <div class="lr-top">
+          <span class="lr-state" style="background:${st.c}">${st.t}</span>
+          <span class="lr-who">${r.customer.name}</span>
+          <span class="lr-age">${sinceText(r.createdAt)}</span>
+        </div>
+        <div class="lr-path">
+          <b>من:</b> ${from}<br>
+          <b>إلى:</b> ${to}
+        </div>
+        <div class="lr-foot">
+          ${r.driver
+            ? `<span>🛺 ${r.driver.name}${r.driver.connected ? '' : ' <span class="lr-nodriver">(تطبيقه مسكّر)</span>'}</span>`
+            : '<span class="lr-nodriver">ماكو سائق بعد</span>'}
+          ${fare ? `<span class="lr-fare">${fare.toLocaleString()} د.ع</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function followRide(id) {
+  const r = activeRides.find(x => x.id === id);
+  if (!r) return;
+  followedRide = r;
+  followRouteFrom = null;
+  switchTab('map');
+  document.getElementById('follow-bar').classList.remove('hidden');
+  if (liveMap) liveMap._fitted = false;   // نخلي الخريطة تتمركز على الرحلة
+  paintFollowed();
+}
+
+function clearFollow() {
+  followedRide = null;
+  followRouteFrom = null;
+  document.getElementById('follow-bar').classList.add('hidden');
+  clearFollowLayers();
+  if (liveMap) liveMap._fitted = false;
+  loadLive();
+}
+
+function clearFollowLayers() {
+  followLayers.forEach(l => { try { liveMap.removeLayer(l); } catch (e) {} });
+  followLayers = [];
+}
+
+function pinIcon(emoji, color, text) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center">
+             <div style="background:${color};color:#fff;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;margin-bottom:2px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${text}</div>
+             <div style="font-size:26px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))">${emoji}</div>
+           </div>`,
+    iconSize: [0, 0],
+  });
+}
+
+async function paintFollowed() {
+  const r = followedRide;
+  if (!r || !liveMap) return;
+
+  const st = rideState(r.status);
+  document.getElementById('fb-title').textContent = `${r.customer.name} · ${st.t}`;
+  document.getElementById('fb-sub').textContent = r.driver
+    ? `السائق ${r.driver.name}${r.driver.connected ? '' : ' — تطبيقه مسكّر'} · ${sinceText(r.createdAt)}`
+    : `ماكو سائق بعد · ${sinceText(r.createdAt)}`;
+
+  clearFollowLayers();
+  const pts = [];
+
+  const start = r.type === 'delivery' && r.store ? r.store : r.pickup;
+  if (start && start.lat != null) {
+    followLayers.push(L.marker([start.lat, start.lng], {
+      icon: pinIcon('🟢', '#12A150', r.type === 'delivery' ? 'المحل' : 'الزبون'),
+    }).addTo(liveMap));
+    pts.push([start.lat, start.lng]);
+  }
+
+  const end = r.type === 'delivery' ? r.pickup : r.destination;
+  if (end && end.lat != null && end !== start) {
+    followLayers.push(L.marker([end.lat, end.lng], {
+      icon: pinIcon('🔴', '#E5484D', r.type === 'delivery' ? 'الزبون' : 'الوجهة'),
+    }).addTo(liveMap));
+    pts.push([end.lat, end.lng]);
+  }
+
+  if (r.driver && r.driver.lat != null) {
+    followLayers.push(L.marker([r.driver.lat, r.driver.lng], {
+      icon: pinIcon('🛺', '#1A1A1A', r.driver.name),
+    }).addTo(liveMap));
+    pts.push([r.driver.lat, r.driver.lng]);
+  }
+
+  // خط السير: من السائق للزبون إذا جاي عليه، ومن الزبون للوجهة إذا الرحلة بدت
+  const legFrom = ['started'].includes(r.status) ? start : (r.driver && r.driver.lat != null ? r.driver : start);
+  const legTo = ['started'].includes(r.status) ? end : start;
+  if (legFrom && legTo && legFrom.lat != null && legTo.lat != null) {
+    followLayers.push(L.polyline([[legFrom.lat, legFrom.lng], [legTo.lat, legTo.lng]],
+      { color: '#FFC107', weight: 4, opacity: .8, dashArray: '2,9' }).addTo(liveMap));
+    drawFollowRoute(legFrom, legTo);
+  }
+
+  if (pts.length && !liveMap._fitted) {
+    liveMap.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 16 });
+    liveMap._fitted = true;
+  }
+}
+
+/* المسار الحقيقي — ما نعيد طلبه إلا إذا تحرك السائق فعلاً، نفس ما
+   يسوي تطبيق الزبون، حتى ما نستهلك حصة خدمة المسارات بلا فايدة. */
+async function drawFollowRoute(from, to) {
+  const moved = followRouteFrom
+    ? Math.hypot(from.lat - followRouteFrom.lat, from.lng - followRouteFrom.lng) * 111
+    : 999;
+  if (moved < 0.15 && followRouteFrom) return;
+  followRouteFrom = { lat: from.lat, lng: from.lng };
+  try {
+    const route = await api(`/api/route?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}`).then(r => r.json());
+    if (!route || !route.coords || !followedRide) return;
+    const line = L.polyline(route.coords, { color: '#12A150', weight: 5, opacity: .9, lineCap: 'round' }).addTo(liveMap);
+    followLayers.push(line);
+  } catch (e) {}
 }
 
 // ============ الطلبات ============
