@@ -1,0 +1,183 @@
+═══════════════════════════════════════════════════════════
+  رفع جايك على App Store — كل الحقول جاهزة للنسخ
+═══════════════════════════════════════════════════════════
+
+الترتيب مهم: املا من فوك لتحت، وآخر شي اضغط "Add for Review".
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ١. App Information  (معلومات التطبيق)        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Subtitle  (٣٠ حرف):
+توصيل ومشاوير داخل المسيب
+
+Category:
+  Primary:    Navigation
+  Secondary:  Travel
+
+Privacy Policy URL:
+https://tuktuk-production-d336.up.railway.app/privacy
+
+Age Rating → ابدا الاستبيان واختر "لا" لكل شي، إلا:
+  • Unrestricted Web Access → لا
+  (التطبيق ما بيه عنف ولا قمار ولا محتوى للكبار — التصنيف يطلع 4+)
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٢. Pricing and Availability                  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Price:  Free
+Availability:  All countries  (أو العراق بس — خيارك)
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٣. App Privacy  (خصوصية التطبيق)             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+نفس أجوبة جوجل بالضبط. اضغط Get Started وأشّر:
+
+Location
+  ☑ Precise Location
+     Used for: App Functionality
+     ☑ Linked to the user    ☐ Used for tracking
+
+Contact Info
+  ☑ Name
+  ☑ Phone Number
+     Used for: App Functionality + Account Management
+     ☑ Linked to the user    ☐ Used for tracking
+
+  ☑ Physical Address        ← عناوين الانطلاق والوصول
+     Used for: App Functionality
+     ☑ Linked to the user    ☐ Used for tracking
+
+Identifiers
+  ☑ User ID
+     Used for: App Functionality + Account Management
+     ☑ Linked to the user    ☐ Used for tracking
+
+User Content
+  ☑ Photos or Videos        ← صور السائق وهويته
+  ☑ Other User Content      ← وصف المواد بطلبات التوصيل
+     Used for: App Functionality
+     ☑ Linked to the user    ☐ Used for tracking
+
+❌ لا تأشّر نهائياً:  Financial Info · Health · Contacts ·
+   Browsing History · Search History · Diagnostics · Usage Data
+
+⚠️ ومهم:  "Used for tracking" اتركها فاضية بكل شي.
+   Tracking عند آبل معناها تتبّع الزبون عبر تطبيقات شركات ثانية
+   للإعلانات — وإحنا ما نسوي هيچي. لو أشّرتها، التطبيق يصير
+   ملزم يعرض شاشة إذن التتبّع وينرفض بلا ما تضيفها بالكود.
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٤. النصوص  (صفحة 1.0 — اختر Arabic فوك)      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+Promotional Text  (١٧٠ حرف — تنتغير بلا مراجعة):
+اطلب تكتك بالمسيب من موبايلك. شوف السائق جاي عليك على الخريطة، واعرف الأجرة قبل ما تنطلق.
+
+Keywords  (١٠٠ حرف، بلا مسافات بعد الفواصل):
+تكتك,توصيل,مشاوير,نقل,تاكسي,سيارة,رحلة,سائق,بابل,المسيب,كرو,اجرة,طلب,دليفري
+
+Description:
+وين ما تريد، جايك.
+
+تطبيق نقل بالتكتك داخل مدينة المسيب. تطلب رحلتك من موبايلك، تشوف
+السائق وهو جاي عليك على الخريطة، وتعرف الأجرة قبل ما تنطلق.
+
+للزبون
+• حدّد مكانك ومكان وصولك على الخريطة بدبوس — بلا ما تشرح العنوان بالتلفون
+• شوف الأجرة قبل ما تأكد الطلب، ما بيها مفاجآت
+• تابع السائق لحظة بلحظة وهو جاي عليك، وشوف اسمه وصورته ورقم تكتكه
+• شوف خط السير مالتك على الخريطة أثناء الرحلة
+• احفظ أماكنك المتكررة (البيت، الشغل) واطلب بضغطة وحدة
+• قيّم السائق بعد الرحلة
+
+للسائق
+• الطلبات القريبة منك توصلك مباشرة
+• شوف وين الزبون ووين رايح قبل ما توافق على الطلب
+• خط السير للزبون وللوجهة يطلعلك على الخريطة
+• تنبيه يوصلك حتى لو التطبيق مسكّر
+• سجل رحلاتك وحساباتك موجود دائماً
+
+الأجرة والدفع
+الأجرة تنحسب حسب المسافة وتظهرلك قبل ما تأكد.
+الدفع نقداً مباشرة للسائق — ماكو أي دفع داخل التطبيق، ولا نطلب
+منك أي بطاقة أو معلومات بنكية.
+
+الدخول
+برقم موبايلك وكود يوصلك برسالة نصية. ما نطلب كلمة سر.
+وتكدر تحذف حسابك من داخل التطبيق بأي وقت.
+
+جايك خدمة محلية بالمسيب — للناس اللي تعرف المدينة.
+
+Support URL:
+https://tuktuk-production-d336.up.railway.app/privacy
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٥. App Review Information  ← أهم شي           ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+☑ Sign-in required
+
+  User Name:  0000000000
+  Password:   865716
+
+Notes:
+This app signs in with a phone number and an SMS code.
+The account above is a TEST account with a FIXED code — no SMS is sent.
+
+Customer account:  0000000000   code: 865716
+Driver account:    0000000001   code: 865716
+
+Steps: open the app > choose "customer" or "driver" >
+enter the number > tap send > enter the code above.
+
+The app asks for location permission to show the map and to let the
+driver find the customer. Payment is cash, directly to the driver —
+there are no in-app purchases.
+
+The service operates in Al-Musayyib, Iraq. To see a map with content,
+set the simulator location to 32.7786, 44.2906.
+
+App language is Arabic (Iraq).
+
+Contact:
+  First Name:  Ali
+  Last Name:   Al-Dujaily
+  Phone:       +9647717533595
+  Email:       alihusain.2001.d@gmail.com
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٦. الصور  ← هاي اللي عليك                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+آبل تطلب صور شاشة لمقاس iPhone واحد على الأقل (6.9" أو 6.5").
+صوّر من آيفونك مباشرة — ٣ أو ٤ صور تكفي:
+
+  1. شاشة الاختيار (زبون / سائق)
+  2. الخريطة ودبوس التحديد
+  3. السعر قبل التأكيد
+  4. تتبّع السائق مع خط السير
+
+⚠️ ولا تحط صور فيها أرقام أو أسماء زبائن حقيقيين — استعمل حساب
+   المراجعة 0000000000.
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ٧. Build                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+بقسم Build اضغط (+) واختر آخر نسخة طلعت من Codemagic.
+
+
+═══════════════════════════════════════════════════════════
+  بعدها: Save ← Add for Review ← Submit
+  المراجعة عادةً ٢٤-٤٨ ساعة.
+═══════════════════════════════════════════════════════════

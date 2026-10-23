@@ -2367,7 +2367,8 @@ function showIncoming(rideId) {
   const a = isDel ? (r.store || r.pickup) : r.pickup;
   const b = isDel ? r.pickup : r.destination;
   if (a && a.lat) {
-    mapEl.src = `/api/static-map?from=${a.lat},${a.lng}` + (b && b.lat ? `&to=${b.lat},${b.lng}` : '');
+    // بتطبيق الآيفون الصور لازم تنطلب من سيرفرنا صراحةً — شوف الجسر
+    mapEl.src = `${window.JAYAK_HOST || ""}/api/static-map?from=${a.lat},${a.lng}` + (b && b.lat ? `&to=${b.lat},${b.lng}` : '');
     mapEl.classList.remove('hidden');
     mapEl.onerror = () => mapEl.classList.add('hidden');
     mapEl.onclick = () => openRoutePreview(r);

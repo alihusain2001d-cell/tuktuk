@@ -1321,7 +1321,10 @@ function renderTrips() {
   body.innerHTML = bar + filtered.map(t => {
     const from = t.type === 'delivery' ? t.store : t.pickup;
     const to = t.type === 'delivery' ? t.pickup : t.destination;
-    const mapUrl = (from && to) ? `/api/static-map?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}` : null;
+    /* بتطبيق الآيفون الصفحات تنفتح من الجهاز، فصورة بتبدي بـ"/" تنطلب
+       من الموبايل نفسه وما تلگى. الجسر يحوّل طلبات البيانات بس، فالصور
+       نوجّهها إحنا. وبالموقع JAYAK_HOST فاضي فما يتغير شي. */
+    const mapUrl = (from && to) ? `${window.JAYAK_HOST || ""}/api/static-map?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}` : null;
     return `
     <div class="trip-card-map">
       ${mapUrl ? `<img class="ti-map" src="${mapUrl}" loading="lazy" alt="">` : ''}
