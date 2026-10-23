@@ -2385,6 +2385,27 @@ async function resyncRideStatus() {
     if (!res.ok) return;
     const s = await res.json();
     if (s.status === 'done') { if (!rateShown(s.rideId)) onDone(s, true); return; }
+
+    /* الشاشة متأخرة عن السيرفر؟ نعيد بناءها كاملة.
+
+       هاي تصير لما يرجع الزبون من الإشعار: الاتصال المباشر كان ميت
+       وهو برا التطبيق، فما وصله خبر إن السائق وافق — ويبقى شايف
+       "ندوّر على سائق" والسائق بالطريق إله. وبيانات السائق (اسمه
+       وصورته ورقمه) ما تجي بهاي النقطة، فنعيد من نقطة الطلب الجاري. */
+    const showing = id => document.getElementById(id).classList.contains('active');
+    const onDriverScreen = showing('flow-driver') || showing('flow-ride') || showing('flow-delivery');
+
+    if (['offered', 'accepted', 'arriving', 'arrived', 'started'].includes(s.status)
+        && !onDriverScreen && !showing('flow-offer')) {
+      await resumeActiveRide();
+      return;
+    }
+    // والعكس: السائق اعتذر وإحنا برا التطبيق — الشاشة بعدها تبين سائق
+    if (s.status === 'searching' && onDriverScreen) {
+      onSearchingAgain({ rideId: s.rideId });
+      return;
+    }
+
     if (s.status === 'arrived') onArrived();
     else if (s.status === 'started') onTripStarted();
   } catch (e) {}
