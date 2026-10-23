@@ -1788,6 +1788,36 @@ function showPinLabel(label) {
   el.classList.add('empty');
 }
 
+/* اسم المعلم من الخريطة نفسها.
+
+   خدمة العناوين تعرف الشوارع أكثر ما تعرف المعالم — الزبون يحط الدبوس
+   على "مستشفى المسيب العام" وهي ترجّع اسم أقرب شارع. والخريطة اللي
+   قدامه راسمة اسم المستشفى، فنقراه منها: نفس الاسم اللي شافه بعينه،
+   وبلا أي طلب زيادة ولا كلفة. */
+function labelFromMap(m) {
+  try {
+    const mm = m && m._glLayer && m._glLayer.getMaplibreMap && m._glLayer.getMaplibreMap();
+    if (!mm || !mm.isStyleLoaded || !mm.isStyleLoaded()) return null;
+
+    const c = m.getCenter();
+    const p = mm.project([c.lng, c.lat]);
+    const R = 28;   // بكسل — بزووم ١٧ تقريباً ٢٥ متر
+    const feats = mm.queryRenderedFeatures([[p.x - R, p.y - R], [p.x + R, p.y + R]]);
+
+    let best = null, bestD = Infinity;
+    for (const f of feats) {
+      if (f.sourceLayer !== 'poi') continue;          // المعالم بس — مو الشوارع ولا المدن
+      const pr = f.properties || {};
+      const nm = pr['name:ar'] || pr.name;
+      if (!nm || !f.geometry || f.geometry.type !== 'Point') continue;
+      const q = mm.project(f.geometry.coordinates);
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < bestD) { bestD = d; best = nm; }
+    }
+    return best;
+  } catch (e) { return null; }
+}
+
 // اسم المكان تحت الدبوس — ننتظر شوية بعد ما يوقف تحريك حتى ما نستهلك طلبات على الفاضي
 function refreshPinPreview() {
   const m = curMap();
@@ -1804,6 +1834,12 @@ function refreshPinPreview() {
       const r = await fetch(`/api/reverse?lat=${c.lat}&lng=${c.lng}`).then(x => x.json());
       if (myReq !== previewReq || step !== curStep()) return;
       if (r && r.name) pinPreview.label = r.name;
+      /* ما لگت الخدمة معلم (رجّعت شارع أو منطقة)؟ نسأل الخريطة —
+         هي راسمة اسم المكان اللي حط الزبون دبوسه عليه. */
+      if (!r || r.kind !== 'landmark') {
+        const fromMap = labelFromMap(m);
+        if (fromMap) pinPreview.label = fromMap;
+      }
     } catch (e) {}
     if (myReq === previewReq && step === curStep()) showPinLabel(pinPreview.label);
   }, 600);
@@ -1934,6 +1970,7 @@ function addTileLayer(m) {
   }
   let fellBack = false;
   const gl = L.maplibreGL({ style: VECTOR_STYLE });
+  m._glLayer = gl;   // نحتاجها حتى نقرأ أسماء المعالم المرسومة
   gl.on('add', () => {
     const mm = gl.getMaplibreMap();
     const apply = () => { mapForceArabic(mm); mapRecolor(mm); };

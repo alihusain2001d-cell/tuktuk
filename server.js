@@ -1201,13 +1201,16 @@ app.get('/api/reverse', async (req, res) => {
     const road = a.road || a.pedestrian || a.footway;
     const hood = a.neighbourhood || a.suburb || a.quarter;
     const area = hood || a.city_district || a.village || a.town || a.city || a.county;
-    let name = null, approx = false;
-    if (landmark && road) name = `${landmark}، ${road}`;
-    else if (landmark) name = landmark;
-    else if (road && hood) name = `${road}، ${hood}`;
-    else if (road) name = road;
-    else if (area) { name = `قرب ${area}`; approx = true; }   // أحسن من "موقع محدد على الخريطة"
-    const out2 = { name, approx };
+    /* نرجّع نوع الاسم هم: التطبيق يقرأ اسم المعلم من الخريطة نفسها
+       لما ما نلگي معلم هنا — الخريطة ترسم أسماء ما تعرفها خدمة
+       العناوين (مستشفى، مدرسة، كراج)، والزبون يختار على اللي يشوفه. */
+    let name = null, approx = false, kind = null;
+    if (landmark && road) { name = `${landmark}، ${road}`; kind = 'landmark'; }
+    else if (landmark) { name = landmark; kind = 'landmark'; }
+    else if (road && hood) { name = `${road}، ${hood}`; kind = 'road'; }
+    else if (road) { name = road; kind = 'road'; }
+    else if (area) { name = `قرب ${area}`; approx = true; kind = 'area'; }   // أحسن من "موقع محدد على الخريطة"
+    const out2 = { name, approx, kind };
     geoSet(key, out2);
     res.json(out2);
   } catch (e) {
