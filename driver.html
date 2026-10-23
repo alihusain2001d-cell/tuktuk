@@ -2664,6 +2664,9 @@ async function resumeActiveRide() {
       document.getElementById('ar-arrived-btn').classList.add('hidden');
       document.getElementById('ar-waiting-actions').classList.add('hidden');
     }
+    // الزر ينرسم جوّا showActiveRide قبل ما نضبط المرحلة — فنعيد رسمه
+    // بعدها، وإلا رحلة مسترجعة وهي ماشية يطلعلها زر "اعتذار" بالغلط
+    paintEndButton();
     routeFitDone = false;
     lastRouteFetch = 0; // showActiveRide رسمت مسار المرحلة الأولى، نجبر تحديث فوري للمرحلة الصحيحة
     drawRoute();
