@@ -1628,6 +1628,7 @@ function renderActiveRides() {
           ${r.driver
             ? `<span>🛺 ${r.driver.name}${r.driver.connected ? '' : ' <span class="lr-nodriver">(تطبيقه مسكّر)</span>'}</span>`
             : '<span class="lr-nodriver">ماكو سائق بعد</span>'}
+          ${r.refusals ? `<span style="color:var(--stop)">↩️ اعتذر عنها ${r.refusals}</span>` : ''}
           ${fare ? `<span class="lr-fare">${fare.toLocaleString()} د.ع</span>` : ''}
         </div>
       </div>`;

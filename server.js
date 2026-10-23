@@ -269,10 +269,10 @@ async function pushToSubscription(subscription, payload, onInvalid) {
 }
 
 // إشعار لكل السواق المسموحلهم يشتغلون وعندهم اشتراك — بغض النظر عن حالة اتصال الـ WebSocket
-async function pushToAllDrivers(payload) {
+async function pushToAllDrivers(payload, exceptId) {
   if (!PUSH_ENABLED && !apns.ENABLED) return;
   try {
-    const drivers = await db.getDriversForPush();
+    const drivers = (await db.getDriversForPush()).filter(d => d.id !== exceptId);
     await Promise.all(drivers.map(d =>
       pushToSubscription(d.push_subscription, payload, () => db.clearDriverPushSubscription(d.id))
     ));
@@ -1741,6 +1741,17 @@ app.post('/api/complete', async (req, res) => {
     if (!ride) return res.status(404).json({ error: 'غير موجودة' });
     // بس السائق المكلّف — وإلا الزبون يكدر ينهي الرحلة بنص الطريق ويدفع أقل
     if (!authDriver(req, res, ride.driverId)) return;
+
+    /* الرحلة لازم تكون بدت فعلاً. بدون هاي، السائق يوافق ويضغط إنهاء
+       على طول — فيتحاسب الزبون وتنحسب للسائق أرباح على رحلة ما صارت،
+       ويوصل الزبون "شكراً لاستخدامك جايك" وهو بعده ينتظر بالشارع. */
+    if (ride.status !== 'started') {
+      return res.status(409).json({
+        error: 'ما تكدر تنهي رحلة ما بدت — اضغط "الزبون طلع، ابدأ الرحلة" أول',
+        notStarted: true,
+      });
+    }
+
     res.json({ ok: true, ...(await finishRide(ride)) });
   } catch (e) {
     console.error('خطأ بالإنهاء:', e.message);
@@ -1892,6 +1903,69 @@ setInterval(async () => {
     } catch (e) { console.error('خطأ بتنظيف رحلة معلّقة:', e.message); }
   }
 }, Number(process.env.STUCK_SWEEP_MS) || 5 * 60 * 1000);
+
+/* ===== اعتذار السائق =====
+   السائق وافق وبعدين ما كدر يكمّل (تكتكه خرب، طلع بعيد، أي سبب).
+   ما نلغي طلب الزبون — نرجّعه للبحث ونعرضه على باقي السواق، لأن
+   الزبون ما ذنبه يعيد الطلب من الصفر.
+
+   والسائق اللي اعتذر ما نعرضه عليه مرة ثانية بنفس الطلب — وإلا
+   يرجع يقبل ويعتذر بحلقة. */
+app.post('/api/driver/give-up', async (req, res) => {
+  try {
+    const { rideId, driverId, reason } = req.body;
+    const ride = activeRides.get(rideId);
+    if (!ride) return res.status(404).json({ error: 'غير موجودة' });
+    if (!driverId || ride.driverId !== driverId) return res.status(403).json({ error: 'غير مصرح' });
+    if (!authDriver(req, res, driverId)) return;
+    if (ride.status === 'started') {
+      return res.status(409).json({ error: 'الرحلة بدأت — ما تكدر تعتذر هسه' });
+    }
+
+    ride.refusedBy = ride.refusedBy || [];
+    if (!ride.refusedBy.includes(driverId)) ride.refusedBy.push(driverId);
+
+    const wasDriver = ride.driverId;
+    ride.driverId = null;
+    ride.status = 'searching';
+    ride.offerPrice = null;
+    ride.offerNote = null;
+    ride.searchStartedAt = Date.now();   // يعيد مؤقت البحث من جديد
+    await db.releaseRideDriver(ride.id);
+
+    // الزبون: نكله الصدق — اعتذر، وندوّر على غيره
+    sendTo(ride.customerSocketId, 'ride:searching-again', {
+      rideId: ride.id,
+      reason: String(reason || '').trim(),
+    });
+    pushToCustomer(ride.customer.phone, {
+      title: '🔄 ندوّرلك على سائق ثاني',
+      body: 'السائق اعتذر عن الطلب — طلبك بعده شغّال وندوّر على غيره',
+      url: '/index.html',
+    });
+
+    // باقي السواق: نفس إعلان الطلب الجديد
+    broadcast('driver', 'ride:new', {
+      rideId: ride.id, type: ride.type, pickup: ride.pickup, destination: ride.destination,
+      store: ride.store, storeName: ride.storeName, itemDesc: ride.itemDesc,
+      estKm: ride.estKm, estFare: ride.estFare, customer: { name: ride.customer.name },
+      rewardApplied: !!ride.rewardId, again: true,
+    });
+    pushToAllDrivers({
+      title: ride.type === 'delivery' ? '🛒 طلب توصيل متاح من جديد' : '🚗 طلب رحلة متاح من جديد',
+      body: `${ride.pickup.label || 'موقع الزبون'} ← ${ride.destination?.label || 'وجهة غير محددة'}`,
+      url: '/driver.html?ride=' + ride.id,
+      rideId: ride.id,
+      urgent: true,
+    }, wasDriver);
+
+    console.log(`↩️ السائق ${wasDriver} اعتذر عن ${ride.id} — رجع للبحث`);
+    res.json({ ok: true, searching: true });
+  } catch (e) {
+    console.error('خطأ باعتذار السائق:', e.message);
+    res.status(500).json({ error: 'خطأ' });
+  }
+});
 
 app.post('/api/cancel', async (req, res) => {
   try {
@@ -2186,6 +2260,8 @@ app.get('/api/admin/active-rides', checkAdmin, async (req, res) => {
         storeName: ride.storeName || null,
         estFare: ride.estFare || 0,
         offerPrice: ride.offerPrice || null,
+        // كم سائق اعتذر عن هالطلب — الإدارة تشوف الطلبات اللي محد يريدها
+        refusals: (ride.refusedBy || []).length,
         driver: d ? {
           id: d.id, name: d.name, phone: d.phone, car: d.car,
           lat: validLoc(dLat, dLng) ? dLat : null,

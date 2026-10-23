@@ -941,6 +941,18 @@ async function updateRideStatus(id, status, driverId) {
   }
 }
 
+/* السائق اعتذر — نرجّع الرحلة للبحث ونفك ارتباطها بيه.
+   ما نستعمل updateRideStatus لأنها ما تمسح السائق لما نمرر null،
+   فيبقى السجل مكتوب عليه سائق والرحلة بعدها تدوّر على واحد. */
+async function releaseRideDriver(id) {
+  if (!HAS_DB) {
+    const r = mem.rides.get(id);
+    if (r) { r.status = 'searching'; r.driverId = null; }
+    return;
+  }
+  await pool.query("UPDATE rides SET status='searching', driver_id=NULL WHERE id=$1", [id]);
+}
+
 // إلغاء الرحلة مع تسجيل سبب الزبون
 async function cancelRideWithReason(id, reason, cancelledBy = 'customer') {
   if (!HAS_DB) {
@@ -1731,7 +1743,7 @@ module.exports = {
   addSavedPlace, getSavedPlaces, deleteSavedPlace,
   updateCustomerProfile, changeCustomerPhone, getCustomerRides, getCustomerCancelCount, getCustomerNoShowCount,
   banCustomer, unbanCustomer,
-  createRide, getRide, updateRideStatus, cancelRideWithReason, getAllRides, getInProgressRides, getDriverEarnings, getStats,
+  createRide, getRide, updateRideStatus, cancelRideWithReason, releaseRideDriver, getAllRides, getInProgressRides, getDriverEarnings, getStats,
   setRideOffer, clearRideOffer, acceptRideOffer,
   getSubscriptionRevenue, getSubscriptions, getDriverPaidTotal, getDriverRides, getDriverCancelledOnCount,
   computeAccess, getDriverPaidTotalsBulk, getDriverRatingSummariesBulk, getCustomerTripCountsBulk, getPendingRewardsBulk,

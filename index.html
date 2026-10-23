@@ -2403,6 +2403,7 @@ function handleWS(type, data) {
     case 'ride:started': onTripStarted(); break;
     case 'ride:done': onDone(data); break;
     case 'ride:cancelled': onDriverCancelled(data); break;
+    case 'ride:searching-again': onSearchingAgain(data); break;
   }
 }
 
@@ -2416,6 +2417,22 @@ function onDriverCancelled(data) {
     ? 'ما لقينا سائق متاح حالياً — جرّب تطلب مرة ثانية'
     : 'السائق ألغى الرحلة' + (data.reason ? ' — ' + data.reason : ''), 5000);
   resetAll();
+}
+
+/* السائق اعتذر بعد ما وافق — الطلب ما انلغى، رجع يدوّر على غيره.
+
+   قبل كان السائق يضغط "إنهاء" وهو بعده ما وصل، فيوصل الزبون "شكراً
+   لاستخدامك جايك" والأجرة وهو واقف بالشارع ينتظر. هسه يرجع لشاشة
+   البحث ويعرف الصدق: اعتذر، وندوّر على غيره. */
+function onSearchingAgain(data) {
+  if (!currentRide || data.rideId !== currentRide) return;
+  stopDriverTracking();
+  driverHeadingToDestination = false;
+  ['flow-driver', 'flow-ride', 'flow-delivery', 'flow-offer'].forEach(
+    id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('flow-searching').classList.add('active');
+  toast('السائق اعتذر عن الطلب' + (data.reason ? ` — ${data.reason}` : '') +
+        ' · ندوّرلك على سائق ثاني', 6000);
 }
 
 // ============ عرض السائق ============

@@ -785,7 +785,8 @@
       </div>
       <div class="btn-row">
         <button class="btn go" onclick="callCustomer()">📞 اتصل</button>
-        <button class="btn danger" onclick="finishRide()">إنهاء الطلب</button>
+        <!-- قبل ما تبدي الرحلة ما أكو شي "ينتهي" — اللي موجود هو اعتذار -->
+        <button class="btn danger" id="ar-end-btn" onclick="endOrGiveUp()">إنهاء الطلب</button>
       </div>
     </div>
   </div>
@@ -2689,6 +2690,7 @@ function showActiveRide(out, r) {
   arrivedBtn.textContent = isDel ? 'وصلت للمحل ✅' : 'وصلت لموقع الزبون ✅';
   document.getElementById('ar-waiting-actions').classList.add('hidden');
   document.getElementById('ar-start-btn').textContent = isDel ? '📦 استلمت الطلب، بالطريق للزبون' : '🚗 الزبون طلع، ابدأ الرحلة';
+  paintEndButton();
 
   const fromLbl = r.pickup.label || 'نقطة على الخريطة';
   const toLbl = r.destination ? (r.destination.label || 'نقطة على الخريطة') : 'غير محدد';
@@ -2825,6 +2827,7 @@ async function startTrip() {
   if (!activeRide || activeRide.phase !== 'waiting') return;
   activeRide.phase = 'leg2';
   document.getElementById('ar-waiting-actions').classList.add('hidden');
+  paintEndButton();   // صارت رحلة ماشية — الزر يصير إنهاء مو اعتذار
   lastRouteFetch = 0; // نجبر تحديث فوري للمسار الجديد
   routeFitDone = false; // نعطي المسار الجديد أول تصغير/تكبير مرة وحدة
   drawRoute();
@@ -2910,9 +2913,39 @@ async function confirmNoShowCancel() {
   } catch (e) { toast('صار خطأ، حاول مرة ثانية'); }
 }
 
+/* الزر الأحمر يتبدّل حسب الحالة:
+   قبل ما تبدي الرحلة ماكو شي "ينتهي" — اللي موجود هو اعتذار.
+   كان الزر "إنهاء الطلب" من أول لحظة، فالسائق يوافق ويضغطه على طول
+   فيوصل الزبون "شكراً لاستخدامك جايك" والأجرة، وهو بعده ينتظر بالشارع. */
+function paintEndButton() {
+  const b = document.getElementById('ar-end-btn');
+  if (!b) return;
+  const started = activeRide && activeRide.phase === 'leg2';   // leg2 = الرحلة ماشية
+  b.textContent = started ? 'إنهاء الطلب' : '↩️ اعتذار عن الطلب';
+}
+
+async function endOrGiveUp() {
+  if (!activeRide) return;
+  if (activeRide.phase === 'leg2') return finishRide();
+
+  if (!confirm('تعتذر عن هذا الطلب؟\n\nالطلب يرجع يدوّر على سائق ثاني، وما ينحسبلك شي.')) return;
+  const reason = (prompt('شنو السبب؟ (اختياري — يوصل للإدارة)') || '').trim();
+  try {
+    const out = await fetch('/api/driver/give-up', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rideId: activeRide.rideId, driverId, reason }),
+    }).then(r => r.json());
+    if (!out.ok) return toast(out.error || 'ما كدرنا نعتذر عن الطلب');
+    toast('انعتذرت — الطلب رجع لباقي السواق');
+    endActive();
+  } catch (e) { toast('صار خطأ'); }
+}
+
 async function finishRide() {
   if (!activeRide) return;
   const out = await fetch('/api/complete', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ rideId:activeRide.rideId }) }).then(r=>r.json());
+  // السيرفر يرفض إنهاء رحلة ما بدت — نوضّح للسائق بدل ما نسكت
+  if (out.notStarted) { toast(out.error, 5000); paintEndButton(); return; }
   /* الرحلات اللي ما كان إلها سعر من البداية (بلا وجهة، أو الزبون غيّر
      وجهته ومشوا أبعد) يجي تفصيلها بالرد — نعرضه للسائق حتى يعرف شدي ياخذ. */
   if (out.pricing) { showFinalFare(out.pricing); endActive(); return; }
