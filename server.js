@@ -19,6 +19,8 @@ const apns = require('./apns');       // إشعارات الآيفون — نظ�
    وتعرض زر تحديث لما تختلف. تتغير مع كل نشر. */
 const WEB_BUILD = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 8)
   || String(Date.now()).slice(-8);
+// وقت آخر نشر — الموقع ما عنده رقم نسخة، فنعرض التاريخ بداله
+const WEB_BUILD_AT = new Date().toISOString();
 const db = require('./db');
 
 const app = express();
@@ -1934,6 +1936,7 @@ app.get('/api/service-settings', async (req, res) => {
       updateForced: !!s.update_forced,
       updateMessage: s.update_message || '',
       webBuild: WEB_BUILD,
+      webBuildAt: WEB_BUILD_AT,
     });
   } catch (e) { res.json({ deliveryEnabled: true, webBuild: WEB_BUILD }); }
 });
