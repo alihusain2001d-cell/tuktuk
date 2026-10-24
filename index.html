@@ -2729,15 +2729,25 @@ function placeDriver(lat, lng) {
   }
   lastDriverPos = here;
 
+  /* تكتك واقف جوّا دائرة، ومؤشر الاتجاه يلف حواليه.
+
+     كان سهم أزرق بس — يبين نقطة زرقا ما تتميز عن أي شي بالخريطة.
+     التكتك ما نلفّه مع الاتجاه (ينقلب على راسه)، نلف المؤشر بس. */
   const icon = L.divIcon({
     className: '', iconSize: [0,0],
     html: `<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%)">
       <div style="background:#1A1A1A;color:#fff;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:8px;white-space:nowrap;margin-bottom:3px;box-shadow:0 1px 4px rgba(0,0,0,.3)">${name}</div>
-      <div class="nav-arrow" style="transform:rotate(${driverHeading}deg);line-height:0">
-        <svg width="38" height="38" viewBox="0 0 46 46">
-          <circle cx="23" cy="23" r="21" fill="#2BA9E0" stroke="#fff" stroke-width="3"/>
-          <path d="M23 9 L32 31 L23 25.5 L14 31 Z" fill="#fff"/>
-        </svg></div>
+      <div style="position:relative;width:46px;height:46px">
+        <div style="position:absolute;inset:0;transform:rotate(${driverHeading}deg);transition:transform .4s">
+          <svg width="46" height="46" viewBox="0 0 46 46" style="display:block">
+            <path d="M23 0 L30.5 12 L15.5 12 Z" fill="#2BA9E0" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+                    width:36px;height:36px;border-radius:50%;background:#fff;
+                    border:3px solid #2BA9E0;box-shadow:0 2px 6px rgba(0,0,0,.35);
+                    display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1">🛺</div>
+      </div>
     </div>`,
   });
   if (driverMarker) mapT.removeLayer(driverMarker);
