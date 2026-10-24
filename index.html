@@ -2742,6 +2742,40 @@ function placeDriver(lat, lng) {
   });
   if (driverMarker) mapT.removeLayer(driverMarker);
   driverMarker = L.marker([lat,lng],{icon,interactive:false}).addTo(mapT);
+  keepDriverInView(lat, lng);
+}
+
+/* نخلي السائق باين بالشاشة وهو يتحرك.
+
+   الخريطة كانت تتضبط مرة وحدة أول ما يقبل السائق، وبعدها ما تتحرك —
+   فالسائق يمشي ويطلع من حدود الشاشة، والزبون يشوف خريطة ساكنة ما
+   تكله وين وصل.
+
+   ما نحرك الخريطة مع كل قراءة — بس لما يقرب من الحافة. وإذا الزبون
+   مسك الخريطة بإيده نتركه بحاله ٢٠ ثانية، حتى ما نسحبها من تحت إيده
+   وهو يتفرج على الطريق. */
+let mapTTouched = 0;
+function watchMapTTouch() {
+  if (!mapT || mapT._touchWatched) return;
+  mapT._touchWatched = true;
+  mapT.on('dragstart zoomstart', () => { mapTTouched = Date.now(); });
+}
+
+function keepDriverInView(lat, lng) {
+  if (!mapT) return;
+  watchMapTTouch();
+  if (Date.now() - mapTTouched < 20000) return;
+
+  // هامش داخلي: نتحرك قبل ما يلزق بالحافة مو بعد ما يختفي
+  if (mapT.getBounds().pad(-0.18).contains([lat, lng])) return;
+
+  const isDel = currentType === 'delivery';
+  const target = driverHeadingToDestination ? (isDel ? pickup : destination) : (isDel ? store : pickup);
+  if (target && target.lat != null) {
+    mapT.fitBounds(L.latLngBounds([[lat, lng], [target.lat, target.lng]]), { padding: [55, 55], maxZoom: 16 });
+  } else {
+    mapT.panTo([lat, lng]);
+  }
 }
 
 function onDriverMoved(data) { if (mapT) { placeDriver(data.lat, data.lng); drawDriverRoute(data.lat, data.lng); } }
